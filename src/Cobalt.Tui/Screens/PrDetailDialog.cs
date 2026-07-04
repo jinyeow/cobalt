@@ -255,7 +255,14 @@ public sealed class PrDetailDialog(
 
     private async Task RunAndLog(Task work, string success)
     {
-        await work.ConfigureAwait(false);
+        try
+        {
+            await work.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // dialog closed mid-op; nothing to report
+        }
         app.Invoke(() => log(vm.Error is { } e ? $"failed: {e}" : success));
     }
 

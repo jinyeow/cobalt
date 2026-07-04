@@ -111,6 +111,15 @@ public sealed class WorkItemListView : View
         }
     }
 
+    public long? SelectedId
+    {
+        get
+        {
+            _vm.SelectedIndex = _list.SelectedItem ?? 0;
+            return _vm.Selected?.Id;
+        }
+    }
+
     public void StartFiltering()
     {
         _filtering = true;

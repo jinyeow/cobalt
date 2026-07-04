@@ -16,8 +16,25 @@ public sealed class PullRequestStoreAdapter(GitApi api, Func<CancellationToken, 
     private async Task<Guid> MeAsync(CancellationToken ct) =>
         _me ??= await resolveMe(ct).ConfigureAwait(false);
 
-    public async Task<IReadOnlyList<PullRequest>> ListPullRequestsAsync(PrListFilter filter, CancellationToken ct) =>
-        await api.ListPullRequestsAsync(filter, await MeAsync(ct).ConfigureAwait(false), ct).ConfigureAwait(false);
+    public async Task<IReadOnlyList<PullRequest>> ListPullRequestsAsync(PrListFilter filter, CancellationToken ct)
+    {
+        var me = await MeAsync(ct).ConfigureAwait(false);
+        var prs = await api.ListPullRequestsAsync(filter, me, ct).ConfigureAwait(false);
+
+        // The review queue is "PRs awaiting MY vote" (SPEC §3): ADO has no server-side
+        // "my vote pending" filter, so drop the ones I've already voted on.
+        if (filter == PrListFilter.ReviewQueue)
+        {
+            var meId = me.ToString();
+            prs =
+            [
+                .. prs.Where(pr => pr.Reviewers
+                    .Where(r => string.Equals(r.Id, meId, StringComparison.OrdinalIgnoreCase))
+                    .All(r => r.Vote == PrVote.NoVote)),
+            ];
+        }
+        return prs;
+    }
 
     public Task<PullRequest> GetPullRequestAsync(int id, CancellationToken ct) =>
         api.GetPullRequestAsync(id, ct);

@@ -206,7 +206,14 @@ public sealed class WorkItemDetailDialog
 
     private async Task RunAndLog(Task work, string success)
     {
-        await work.ConfigureAwait(false);
+        try
+        {
+            await work.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // dialog closed mid-op; nothing to report
+        }
         _app.Invoke(() => _log(_vm.Error is { } e ? $"failed: {e}" : success));
     }
 }

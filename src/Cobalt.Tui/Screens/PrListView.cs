@@ -57,6 +57,15 @@ public sealed class PrListView : View
         }
     }
 
+    public PullRequest? SelectedPr
+    {
+        get
+        {
+            _vm.SelectedIndex = _list.SelectedItem ?? 0;
+            return _vm.Selected;
+        }
+    }
+
     private async Task Observe(Task task)
     {
         try

@@ -25,7 +25,7 @@ public static class CobaltTuiApp
             async ct => (await identity.Value.WaitAsync(ct).ConfigureAwait(false)).Id);
 
         using var app = Application.Create().Init();
-        var shell = new CobaltShell(app, vm, workItems, pullRequests);
+        var shell = new CobaltShell(app, vm, workItems, pullRequests, editor: null, context: context);
 
         ResolveIdentityInBackground(app, vm, connection);
 

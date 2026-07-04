@@ -1,3 +1,4 @@
+using Cobalt.Core.Config;
 using Cobalt.Tui.Editor;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.Screens;
@@ -36,17 +37,21 @@ public sealed class CobaltShell : Window
 
     private View? _activeScreen;
 
+    private readonly AdoContext? _context;
+
     public CobaltShell(
         IApplication app,
         ShellViewModel vm,
         WorkItemStoreAdapter? workItems = null,
         PullRequestStoreAdapter? pullRequests = null,
-        EditorService? editor = null)
+        EditorService? editor = null,
+        AdoContext? context = null)
     {
         _app = app;
         _vm = vm;
         _workItems = workItems;
         _pullRequests = pullRequests;
+        _context = context;
         // TODO(M6): drive Terminal.Gui's terminal suspend/resume around the editor
         // process so a full-screen $EDITOR doesn't fight the driver for the screen.
         _editor = editor ?? new EditorService(new ProcessEditorLauncher(Environment.GetEnvironmentVariable));
@@ -164,8 +169,63 @@ public sealed class CobaltShell : Window
                 _workItemList?.OnOpen();
                 _prList?.OnOpen();
                 break;
+            case AppCommand.YankId:
+                CopyCurrentUrl();
+                break;
+            case AppCommand.OpenInBrowser:
+                OpenCurrentInBrowser();
+                break;
             default:
                 break;
+        }
+    }
+
+    private string? CurrentUrl()
+    {
+        if (_context is null)
+        {
+            return null;
+        }
+        if (_workItemList?.SelectedId is { } wid)
+        {
+            return AdoUrls.WorkItem(_context, wid);
+        }
+        if (_prList?.SelectedPr is { } pr)
+        {
+            return AdoUrls.PullRequest(_context, pr.RepositoryName, pr.PullRequestId);
+        }
+        return null;
+    }
+
+    private void CopyCurrentUrl()
+    {
+        if (CurrentUrl() is not { } url)
+        {
+            return;
+        }
+        if (_app.Clipboard?.TrySetClipboardData(url) == true)
+        {
+            _vm.Messages.Info($"yanked {url}");
+        }
+        else
+        {
+            _vm.Messages.Info($"clipboard unavailable — {url}");
+        }
+    }
+
+    private void OpenCurrentInBrowser()
+    {
+        if (CurrentUrl() is not { } url)
+        {
+            return;
+        }
+        if (BrowserLauncher.TryOpen(url, out var error))
+        {
+            _vm.Messages.Info($"opened {url}");
+        }
+        else
+        {
+            _vm.Messages.Error($"could not open browser: {error}");
         }
     }
 
