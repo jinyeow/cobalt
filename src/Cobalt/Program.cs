@@ -1,5 +1,7 @@
 using System.Reflection;
+using Cobalt.Cli;
 using Cobalt.Core.Cli;
+using Cobalt.Core.Config;
 
 var parsed = CliArgs.Parse(args);
 
@@ -9,23 +11,34 @@ if (parsed.Error is not null)
     return 2;
 }
 
-switch (parsed.Command)
+try
 {
-    case CliCommand.Version:
-        Console.WriteLine(InformationalVersion());
-        return 0;
-    case CliCommand.Help:
-        PrintHelp();
-        return 0;
-    case CliCommand.AuthLogin:
-    case CliCommand.AuthStatus:
-        Console.Error.WriteLine("cobalt: auth commands arrive in milestone M1.");
-        return 1;
-    case CliCommand.Tui:
-    default:
-        Console.Error.WriteLine("cobalt: the TUI arrives in milestone M2.");
-        return 1;
+    switch (parsed.Command)
+    {
+        case CliCommand.Version:
+            Console.WriteLine(InformationalVersion());
+            return 0;
+        case CliCommand.Help:
+            PrintHelp();
+            return 0;
+        case CliCommand.AuthLogin:
+            return await AuthCommands.LoginAsync(LoadConfig());
+        case CliCommand.AuthStatus:
+            return await AuthCommands.StatusAsync(LoadConfig());
+        case CliCommand.Tui:
+        default:
+            _ = LoadConfig().Resolve(parsed.Context); // validate before the TUI exists
+            Console.Error.WriteLine("cobalt: the TUI arrives in milestone M2.");
+            return 1;
+    }
 }
+catch (ConfigException ex)
+{
+    Console.Error.WriteLine($"cobalt: {ex.Message}");
+    return 2;
+}
+
+static CobaltConfig LoadConfig() => ConfigLoader.Load(ConfigPaths.ConfigFile());
 
 static string InformationalVersion()
 {

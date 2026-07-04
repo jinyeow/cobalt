@@ -6,7 +6,7 @@ and demoable. Estimated relative sizes in ⬤ (1–5).
 ## Status
 
 - [x] M0 — Scaffold & CI (done 2026-07-04; package id is `cobalt-tui`, see ADR 0005)
-- [ ] M1 — Auth + config + API foundation
+- [x] M1 — Auth + config + API foundation (done 2026-07-04; M0 review fixes folded in)
 - [ ] M2 — TUI shell + vim input layer
 - [ ] M3 — Work items slice
 - [ ] M4 — PR lists, threads, votes
@@ -48,7 +48,7 @@ MVVM-ish: view-models own all state and talk to `Cobalt.Core`; Terminal.Gui view
 - Solution, projects, `Directory.Build.props` (net10.0, nullable, implicit usings,
   analyzers, warnings-as-errors), `.editorconfig`, dotnet-tool packing metadata.
 - GitHub Actions: build + test on push/PR; release workflow stub (pack + publish on tag).
-- **Demo**: `dotnet tool install -g --add-source ./nupkg cobalt && cobalt --version`.
+- **Demo**: `dotnet tool install -g --add-source ./nupkg cobalt-tui && cobalt --version`.
 
 ### M1 — Auth + config + API foundation ⬤⬤⬤
 - Config load/save, context model, `--context` flag.

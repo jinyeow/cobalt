@@ -20,7 +20,12 @@ Authenticate exclusively with Entra ID bearer tokens obtained through
    cache (`TokenCachePersistenceOptions`), so interactive login is rare.
 
 Tokens are requested for the Azure DevOps resource scope
-`499b84ac-1321-427f-aa17-267ca6975798/.default`.
+`499b84ac-1321-427f-aa17-267ca6975798/.default`. The MSAL cache allows
+unencrypted file storage as a fallback (`UnencryptedStorageAllowed = true`)
+because Linux boxes without a keyring (headless, some WSL setups) otherwise
+cannot persist tokens at all — the same tradeoff the az CLI makes. The
+`AuthenticationRecord` (not a secret; account metadata only) is stored next to
+the config file so later runs authenticate silently.
 
 ## Consequences
 

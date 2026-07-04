@@ -29,9 +29,13 @@ public sealed record CliArgs
                 case "--help" or "-h":
                     return new CliArgs { Command = CliCommand.Help };
                 case "--context":
-                    if (i + 1 >= args.Count)
+                    if (i + 1 >= args.Count || args[i + 1].Length == 0 || args[i + 1].StartsWith('-'))
                     {
                         return Fail("--context requires a value (a context name from your config).");
+                    }
+                    if (context is not null)
+                    {
+                        return Fail("--context was given more than once.");
                     }
                     context = args[++i];
                     break;
@@ -49,6 +53,6 @@ public sealed record CliArgs
 
         return new CliArgs { Command = command, Context = context };
 
-        static CliArgs Fail(string message) => new() { Command = CliCommand.Help, Error = message };
+        static CliArgs Fail(string message) => new() { Error = message };
     }
 }

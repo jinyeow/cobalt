@@ -51,6 +51,24 @@ public class CliArgsTests
         Assert.NotNull(result.Error);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("--version")]
+    public void ContextOption_WithEmptyOrOptionLikeValue_IsAnError(string value)
+    {
+        var result = CliArgs.Parse(["--context", value]);
+
+        Assert.NotNull(result.Error);
+    }
+
+    [Fact]
+    public void ContextOption_Repeated_IsAnError()
+    {
+        var result = CliArgs.Parse(["--context", "a", "--context", "b"]);
+
+        Assert.NotNull(result.Error);
+    }
+
     [Fact]
     public void AuthLogin_IsRecognized()
     {
