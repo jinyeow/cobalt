@@ -124,4 +124,65 @@ public class UiThreadSuspenderTests
 
         Assert.Equal(5, await task);
     }
+
+    [Fact]
+    public async Task Cancellation_Between_Queue_And_Run_Skips_Suspend_And_Body()
+    {
+        // The dialog can close (cancelling its token) after the invoke is queued but
+        // before it runs — we must not open an editor over the shell in that window.
+        var log = new List<string>();
+        Action? queued = null;
+        using var cts = new CancellationTokenSource();
+        var suspender = new UiThreadSuspender(
+            a => queued = a, // store, do not run yet
+            () => log.Add("suspend"),
+            () => log.Add("resume"));
+
+        var task = suspender.RunSuspendedAsync(() => { log.Add("body"); return 0; }, cts.Token);
+        cts.Cancel();       // dialog closed while the invoke was queued
+        queued!();          // now the UI thread runs it
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => task);
+        Assert.Empty(log);  // never suspended, never ran the editor
+    }
+
+    [Fact]
+    public async Task Continuation_Does_Not_Run_Synchronously_On_The_Completing_Thread()
+    {
+        // Pins RunContinuationsAsynchronously: the awaiting continuation (in production,
+        // the follow-up ADO call) must NOT execute inline on the thread that completes
+        // the TCS — otherwise it would run on the parked UI loop. Deleting the flag
+        // makes this fail; the happy-path tests would still pass, so this is the guard.
+        Action? queued = null;
+        var suspender = new UiThreadSuspender(a => queued = a, () => { }, () => { });
+
+        var task = suspender.RunSuspendedAsync(() => 7, TestContext.Current.CancellationToken);
+
+        var ranDuringCompletion = false;
+        var completing = false;
+        using var continuationRan = new ManualResetEventSlim(false);
+        // ExecuteSynchronously asks to run inline on the completing thread; the flag on
+        // the TCS must override that and force the continuation asynchronous.
+        var continuation = task.ContinueWith(
+            _ =>
+            {
+                if (Volatile.Read(ref completing))
+                {
+                    ranDuringCompletion = true;
+                }
+                continuationRan.Set();
+            },
+            TestContext.Current.CancellationToken,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        Volatile.Write(ref completing, true);
+        queued!();                       // completes the TCS via TrySetResult(7)
+        Volatile.Write(ref completing, false);
+
+        Assert.False(ranDuringCompletion);          // continuation was posted async, not inline
+        Assert.True(continuationRan.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+        await continuation;
+        Assert.Equal(7, await task);
+    }
 }

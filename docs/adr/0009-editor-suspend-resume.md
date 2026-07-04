@@ -53,9 +53,11 @@ blocked for the child's whole lifetime.
 
 - `RunSuspendedAsync` must **never** be synchronously awaited (`.Wait()`) on the
   UI thread — that deadlocks. All current call paths are background tasks.
-- Cancellation is **not observed** while the editor is open: the UI thread is
-  parked, so the dialog cannot close and cancel its token anyway. The token is
-  checked once before suspending.
+- Cancellation is **not observed once the child is running**: the UI thread is
+  parked in `WaitForExit`, so the editor runs to completion regardless. The token
+  is checked twice — before queuing the invoke, and again on the UI thread at the
+  top of the callback — so a dialog that closes in the window *between* queuing and
+  running (during the async temp-file write) does not open an editor over the shell.
 - The 3-lambda adapter is the only part not covered by unit tests. It is verified
   by a `pty.fork()` smoke through the production stack
   (`EditorService`→`ProcessEditorLauncher`→`TerminalGuiSuspender`): the child

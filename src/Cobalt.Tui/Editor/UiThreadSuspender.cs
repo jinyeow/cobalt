@@ -22,8 +22,9 @@ public sealed class UiThreadSuspender(
 {
     public Task<int> RunSuspendedAsync(Func<int> body, CancellationToken cancellationToken = default)
     {
-        // Async continuations must not run inline on the UI thread that completes
-        // the TCS — that would re-enter the parked loop.
+        // RunContinuationsAsynchronously keeps the awaiting continuation (in production,
+        // the follow-up ADO call) off the UI thread: without it, TrySetResult would run
+        // that continuation synchronously inside the invoke callback, on the parked loop.
         var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         if (cancellationToken.IsCancellationRequested)
@@ -34,6 +35,15 @@ public sealed class UiThreadSuspender(
 
         invokeOnUiThread(() =>
         {
+            // Re-check on the UI thread: between queuing and running, the caller's
+            // dialog may have closed (cancelling its token). Skip so we never open an
+            // editor over the shell after the requesting screen is gone.
+            if (cancellationToken.IsCancellationRequested)
+            {
+                tcs.TrySetException(new OperationCanceledException(cancellationToken));
+                return;
+            }
+
             var exit = 0;
             try
             {

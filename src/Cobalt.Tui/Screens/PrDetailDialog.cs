@@ -198,7 +198,7 @@ public sealed class PrDetailDialog(
         {
             text = await editor.EditAsync("", ".md", Token).ConfigureAwait(false);
         }
-        catch (EditorLaunchException ex)
+        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
             app.Invoke(() => log($"editor failed: {ex.Message}"));
             return;
@@ -229,7 +229,7 @@ public sealed class PrDetailDialog(
         {
             text = await editor.EditAsync("", ".txt", Token).ConfigureAwait(false);
         }
-        catch (EditorLaunchException ex)
+        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
             app.Invoke(() => log($"editor failed: {ex.Message}"));
             return null;

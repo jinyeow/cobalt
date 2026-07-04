@@ -158,7 +158,7 @@ public sealed class DiffReviewDialog(
         {
             text = await editor.EditAsync("", ".md", Token).ConfigureAwait(false);
         }
-        catch (EditorLaunchException ex)
+        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
             app.Invoke(() => log($"editor failed: {ex.Message}"));
             return;

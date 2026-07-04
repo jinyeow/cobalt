@@ -184,7 +184,7 @@ public sealed class WorkItemDetailDialog
         {
             text = await _editor.EditAsync("", ".md", Token).ConfigureAwait(false);
         }
-        catch (EditorLaunchException ex)
+        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
             _app.Invoke(() => _log($"editor failed: {ex.Message}"));
             return;
@@ -202,7 +202,7 @@ public sealed class WorkItemDetailDialog
         {
             edited = await _editor.EditAsync(_vm.DescriptionMarkdown, ".md", Token).ConfigureAwait(false);
         }
-        catch (EditorLaunchException ex)
+        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
             _app.Invoke(() => _log($"editor failed: {ex.Message}"));
             return;
@@ -220,7 +220,7 @@ public sealed class WorkItemDetailDialog
         {
             value = await _editor.EditAsync(initial, ".txt", Token).ConfigureAwait(false);
         }
-        catch (EditorLaunchException ex)
+        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
             _app.Invoke(() => _log($"editor failed: {ex.Message}"));
             return;
