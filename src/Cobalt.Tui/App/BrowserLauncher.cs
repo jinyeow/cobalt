@@ -10,8 +10,7 @@ public static class BrowserLauncher
     {
         try
         {
-            var (file, args) = Command(url);
-            using var process = Process.Start(new ProcessStartInfo(file, args) { UseShellExecute = false });
+            using var process = Process.Start(StartInfo(url));
             error = null;
             return true;
         }
@@ -22,16 +21,15 @@ public static class BrowserLauncher
         }
     }
 
-    private static (string File, string Args) Command(string url)
+    private static ProcessStartInfo StartInfo(string url)
     {
+        // On Windows, the shell "open" verb (UseShellExecute) launches the default
+        // browser without routing the URL through cmd.exe metacharacter parsing.
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            return ("cmd", $"/c start \"\" \"{url}\"");
+            return new ProcessStartInfo(url) { UseShellExecute = true };
         }
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            return ("open", url);
-        }
-        return ("xdg-open", url);
+        var opener = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "open" : "xdg-open";
+        return new ProcessStartInfo(opener, url) { UseShellExecute = false };
     }
 }

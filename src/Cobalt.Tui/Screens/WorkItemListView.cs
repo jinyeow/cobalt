@@ -167,8 +167,16 @@ public sealed class WorkItemListView : View
         var id = item.Id.ToString().PadLeft(6);
         var type = Truncate(item.WorkItemType, 8).PadRight(8);
         var state = Truncate(item.State, 10).PadRight(10);
-        var title = Truncate(item.Title, 60);
-        return $"{id}  {type}  {state}  {title}";
+        var title = Truncate(item.Title, 40).PadRight(40);
+        var iteration = Truncate(LastSegment(item.IterationPath), 14).PadRight(14);
+        var updated = item.ChangedDate?.ToString("yyyy-MM-dd") ?? "";
+        return $"{id}  {type}  {state}  {title}  {iteration}  {updated}";
+    }
+
+    private static string LastSegment(string path)
+    {
+        var slash = path.LastIndexOf('\\');
+        return slash >= 0 ? path[(slash + 1)..] : path;
     }
 
     private static string Truncate(string value, int max) =>

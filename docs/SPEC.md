@@ -124,3 +124,8 @@ Sprint/kanban board · saved queries/WIQL browser · backlog hierarchy ·
 PR creation · pipelines/builds · notifications/polling daemon · syntax
 highlighting in diffs · cross-iteration thread tracking · remappable keys ·
 Native AOT binaries · Azure DevOps Server (on-prem).
+
+**Deferred during implementation** (originally in §3, moved out to hit v1):
+word-level **intra-line diff highlighting** (v1 colours whole added/removed
+lines) and **rename-aware diffs** (a rename renders as a whole-file add). Both
+tracked in the CHANGELOG.

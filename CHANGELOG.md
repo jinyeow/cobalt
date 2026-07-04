@@ -24,4 +24,11 @@ First release. A vim-flavored Azure DevOps TUI for a neovim-centric workflow.
 
 ### Notes
 - Built as a UI-free `Cobalt.Core` + view-model layer (no Terminal.Gui types),
-  covered by 189 unit/integration tests. Architecture decisions in `docs/adr/`.
+  covered by unit/integration tests. Architecture decisions in `docs/adr/`.
+
+### Deferred to a later release
+- Word-level intra-line diff highlighting and syntax highlighting (diffs colour
+  whole added/removed lines in v1).
+- Rename-aware diffs (a rename currently renders as a whole-file add).
+- Driving the terminal suspend/resume around a full-screen `$EDITOR`.
+- Cross-iteration PR thread tracking; remappable keybindings.

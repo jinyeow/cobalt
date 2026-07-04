@@ -201,6 +201,7 @@ public sealed class CobaltShell : Window
     {
         if (CurrentUrl() is not { } url)
         {
+            _vm.Messages.Info("nothing to yank — select a work item or PR first");
             return;
         }
         if (_app.Clipboard?.TrySetClipboardData(url) == true)
@@ -217,6 +218,7 @@ public sealed class CobaltShell : Window
     {
         if (CurrentUrl() is not { } url)
         {
+            _vm.Messages.Info("nothing to open — select a work item or PR first");
             return;
         }
         if (BrowserLauncher.TryOpen(url, out var error))

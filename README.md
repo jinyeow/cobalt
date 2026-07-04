@@ -63,6 +63,9 @@ URL to the clipboard · `gx` opens it in your browser.
   the M6 TODO in `CobaltShell`. Single-line edits work in-app.
 - Line comments anchor to the latest PR iteration only; the diff is computed
   client-side (see [ADR 0008](docs/adr/0008-client-side-diff-and-line-comments.md)).
+- Diffs colour whole added/removed lines; word-level intra-line highlighting and
+  syntax highlighting are deferred to a later release. Renames currently render
+  as a whole-file add.
 - Keybindings are fixed in v1; a remapping config is post-v1.
 
 ## Development

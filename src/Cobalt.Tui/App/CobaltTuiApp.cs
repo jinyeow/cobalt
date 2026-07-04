@@ -17,8 +17,8 @@ public static class CobaltTuiApp
         using var connection = AdoConnection.Create(context, tokens);
         var workItems = new WorkItemStoreAdapter(new WorkItemsApi(connection.Http, context));
 
-        // The signed-in user id (for PR reviewer/creator filters) resolves lazily and
-        // is cached; the first PR list load triggers it without blocking startup.
+        // Resolve the signed-in user once and share it: the status bar and the PR
+        // reviewer/creator filters both consume this single cached call.
         var identity = new Lazy<Task<AdoUser>>(() => connection.Identity.GetAuthenticatedUserAsync());
         var pullRequests = new PullRequestStoreAdapter(
             new GitApi(connection.Http, context),
@@ -27,7 +27,7 @@ public static class CobaltTuiApp
         using var app = Application.Create().Init();
         var shell = new CobaltShell(app, vm, workItems, pullRequests, editor: null, context: context);
 
-        ResolveIdentityInBackground(app, vm, connection);
+        ResolveIdentityInBackground(app, vm, identity);
 
         app.Run(shell);
         shell.Dispose();
@@ -36,13 +36,13 @@ public static class CobaltTuiApp
 
     /// <summary>Fills the status bar with who we are; failures land in the message bar, never block startup.</summary>
     private static void ResolveIdentityInBackground(
-        IApplication app, ShellViewModel vm, AdoConnection connection)
+        IApplication app, ShellViewModel vm, Lazy<Task<AdoUser>> identity)
     {
         _ = Task.Run(async () =>
         {
             try
             {
-                var user = await connection.Identity.GetAuthenticatedUserAsync().ConfigureAwait(false);
+                var user = await identity.Value.ConfigureAwait(false);
                 app.Invoke(() => vm.OnUserResolved(user.DisplayName));
             }
             catch (Exception ex) when (ex is AdoApiException
