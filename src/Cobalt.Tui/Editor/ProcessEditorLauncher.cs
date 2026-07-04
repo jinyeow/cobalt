@@ -1,17 +1,23 @@
+using System.ComponentModel;
 using System.Diagnostics;
 
 namespace Cobalt.Tui.Editor;
 
 /// <summary>
-/// Runs $VISUAL/$EDITOR attached to the real terminal. The TUI must be paused
-/// around this call; the shell passes suspend/resume hooks for that.
+/// Runs $VISUAL/$EDITOR attached to the real terminal. Because a full-screen
+/// editor fights Terminal.Gui for the tty, the launch runs inside an
+/// <see cref="ITerminalSuspender"/>: the suspender parks the UI thread, hands the
+/// terminal to the child, and restores the TUI on exit. The default
+/// <see cref="InlineTerminalSuspender"/> keeps headless/test construction working;
+/// the shell wires the Terminal.Gui suspender for the production path.
 /// </summary>
 public sealed class ProcessEditorLauncher(
     Func<string, string?> env,
-    Action? beforeLaunch = null,
-    Action? afterExit = null) : IEditorLauncher
+    ITerminalSuspender? suspender = null) : IEditorLauncher
 {
-    public async Task<int> LaunchAsync(string filePath, CancellationToken cancellationToken = default)
+    private readonly ITerminalSuspender _suspender = suspender ?? new InlineTerminalSuspender();
+
+    public Task<int> LaunchAsync(string filePath, CancellationToken cancellationToken = default)
     {
         var command = EditorService.ResolveEditorCommand(env);
         // $EDITOR may carry arguments ("code --wait") and quoted paths ("/opt/My Editor/nvim").
@@ -28,18 +34,27 @@ public sealed class ProcessEditorLauncher(
         }
         info.ArgumentList.Add(filePath);
 
-        beforeLaunch?.Invoke();
-        try
+        // The body runs on the parked UI thread, so WaitForExit is synchronous by
+        // design: nothing may draw while the child owns the terminal.
+        return _suspender.RunSuspendedAsync(() =>
         {
-            using var process = Process.Start(info)
-                ?? throw new InvalidOperationException($"could not start editor '{parts[0]}'");
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            return process.ExitCode;
-        }
-        finally
-        {
-            afterExit?.Invoke();
-        }
+            Process process;
+            try
+            {
+                process = Process.Start(info)
+                    ?? throw new EditorLaunchException($"could not start editor '{parts[0]}'");
+            }
+            catch (Win32Exception ex)
+            {
+                throw new EditorLaunchException(
+                    $"could not start editor '{parts[0]}' — check $VISUAL/$EDITOR", ex);
+            }
+            using (process)
+            {
+                process.WaitForExit();
+                return process.ExitCode;
+            }
+        }, cancellationToken);
     }
 
     /// <summary>Splits a command on spaces, honoring single/double quotes around paths or args.</summary>

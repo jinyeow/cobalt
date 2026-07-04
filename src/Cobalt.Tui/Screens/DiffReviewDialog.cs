@@ -153,7 +153,16 @@ public sealed class DiffReviewDialog(
             return;
         }
         var lineIndex = _diffPane.SelectedItem ?? 0;
-        var text = await editor.EditAsync("", ".md", Token).ConfigureAwait(false);
+        string? text;
+        try
+        {
+            text = await editor.EditAsync("", ".md", Token).ConfigureAwait(false);
+        }
+        catch (EditorLaunchException ex)
+        {
+            app.Invoke(() => log($"editor failed: {ex.Message}"));
+            return;
+        }
         if (string.IsNullOrWhiteSpace(text))
         {
             return;

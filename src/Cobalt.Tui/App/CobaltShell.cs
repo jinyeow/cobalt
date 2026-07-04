@@ -52,9 +52,8 @@ public sealed class CobaltShell : Window
         _workItems = workItems;
         _pullRequests = pullRequests;
         _context = context;
-        // TODO(M6): drive Terminal.Gui's terminal suspend/resume around the editor
-        // process so a full-screen $EDITOR doesn't fight the driver for the screen.
-        _editor = editor ?? new EditorService(new ProcessEditorLauncher(Environment.GetEnvironmentVariable));
+        _editor = editor ?? new EditorService(new ProcessEditorLauncher(
+            Environment.GetEnvironmentVariable, TerminalGuiSuspender.For(app)));
         _router = new KeymapRouter(_bindings);
 
         Title = "cobalt";

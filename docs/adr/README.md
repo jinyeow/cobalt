@@ -13,3 +13,4 @@ immutable once accepted; superseding decisions get a new number that links back.
 | [0006](0006-tdd-and-central-package-management.md) | TDD workflow, xunit v3, central package management | Accepted |
 | [0007](0007-vim-input-as-testable-data.md) | Vim input as testable data, verified without a live terminal | Accepted |
 | [0008](0008-client-side-diff-and-line-comments.md) | Client-side unified diff and line-comment anchoring | Accepted |
+| [0009](0009-editor-suspend-resume.md) | Suspend Terminal.Gui by parking the UI thread around external processes | Accepted |

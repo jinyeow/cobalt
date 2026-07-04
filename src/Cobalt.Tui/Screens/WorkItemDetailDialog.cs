@@ -179,7 +179,16 @@ public sealed class WorkItemDetailDialog
 
     private async Task CommentAsync()
     {
-        var text = await _editor.EditAsync("", ".md", Token).ConfigureAwait(false);
+        string? text;
+        try
+        {
+            text = await _editor.EditAsync("", ".md", Token).ConfigureAwait(false);
+        }
+        catch (EditorLaunchException ex)
+        {
+            _app.Invoke(() => _log($"editor failed: {ex.Message}"));
+            return;
+        }
         if (!string.IsNullOrWhiteSpace(text))
         {
             await RunAndLog(_vm.AddCommentAsync(text.Trim(), Token), "comment added").ConfigureAwait(false);
@@ -188,7 +197,16 @@ public sealed class WorkItemDetailDialog
 
     private async Task EditDescriptionAsync()
     {
-        var edited = await _editor.EditAsync(_vm.DescriptionMarkdown, ".md", Token).ConfigureAwait(false);
+        string? edited;
+        try
+        {
+            edited = await _editor.EditAsync(_vm.DescriptionMarkdown, ".md", Token).ConfigureAwait(false);
+        }
+        catch (EditorLaunchException ex)
+        {
+            _app.Invoke(() => _log($"editor failed: {ex.Message}"));
+            return;
+        }
         if (edited is not null)
         {
             await RunAndLog(_vm.SaveDescriptionAsync(edited, Token), "description saved").ConfigureAwait(false);
@@ -197,7 +215,16 @@ public sealed class WorkItemDetailDialog
 
     private async Task PromptAndRun(string title, string initial, Func<string, Task> action)
     {
-        var value = await _editor.EditAsync(initial, ".txt", Token).ConfigureAwait(false);
+        string? value;
+        try
+        {
+            value = await _editor.EditAsync(initial, ".txt", Token).ConfigureAwait(false);
+        }
+        catch (EditorLaunchException ex)
+        {
+            _app.Invoke(() => _log($"editor failed: {ex.Message}"));
+            return;
+        }
         if (value is not null)
         {
             await RunAndLog(action(value.Trim()), title).ConfigureAwait(false);

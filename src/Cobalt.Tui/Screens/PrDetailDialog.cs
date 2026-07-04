@@ -193,7 +193,16 @@ public sealed class PrDetailDialog(
         {
             return;
         }
-        var text = await editor.EditAsync("", ".md", Token).ConfigureAwait(false);
+        string? text;
+        try
+        {
+            text = await editor.EditAsync("", ".md", Token).ConfigureAwait(false);
+        }
+        catch (EditorLaunchException ex)
+        {
+            app.Invoke(() => log($"editor failed: {ex.Message}"));
+            return;
+        }
         if (!string.IsNullOrWhiteSpace(text))
         {
             await RunAndLog(vm.ReplyAsync(thread.Value, text.Trim(), Token), "reply posted").ConfigureAwait(false);
@@ -215,7 +224,16 @@ public sealed class PrDetailDialog(
 
     private async Task<int?> PromptThreadId(string prompt)
     {
-        var text = await editor.EditAsync("", ".txt", Token).ConfigureAwait(false);
+        string? text;
+        try
+        {
+            text = await editor.EditAsync("", ".txt", Token).ConfigureAwait(false);
+        }
+        catch (EditorLaunchException ex)
+        {
+            app.Invoke(() => log($"editor failed: {ex.Message}"));
+            return null;
+        }
         return int.TryParse(text?.Trim(), out var id) ? id : null;
     }
 
