@@ -22,6 +22,9 @@ public sealed class DiffReviewDialog(
     private ListView _fileList = null!;
     private ListView _diffPane = null!;
     private Label _diffHeader = null!;
+    private int _fileCount = -1;
+    private int _fileIndex;
+    private string? _renderedDiffPath;
 
     private CancellationToken Token => _cts.Token;
 
@@ -52,7 +55,12 @@ public sealed class DiffReviewDialog(
             CanFocus = true,
         };
 
-        _fileList.Accepting += (_, _) => _ = SelectFile(_fileList.SelectedItem ?? 0);
+        // Enter on the file list opens the highlighted file (SelectedItem is valid at that moment).
+        _fileList.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            _ = SelectFile(_fileList.SelectedItem ?? _fileIndex);
+        };
 
         void OnChanged() => app.Invoke(() =>
         {
@@ -86,11 +94,11 @@ public sealed class DiffReviewDialog(
                     break;
                 case "]":
                     key.Handled = true;
-                    _ = SelectFile((_fileList.SelectedItem ?? 0) + 1);
+                    _ = SelectFile(_fileIndex + 1);
                     break;
                 case "[":
                     key.Handled = true;
-                    _ = SelectFile((_fileList.SelectedItem ?? 0) - 1);
+                    _ = SelectFile(_fileIndex - 1);
                     break;
                 case "c":
                     key.Handled = true;
@@ -128,9 +136,10 @@ public sealed class DiffReviewDialog(
         {
             return;
         }
+        _fileIndex = Math.Clamp(index, 0, vm.Files.Count - 1);
         try
         {
-            await vm.SelectFileAsync(index, Token).ConfigureAwait(false);
+            await vm.SelectFileAsync(_fileIndex, Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -164,8 +173,17 @@ public sealed class DiffReviewDialog(
             _diffHeader.Text = $" error: {e}";
         }
 
-        var files = new ObservableCollection<string>(vm.Files.Select(FormatFile));
-        _fileList.SetSource(files);
+        // Rebuild the file list only when the set changes; SetSource nulls the
+        // selection, so restore it afterwards to keep the highlight and nav index.
+        if (vm.Files.Count != _fileCount)
+        {
+            _fileCount = vm.Files.Count;
+            _fileList.SetSource(new ObservableCollection<string>(vm.Files.Select(FormatFile)));
+        }
+        if (vm.Files.Count > 0)
+        {
+            _fileList.SelectedItem = Math.Clamp(_fileIndex, 0, vm.Files.Count - 1);
+        }
 
         if (vm.CurrentDiff is { } diff)
         {
@@ -174,7 +192,18 @@ public sealed class DiffReviewDialog(
                 ? ""
                 : $" {file.Path}   +{diff.Additions} -{diff.Deletions}" +
                   (diff.IsBinary ? "  (binary)" : diff.TooLarge ? "  (too large)" : "");
-            _diffPane.SetSource(new ObservableCollection<string>(diff.Lines.Select(l => FormatLine(diff, l))));
+
+            // Rebuild the diff pane (thread markers may have changed after a comment),
+            // but preserve the reviewer's line position on a same-file refresh; reset
+            // to the top only when the selected file actually changed.
+            var sameFile = file?.Path == _renderedDiffPath;
+            var keepLine = sameFile ? _diffPane.SelectedItem : 0;
+            _renderedDiffPath = file?.Path;
+            _diffPane.SetSource(new ObservableCollection<string>(diff.Lines.Select(FormatLine)));
+            if (diff.Lines.Count > 0)
+            {
+                _diffPane.SelectedItem = Math.Clamp(keepLine ?? 0, 0, diff.Lines.Count - 1);
+            }
         }
         _diffPane.SetNeedsDraw();
         _fileList.SetNeedsDraw();
@@ -193,9 +222,9 @@ public sealed class DiffReviewDialog(
         return $"{glyph} {name}";
     }
 
-    private string FormatLine(FileDiff diff, DiffLine line)
+    private string FormatLine(DiffLine line)
     {
-        var marker = vm.ThreadsForCurrentFileLine(line.NewLineNumber ?? -1).Count > 0 ? "●" : " ";
+        var marker = vm.ThreadsForDiffLine(line).Count > 0 ? "●" : " ";
         var sign = line.Kind switch
         {
             DiffLineKind.Added => "+",

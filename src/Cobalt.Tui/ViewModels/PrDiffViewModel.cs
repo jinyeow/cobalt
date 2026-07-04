@@ -84,8 +84,8 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         Changed?.Invoke();
     }
 
-    /// <summary>Threads anchored to a given right-side line of the current file.</summary>
-    public IReadOnlyList<PrThread> ThreadsForCurrentFileLine(int rightLine)
+    /// <summary>Threads anchored to a diff line: right side for added/context, left side for removed.</summary>
+    public IReadOnlyList<PrThread> ThreadsForDiffLine(DiffLine line)
     {
         var path = SelectedFile?.Path;
         if (path is null)
@@ -95,7 +95,10 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         return
         [
             .. Threads.Where(t =>
-                string.Equals(t.FilePath, path, StringComparison.Ordinal) && t.RightLine == rightLine),
+                string.Equals(t.FilePath, path, StringComparison.Ordinal) &&
+                (line.Kind == DiffLineKind.Removed
+                    ? line.OldLineNumber is { } l && t.LeftLine == l
+                    : line.NewLineNumber is { } r && t.RightLine == r)),
         ];
     }
 

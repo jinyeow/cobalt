@@ -120,10 +120,32 @@ public class PrDiffViewModelTests
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
-        var onLine2 = vm.ThreadsForCurrentFileLine(rightLine: 2);
+        var onLine2 = vm.ThreadsForDiffLine(new DiffLine(DiffLineKind.Context, 2, 2, "y"));
         Assert.Single(onLine2);
         Assert.Equal(1, onLine2[0].Id);
-        Assert.Empty(vm.ThreadsForCurrentFileLine(rightLine: 99));
+        Assert.Empty(vm.ThreadsForDiffLine(new DiffLine(DiffLineKind.Context, 99, 99, "z")));
+    }
+
+    [Fact]
+    public async Task Left_Side_Threads_Map_To_Removed_Lines()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads =
+            [
+                new PrThread(3, PrThreadStatus.Active, [new PrComment(1, "Sam", "deleted line note", false)], "/a.cs", null, 4),
+            ],
+        };
+        source.Blobs[("/a.cs", "base")] = "a\nb\nc\nd\n";
+        source.Blobs[("/a.cs", "src")] = "a\nb\nc\nd\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var onRemoved = vm.ThreadsForDiffLine(new DiffLine(DiffLineKind.Removed, 4, null, "d"));
+
+        Assert.Single(onRemoved);
+        Assert.Equal(3, onRemoved[0].Id);
     }
 
     [Fact]
