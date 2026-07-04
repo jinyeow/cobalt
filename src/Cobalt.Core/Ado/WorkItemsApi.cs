@@ -49,9 +49,18 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
             return [];
         }
 
-        // WIQL returns ids ordered; the batch endpoint does not preserve order, so re-sort.
-        var batch = await BatchAsync(ids, ListFields, cancellationToken).ConfigureAwait(false);
-        var byId = batch.Value.ToDictionary(w => w.Id, WorkItem.From);
+        // workitemsbatch caps at 200 ids per call; page through and merge.
+        var byId = new Dictionary<long, WorkItem>();
+        foreach (var page in Chunk(ids, 200))
+        {
+            var batch = await BatchAsync(page, ListFields, cancellationToken).ConfigureAwait(false);
+            foreach (var dto in batch.Value)
+            {
+                byId[dto.Id] = WorkItem.From(dto);
+            }
+        }
+
+        // WIQL returns ids ordered; the batch endpoint does not, so re-sort by WIQL order.
         return [.. ids.Where(byId.ContainsKey).Select(id => byId[id])];
     }
 
@@ -105,14 +114,24 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
     public async Task<WorkItemComment> AddCommentAsync(
         long id, string text, CancellationToken cancellationToken = default)
     {
+        // ADO stores comment text as HTML (like descriptions); the reader converts
+        // HTML->Markdown, so we must convert Markdown->HTML on the way in to round-trip.
         var dto = await http.SendJsonAsync(
             HttpMethod.Post,
             $"{Project}/_apis/wit/workItems/{id}/comments?api-version=7.2-preview.4",
-            new AddCommentRequest { Text = text },
+            new AddCommentRequest { Text = Text.HtmlMarkdown.ToHtml(text) },
             WorkItemJsonContext.Default.AddCommentRequest,
             WorkItemJsonContext.Default.WorkItemCommentDto,
             cancellationToken: cancellationToken).ConfigureAwait(false);
         return WorkItemComment.From(dto);
+    }
+
+    private static IEnumerable<List<T>> Chunk<T>(IReadOnlyList<T> items, int size)
+    {
+        for (var i = 0; i < items.Count; i += size)
+        {
+            yield return [.. items.Skip(i).Take(size)];
+        }
     }
 
     private Task<WorkItemBatchResult> BatchAsync(

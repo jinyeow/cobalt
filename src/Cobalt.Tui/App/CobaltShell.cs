@@ -19,11 +19,13 @@ public sealed class CobaltShell : Window
     private readonly IApplication _app;
     private readonly ShellViewModel _vm;
     private readonly WorkItemStoreAdapter? _workItems;
+    private readonly PullRequestStoreAdapter? _pullRequests;
     private readonly EditorService _editor;
     private readonly KeyBindingTable _bindings = KeyBindingTable.Default();
     private readonly KeymapRouter _router;
 
     private WorkItemListView? _workItemList;
+    private PrListView? _prList;
 
     private readonly Label _tabs;
     private readonly View _content;
@@ -38,11 +40,13 @@ public sealed class CobaltShell : Window
         IApplication app,
         ShellViewModel vm,
         WorkItemStoreAdapter? workItems = null,
+        PullRequestStoreAdapter? pullRequests = null,
         EditorService? editor = null)
     {
         _app = app;
         _vm = vm;
         _workItems = workItems;
+        _pullRequests = pullRequests;
         // TODO(M6): drive Terminal.Gui's terminal suspend/resume around the editor
         // process so a full-screen $EDITOR doesn't fight the driver for the screen.
         _editor = editor ?? new EditorService(new ProcessEditorLauncher(Environment.GetEnvironmentVariable));
@@ -121,6 +125,21 @@ public sealed class CobaltShell : Window
 
     private void Dispatch(AppCommand command)
     {
+        // In the PR section, Tab/S-Tab cycle the PR sub-tabs (review queue/mine/active)
+        // rather than switching top-level sections; 1/2 still switch sections.
+        if (_prList is not null && command is AppCommand.NextTab or AppCommand.PrevTab)
+        {
+            if (command == AppCommand.NextTab)
+            {
+                _prList.NextTab();
+            }
+            else
+            {
+                _prList.PrevTab();
+            }
+            return;
+        }
+
         if (_vm.HandleCommand(command))
         {
             return;
@@ -136,16 +155,29 @@ public sealed class CobaltShell : Window
                 break;
             case AppCommand.Refresh:
                 _workItemList?.OnRefresh();
+                _prList?.Load();
                 break;
             case AppCommand.FilterStart:
                 _workItemList?.StartFiltering();
                 break;
             case AppCommand.Open:
                 _workItemList?.OnOpen();
+                _prList?.OnOpen();
                 break;
             default:
                 break;
         }
+    }
+
+    private void OpenPrDetail(int id)
+    {
+        if (_pullRequests is null)
+        {
+            return;
+        }
+        var detailVm = new PrDetailViewModel(_pullRequests, id);
+        new PrDetailDialog(_app, detailVm, _editor, _vm.Messages.Info).Show();
+        _prList?.Load(); // reflect any votes/edits back into the list
     }
 
     private void OpenWorkItemDetail(long id)
@@ -203,6 +235,7 @@ public sealed class CobaltShell : Window
             _activeScreen.Dispose();
             _activeScreen = null;
             _workItemList = null;
+            _prList = null;
         }
 
         if (_vm.ActiveSection == AppSection.WorkItems && _workItems is not null)
@@ -214,17 +247,24 @@ public sealed class CobaltShell : Window
             _content.Add(_activeScreen);
             _workItemList.Load();
         }
+        else if (_vm.ActiveSection == AppSection.PullRequests && _pullRequests is not null)
+        {
+            var listVm = new PrListViewModel(_pullRequests);
+            _prList = new PrListView(_app, listVm);
+            _prList.ItemActivated += OpenPrDetail;
+            _activeScreen = _prList;
+            _content.Add(_activeScreen);
+            _prList.Load();
+        }
         else
         {
-            // Pull requests land in M4; work items with no connection show a hint.
+            // No connection: show a hint instead of an empty pane.
             _activeScreen = new Label
             {
                 X = 1,
                 Y = 1,
                 Width = Dim.Fill(),
-                Text = _vm.ActiveSection == AppSection.WorkItems
-                    ? "no Azure DevOps connection — run: cobalt auth login"
-                    : "Pull requests land in M4.  ?:help  ::palette  1/2:sections",
+                Text = "no Azure DevOps connection — run: cobalt auth login",
             };
             _content.Add(_activeScreen);
         }

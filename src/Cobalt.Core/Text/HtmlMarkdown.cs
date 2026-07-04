@@ -63,8 +63,10 @@ public static partial class HtmlMarkdown
                 lossy = true;
                 break;
             }
-            if (attrs.Contains("style", StringComparison.OrdinalIgnoreCase) ||
-                (StyleCarriers.Contains(name) && attrs.Contains("class", StringComparison.OrdinalIgnoreCase)))
+            // Match the attribute name (style=), not any value containing "style"
+            // (e.g. title="lifestyle guide" round-trips cleanly).
+            if (StyleAttrRegex().IsMatch(attrs) ||
+                (StyleCarriers.Contains(name) && ClassAttrRegex().IsMatch(attrs)))
             {
                 lossy = true;
                 break;
@@ -76,4 +78,10 @@ public static partial class HtmlMarkdown
 
     [GeneratedRegex(@"<\s*/?\s*(?<name>[a-zA-Z][a-zA-Z0-9]*)(?<attrs>[^>]*)>")]
     private static partial Regex TagRegex();
+
+    [GeneratedRegex(@"\bstyle\s*=", RegexOptions.IgnoreCase)]
+    private static partial Regex StyleAttrRegex();
+
+    [GeneratedRegex(@"\bclass\s*=", RegexOptions.IgnoreCase)]
+    private static partial Regex ClassAttrRegex();
 }

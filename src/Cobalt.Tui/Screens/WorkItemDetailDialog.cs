@@ -17,6 +17,10 @@ public sealed class WorkItemDetailDialog
     private readonly WorkItemDetailViewModel _vm;
     private readonly EditorService _editor;
     private readonly Action<string> _log;
+    private readonly CancellationTokenSource _cts = new();
+    private bool _closed;
+
+    private CancellationToken Token => _cts.Token;
 
     public WorkItemDetailDialog(
         IApplication app, WorkItemDetailViewModel vm, EditorService editor, Action<string> log)
@@ -48,7 +52,15 @@ public sealed class WorkItemDetailDialog
         };
 #pragma warning restore CS0618
 
-        _vm.Changed += () => _app.Invoke(() => { body.Text = RenderBody(); dialog.SetNeedsDraw(); });
+        void OnChanged() => _app.Invoke(() =>
+        {
+            if (!_closed)
+            {
+                body.Text = RenderBody();
+                dialog.SetNeedsDraw();
+            }
+        });
+        _vm.Changed += OnChanged;
 
         dialog.KeyDown += (_, key) =>
         {
@@ -57,7 +69,7 @@ public sealed class WorkItemDetailDialog
             {
                 case "q" or "Esc":
                     key.Handled = true;
-                    _app.RequestStop(dialog);
+                    Close(dialog);
                     break;
                 case "s":
                     key.Handled = true;
@@ -73,12 +85,12 @@ public sealed class WorkItemDetailDialog
                     break;
                 case "a":
                     key.Handled = true;
-                    _ = PromptAndRun("assign to (unique name)", "", v => _vm.AssignAsync(v, CancellationToken.None));
+                    _ = PromptAndRun("assign to (unique name)", "", v => _vm.AssignAsync(v, Token));
                     break;
                 case "t":
                     key.Handled = true;
                     _ = PromptAndRun("tags (semicolon separated)", string.Join("; ", _vm.Item?.Tags ?? []),
-                        v => _vm.SetTagsAsync(v.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), CancellationToken.None));
+                        v => _vm.SetTagsAsync(v.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), Token));
                     break;
                 default:
                     break;
@@ -86,9 +98,33 @@ public sealed class WorkItemDetailDialog
         };
 
         dialog.Add(body);
-        _ = _vm.LoadAsync(CancellationToken.None);
+        _ = LoadAsync();
         body.Text = RenderBody();
         _app.Run(dialog);
+
+        // app.Run returned → dialog is closing; stop any late callbacks touching it.
+        _closed = true;
+        _vm.Changed -= OnChanged;
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            await _vm.LoadAsync(Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // dialog closed mid-load
+        }
+    }
+
+    private void Close(Dialog dialog)
+    {
+        _closed = true;
+        _app.RequestStop(dialog);
     }
 
     private string RenderBody()
@@ -137,31 +173,31 @@ public sealed class WorkItemDetailDialog
         var choice = MessageBox.Query(_app, "change state", "", states);
         if (choice is { } index && index >= 0 && index < states.Length)
         {
-            _ = RunAndLog(_vm.ChangeStateAsync(states[index], CancellationToken.None), $"state → {states[index]}");
+            _ = RunAndLog(_vm.ChangeStateAsync(states[index], Token), $"state → {states[index]}");
         }
     }
 
     private async Task CommentAsync()
     {
-        var text = await _editor.EditAsync("", ".md", CancellationToken.None).ConfigureAwait(false);
+        var text = await _editor.EditAsync("", ".md", Token).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(text))
         {
-            await RunAndLog(_vm.AddCommentAsync(text.Trim(), CancellationToken.None), "comment added").ConfigureAwait(false);
+            await RunAndLog(_vm.AddCommentAsync(text.Trim(), Token), "comment added").ConfigureAwait(false);
         }
     }
 
     private async Task EditDescriptionAsync()
     {
-        var edited = await _editor.EditAsync(_vm.DescriptionMarkdown, ".md", CancellationToken.None).ConfigureAwait(false);
+        var edited = await _editor.EditAsync(_vm.DescriptionMarkdown, ".md", Token).ConfigureAwait(false);
         if (edited is not null)
         {
-            await RunAndLog(_vm.SaveDescriptionAsync(edited, CancellationToken.None), "description saved").ConfigureAwait(false);
+            await RunAndLog(_vm.SaveDescriptionAsync(edited, Token), "description saved").ConfigureAwait(false);
         }
     }
 
     private async Task PromptAndRun(string title, string initial, Func<string, Task> action)
     {
-        var value = await _editor.EditAsync(initial, ".txt", CancellationToken.None).ConfigureAwait(false);
+        var value = await _editor.EditAsync(initial, ".txt", Token).ConfigureAwait(false);
         if (value is not null)
         {
             await RunAndLog(action(value.Trim()), title).ConfigureAwait(false);

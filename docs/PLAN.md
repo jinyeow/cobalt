@@ -9,7 +9,7 @@ and demoable. Estimated relative sizes in ⬤ (1–5).
 - [x] M1 — Auth + config + API foundation (done 2026-07-04; M0 review fixes folded in)
 - [x] M2 — TUI shell + vim input layer (done 2026-07-04; M1 review fixes folded in, ADR 0007)
 - [x] M3 — Work items slice (done 2026-07-04; M2 review fixes folded in)
-- [ ] M4 — PR lists, threads, votes
+- [x] M4 — PR lists, threads, votes (done 2026-07-04; M3 review fixes folded in)
 - [ ] M5 — Diff review + line comments
 - [ ] M6 — Polish & release
 

@@ -54,4 +54,21 @@ public class HtmlMarkdownTests
 
         Assert.Contains("important note", result.Markdown);
     }
+
+    [Fact]
+    public void Attribute_Value_Containing_Style_Is_Not_A_False_Positive()
+    {
+        // "lifestyle" in a title must not trip the style= detector.
+        var result = HtmlMarkdown.Analyze("<p><a href=\"/x\" title=\"lifestyle guide\">link</a></p>");
+
+        Assert.False(result.Lossy);
+    }
+
+    [Fact]
+    public void Actual_Style_Attribute_Is_Flagged()
+    {
+        var result = HtmlMarkdown.Analyze("<p style=\"color:red\">warn</p>");
+
+        Assert.True(result.Lossy);
+    }
 }

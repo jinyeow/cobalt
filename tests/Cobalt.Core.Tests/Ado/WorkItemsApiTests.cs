@@ -48,6 +48,29 @@ public class WorkItemsApiTests
     }
 
     [Fact]
+    public async Task QueryMyWorkItems_Pages_Batch_Calls_Over_200_Ids()
+    {
+        // 250 ids from WIQL must become two workitemsbatch calls (200 + 50).
+        var wiqlIds = string.Join(",", Enumerable.Range(1, 250).Select(i => $"{{\"id\":{i}}}"));
+        var page1 = string.Join(",", Enumerable.Range(1, 200).Select(WorkItemJson));
+        var page2 = string.Join(",", Enumerable.Range(201, 50).Select(WorkItemJson));
+        var handler = new FakeHttpHandler()
+            .Respond(HttpStatusCode.OK, $"{{\"workItems\":[{wiqlIds}]}}")
+            .Respond(HttpStatusCode.OK, $"{{\"value\":[{page1}]}}")
+            .Respond(HttpStatusCode.OK, $"{{\"value\":[{page2}]}}");
+
+        var items = await Api(handler).QueryMyWorkItemsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(250, items.Count);
+        Assert.Equal(1, items[0].Id); // WIQL order preserved across pages
+        Assert.Equal(250, items[^1].Id);
+        Assert.Equal(3, handler.Requests.Count); // 1 WIQL + 2 batch pages
+    }
+
+    private static string WorkItemJson(int id) =>
+        $"{{\"id\":{id},\"fields\":{{\"System.Title\":\"item {id}\",\"System.State\":\"New\",\"System.WorkItemType\":\"Task\"}}}}";
+
+    [Fact]
     public async Task QueryMyWorkItems_Empty_Skips_Batch_Call()
     {
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"workItems":[]}""");

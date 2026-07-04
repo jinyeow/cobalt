@@ -1,6 +1,7 @@
 using Cobalt.Core.Ado;
 using Cobalt.Core.Auth;
 using Cobalt.Core.Config;
+using Cobalt.Core.Models;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
 
@@ -16,8 +17,15 @@ public static class CobaltTuiApp
         using var connection = AdoConnection.Create(context, tokens);
         var workItems = new WorkItemStoreAdapter(new WorkItemsApi(connection.Http, context));
 
+        // The signed-in user id (for PR reviewer/creator filters) resolves lazily and
+        // is cached; the first PR list load triggers it without blocking startup.
+        var identity = new Lazy<Task<AdoUser>>(() => connection.Identity.GetAuthenticatedUserAsync());
+        var pullRequests = new PullRequestStoreAdapter(
+            new GitApi(connection.Http, context),
+            async ct => (await identity.Value.WaitAsync(ct).ConfigureAwait(false)).Id);
+
         using var app = Application.Create().Init();
-        var shell = new CobaltShell(app, vm, workItems);
+        var shell = new CobaltShell(app, vm, workItems, pullRequests);
 
         ResolveIdentityInBackground(app, vm, connection);
 
