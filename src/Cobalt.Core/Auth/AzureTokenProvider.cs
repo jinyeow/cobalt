@@ -18,7 +18,11 @@ public sealed class AzureTokenProvider : ITokenProvider
     private readonly TokenCredential _credential;
     private readonly TimeProvider _time;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private AccessToken _cached;
+
+    // Reference type so the lock-free fast path reads it atomically (no torn struct read).
+    private sealed record Cached(string Token, DateTimeOffset ExpiresOn);
+
+    private Cached? _cached;
 
     public AzureTokenProvider(TokenCredential credential, TimeProvider? time = null)
     {
@@ -31,20 +35,22 @@ public sealed class AzureTokenProvider : ITokenProvider
 
     public async ValueTask<string> GetAccessTokenAsync(CancellationToken cancellationToken = default)
     {
-        if (StillFresh())
+        if (StillFresh(_cached) is { } fast)
         {
-            return _cached.Token;
+            return fast;
         }
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!StillFresh())
+            if (StillFresh(_cached) is { } refreshed)
             {
-                _cached = await _credential.GetTokenAsync(
-                    new TokenRequestContext([AdoScope]), cancellationToken).ConfigureAwait(false);
+                return refreshed;
             }
-            return _cached.Token;
+            var token = await _credential.GetTokenAsync(
+                new TokenRequestContext([AdoScope]), cancellationToken).ConfigureAwait(false);
+            _cached = new Cached(token.Token, token.ExpiresOn);
+            return token.Token;
         }
         finally
         {
@@ -52,9 +58,10 @@ public sealed class AzureTokenProvider : ITokenProvider
         }
     }
 
-    private bool StillFresh() =>
-        _cached.Token is { Length: > 0 } &&
-        _cached.ExpiresOn - _time.GetUtcNow() > RefreshSkew;
+    private string? StillFresh(Cached? cached) =>
+        cached is not null && cached.ExpiresOn - _time.GetUtcNow() > RefreshSkew
+            ? cached.Token
+            : null;
 
     private static TokenCredential BuildChain(string authRecordPath)
     {
@@ -67,6 +74,9 @@ public sealed class AzureTokenProvider : ITokenProvider
     {
         var options = new InteractiveBrowserCredentialOptions
         {
+            // Silent paths (auth status, the TUI) must never pop a browser; only
+            // `cobalt auth login` (AuthenticateAsync) may prompt.
+            DisableAutomaticAuthentication = true,
             // UnencryptedStorageAllowed: on Linux without a keyring (headless/WSL) the
             // encrypted cache is unavailable; fall back to a file like `az` does.
             TokenCachePersistenceOptions = new TokenCachePersistenceOptions
@@ -92,8 +102,14 @@ public sealed class AzureTokenProvider : ITokenProvider
             new TokenRequestContext([AdoScope]), cancellationToken).ConfigureAwait(false);
 
         Directory.CreateDirectory(Path.GetDirectoryName(authRecordPath)!);
-        await using var stream = File.Create(authRecordPath);
-        await record.SerializeAsync(stream, cancellationToken).ConfigureAwait(false);
+        await using (var stream = File.Create(authRecordPath))
+        {
+            await record.SerializeAsync(stream, cancellationToken).ConfigureAwait(false);
+        }
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(authRecordPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
         return record;
     }
 

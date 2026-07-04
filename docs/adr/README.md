@@ -11,3 +11,4 @@ immutable once accepted; superseding decisions get a new number that links back.
 | [0004](0004-terminal-gui-v2-with-viewmodels.md) | Terminal.Gui v2 behind a TUI-free view-model layer | Accepted |
 | [0005](0005-dotnet-global-tool-packaging.md) | Distribute as a dotnet global tool | Accepted |
 | [0006](0006-tdd-and-central-package-management.md) | TDD workflow, xunit v3, central package management | Accepted |
+| [0007](0007-vim-input-as-testable-data.md) | Vim input as testable data, verified without a live terminal | Accepted |

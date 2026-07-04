@@ -63,7 +63,7 @@ public sealed class AdoHttp(HttpClient client)
 
     private static string ExtractError(HttpResponseMessage response, string bodyText)
     {
-        if (bodyText.StartsWith('{'))
+        if (bodyText.AsSpan().TrimStart().StartsWith("{"))
         {
             try
             {

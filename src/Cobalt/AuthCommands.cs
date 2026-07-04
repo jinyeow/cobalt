@@ -33,8 +33,11 @@ internal static class AuthCommands
                 var user = await connection.Identity.GetAuthenticatedUserAsync();
                 status = $"signed in as {user.DisplayName} ({user.Id})";
             }
-            catch (Exception ex) when (ex is AdoApiException or Azure.Identity.CredentialUnavailableException
-                or Azure.Identity.AuthenticationFailedException or HttpRequestException)
+            catch (Exception ex) when (ex is AdoApiException
+                or Azure.Identity.AuthenticationFailedException // includes CredentialUnavailable
+                or HttpRequestException
+                or OperationCanceledException // HttpClient timeout surfaces as TaskCanceled
+                or System.Text.Json.JsonException)
             {
                 failures++;
                 status = $"NOT signed in — {FirstLine(ex.Message)}";

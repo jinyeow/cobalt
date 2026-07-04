@@ -94,9 +94,14 @@ public static class ConfigLoader
     private static Uri NormalizeOrganization(string contextName, string organization)
     {
         // A bare name like "contoso" means https://dev.azure.com/contoso.
-        var url = organization.Contains("://", StringComparison.Ordinal)
-            ? organization
-            : $"https://dev.azure.com/{organization}";
+        var isUrl = organization.Contains("://", StringComparison.Ordinal);
+        if (!isUrl && organization.Contains('/', StringComparison.Ordinal))
+        {
+            throw new ConfigException(
+                $"[contexts.{contextName}] organization '{organization}' looks like a partial URL; " +
+                "use either a bare org name or a full https:// URL");
+        }
+        var url = isUrl ? organization : $"https://dev.azure.com/{organization}";
 
         if (!Uri.TryCreate(url.TrimEnd('/'), UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
         {
