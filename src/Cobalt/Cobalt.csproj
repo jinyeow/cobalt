@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Cobalt.Cli</RootNamespace>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>cobalt</ToolCommandName>
+    <!-- 'cobalt' is taken on nuget.org by an unrelated package; the command name is still `cobalt`. -->
+    <PackageId>cobalt-tui</PackageId>
+    <Description>A vim-flavored terminal UI for Azure DevOps: work items, pull requests, reviews, and votes.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Cobalt.Core/Cobalt.Core.csproj" />
+    <ProjectReference Include="../Cobalt.Tui/Cobalt.Tui.csproj" />
+  </ItemGroup>
+</Project>

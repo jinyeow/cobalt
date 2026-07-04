@@ -3,6 +3,16 @@
 Companion to [SPEC.md](./SPEC.md). Six milestones, each independently shippable
 and demoable. Estimated relative sizes in ⬤ (1–5).
 
+## Status
+
+- [x] M0 — Scaffold & CI (done 2026-07-04; package id is `cobalt-tui`, see ADR 0005)
+- [ ] M1 — Auth + config + API foundation
+- [ ] M2 — TUI shell + vim input layer
+- [ ] M3 — Work items slice
+- [ ] M4 — PR lists, threads, votes
+- [ ] M5 — Diff review + line comments
+- [ ] M6 — Polish & release
+
 ## Architecture
 
 ```

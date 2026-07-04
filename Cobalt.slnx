@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Cobalt.Core/Cobalt.Core.csproj" />
+    <Project Path="src/Cobalt.Tui/Cobalt.Tui.csproj" />
+    <Project Path="src/Cobalt/Cobalt.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Cobalt.Core.Tests/Cobalt.Core.Tests.csproj" />
+    <Project Path="tests/Cobalt.Tui.Tests/Cobalt.Tui.Tests.csproj" />
+  </Folder>
+</Solution>
