@@ -5,4 +5,7 @@
   <ItemGroup>
     <ProjectReference Include="../Cobalt.Core/Cobalt.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cobalt.Tui.Tests" />
+  </ItemGroup>
 </Project>

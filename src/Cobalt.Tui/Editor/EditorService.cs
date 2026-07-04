@@ -11,9 +11,10 @@ public sealed class EditorService(IEditorLauncher launcher)
     {
         var path = Path.Combine(
             Path.GetTempPath(), $"cobalt-{Guid.NewGuid():N}{extension}");
-        await File.WriteAllTextAsync(path, initialContent, cancellationToken).ConfigureAwait(false);
         try
         {
+            // Inside the try so cancellation during the write still hits the cleanup.
+            await File.WriteAllTextAsync(path, initialContent, cancellationToken).ConfigureAwait(false);
             var exitCode = await launcher.LaunchAsync(path, cancellationToken).ConfigureAwait(false);
             if (exitCode != 0)
             {

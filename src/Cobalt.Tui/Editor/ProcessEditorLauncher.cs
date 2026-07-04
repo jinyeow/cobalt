@@ -14,8 +14,8 @@ public sealed class ProcessEditorLauncher(
     public async Task<int> LaunchAsync(string filePath, CancellationToken cancellationToken = default)
     {
         var command = EditorService.ResolveEditorCommand(env);
-        // $EDITOR may carry arguments ("code --wait"); first token is the executable.
-        var parts = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        // $EDITOR may carry arguments ("code --wait") and quoted paths ("/opt/My Editor/nvim").
+        var parts = TokenizeCommand(command);
 
         var info = new ProcessStartInfo
         {
@@ -40,5 +40,50 @@ public sealed class ProcessEditorLauncher(
         {
             afterExit?.Invoke();
         }
+    }
+
+    /// <summary>Splits a command on spaces, honoring single/double quotes around paths or args.</summary>
+    internal static List<string> TokenizeCommand(string command)
+    {
+        var tokens = new List<string>();
+        var current = new System.Text.StringBuilder();
+        var quote = '\0';
+
+        foreach (var c in command)
+        {
+            if (quote != '\0')
+            {
+                if (c == quote)
+                {
+                    quote = '\0';
+                }
+                else
+                {
+                    current.Append(c);
+                }
+            }
+            else if (c is '"' or '\'')
+            {
+                quote = c;
+            }
+            else if (char.IsWhiteSpace(c))
+            {
+                if (current.Length > 0)
+                {
+                    tokens.Add(current.ToString());
+                    current.Clear();
+                }
+            }
+            else
+            {
+                current.Append(c);
+            }
+        }
+
+        if (current.Length > 0)
+        {
+            tokens.Add(current.ToString());
+        }
+        return tokens.Count > 0 ? tokens : ["vi"];
     }
 }

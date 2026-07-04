@@ -61,6 +61,7 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.DiffReview, "u", AppCommand.ReactivateThread);
         table.Bind(KeyScope.DiffReview, "v", AppCommand.Vote);
 
+        table.Validate();
         return table;
     }
 
@@ -71,6 +72,33 @@ public sealed class KeyBindingTable
             _bindings[scope] = list = [];
         }
         list.Add((sequence.Split(' ', StringSplitOptions.RemoveEmptyEntries), command));
+    }
+
+    /// <summary>
+    /// Guards the router's "exact match fires immediately" rule: no complete sequence
+    /// may be a strict prefix of another in the same scope, or the longer one becomes
+    /// unreachable. Cheap insurance for the future remapping seam (ADR 0007).
+    /// </summary>
+    public void Validate()
+    {
+        foreach (var scope in Enum.GetValues<KeyScope>())
+        {
+            var sequences = Visible(scope).Select(b => b.Sequence).ToList();
+            foreach (var a in sequences)
+            {
+                foreach (var b in sequences)
+                {
+                    if (!ReferenceEquals(a, b) &&
+                        a.Length < b.Length &&
+                        a.SequenceEqual(b.Take(a.Length), StringComparer.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            $"key binding '{string.Join(" ", a)}' is a prefix of '{string.Join(" ", b)}' " +
+                            $"in scope {scope}; the longer binding would be unreachable");
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>All bindings visible from a scope: scoped first, then global fallback.</summary>

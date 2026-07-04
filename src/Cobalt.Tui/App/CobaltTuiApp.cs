@@ -13,10 +13,13 @@ public static class CobaltTuiApp
         var context = config.Resolve(contextOverride);
         var vm = new ShellViewModel([.. config.Contexts.Keys.Order(StringComparer.Ordinal)], context.Name);
 
-        using var app = Application.Create().Init();
-        var shell = new CobaltShell(app, vm);
+        using var connection = AdoConnection.Create(context, tokens);
+        var workItems = new WorkItemStoreAdapter(new WorkItemsApi(connection.Http, context));
 
-        ResolveIdentityInBackground(app, vm, context, tokens);
+        using var app = Application.Create().Init();
+        var shell = new CobaltShell(app, vm, workItems);
+
+        ResolveIdentityInBackground(app, vm, connection);
 
         app.Run(shell);
         shell.Dispose();
@@ -25,20 +28,20 @@ public static class CobaltTuiApp
 
     /// <summary>Fills the status bar with who we are; failures land in the message bar, never block startup.</summary>
     private static void ResolveIdentityInBackground(
-        IApplication app, ShellViewModel vm, AdoContext context, ITokenProvider tokens)
+        IApplication app, ShellViewModel vm, AdoConnection connection)
     {
         _ = Task.Run(async () =>
         {
             try
             {
-                using var connection = AdoConnection.Create(context, tokens);
                 var user = await connection.Identity.GetAuthenticatedUserAsync().ConfigureAwait(false);
                 app.Invoke(() => vm.OnUserResolved(user.DisplayName));
             }
             catch (Exception ex) when (ex is AdoApiException
                 or Azure.Identity.AuthenticationFailedException
                 or HttpRequestException
-                or OperationCanceledException)
+                or OperationCanceledException
+                or System.Text.Json.JsonException)
             {
                 var message = ex.Message;
                 app.Invoke(() => vm.Messages.Error($"not signed in — {FirstLine(message)} (run: cobalt auth login)"));

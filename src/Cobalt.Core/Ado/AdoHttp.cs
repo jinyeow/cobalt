@@ -37,6 +37,23 @@ public sealed class AdoHttp(HttpClient client)
         return await ReadAsync(response, responseType, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Sends a pre-serialized body (e.g. a JSON Patch document) and reads a typed response.</summary>
+    public async Task<TResponse> SendRawAsync<TResponse>(
+        HttpMethod method,
+        string path,
+        string body,
+        JsonTypeInfo<TResponse> responseType,
+        string contentType = "application/json",
+        CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(method, new Uri(path, UriKind.Relative))
+        {
+            Content = new StringContent(body, Encoding.UTF8, contentType),
+        };
+        using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        return await ReadAsync(response, responseType, cancellationToken).ConfigureAwait(false);
+    }
+
     private static async Task<T> ReadAsync<T>(
         HttpResponseMessage response, JsonTypeInfo<T> type, CancellationToken cancellationToken)
     {

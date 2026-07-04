@@ -1,4 +1,6 @@
+using Cobalt.Tui.Editor;
 using Cobalt.Tui.Input;
+using Cobalt.Tui.Screens;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
@@ -16,8 +18,12 @@ public sealed class CobaltShell : Window
 {
     private readonly IApplication _app;
     private readonly ShellViewModel _vm;
+    private readonly WorkItemStoreAdapter? _workItems;
+    private readonly EditorService _editor;
     private readonly KeyBindingTable _bindings = KeyBindingTable.Default();
     private readonly KeymapRouter _router;
+
+    private WorkItemListView? _workItemList;
 
     private readonly Label _tabs;
     private readonly View _content;
@@ -28,10 +34,18 @@ public sealed class CobaltShell : Window
 
     private View? _activeScreen;
 
-    public CobaltShell(IApplication app, ShellViewModel vm)
+    public CobaltShell(
+        IApplication app,
+        ShellViewModel vm,
+        WorkItemStoreAdapter? workItems = null,
+        EditorService? editor = null)
     {
         _app = app;
         _vm = vm;
+        _workItems = workItems;
+        // TODO(M6): drive Terminal.Gui's terminal suspend/resume around the editor
+        // process so a full-screen $EDITOR doesn't fight the driver for the screen.
+        _editor = editor ?? new EditorService(new ProcessEditorLauncher(Environment.GetEnvironmentVariable));
         _router = new KeymapRouter(_bindings);
 
         Title = "cobalt";
@@ -121,13 +135,28 @@ public sealed class CobaltShell : Window
                 _vm.Messages.Info("nothing to close — quit with :q");
                 break;
             case AppCommand.Refresh:
+                _workItemList?.OnRefresh();
+                break;
             case AppCommand.FilterStart:
+                _workItemList?.StartFiltering();
+                break;
             case AppCommand.Open:
-                _vm.Messages.Info("data screens arrive with M3/M4");
+                _workItemList?.OnOpen();
                 break;
             default:
                 break;
         }
+    }
+
+    private void OpenWorkItemDetail(long id)
+    {
+        if (_workItems is null)
+        {
+            return;
+        }
+        var detailVm = new WorkItemDetailViewModel(_workItems, id);
+        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info).Show();
+        _workItemList?.OnRefresh(); // reflect any edits back into the list
     }
 
     private void WirePalette()
@@ -163,7 +192,7 @@ public sealed class CobaltShell : Window
         _palette.Visible = false;
         _palettePrompt.Visible = false;
         _message.Visible = true;
-        _content.SetFocus();
+        _activeScreen?.SetFocus();
     }
 
     private void ShowSection()
@@ -172,19 +201,37 @@ public sealed class CobaltShell : Window
         {
             _content.Remove(_activeScreen);
             _activeScreen.Dispose();
+            _activeScreen = null;
+            _workItemList = null;
         }
 
-        // M2 placeholder screens; M3/M4 swap in the real list views.
-        _activeScreen = new Label
+        if (_vm.ActiveSection == AppSection.WorkItems && _workItems is not null)
         {
-            X = 1,
-            Y = 1,
-            Width = Dim.Fill(),
-            Text = _vm.ActiveSection == AppSection.WorkItems
-                ? "Work items land in M3.  ?:help  ::palette  1/2:sections"
-                : "Pull requests land in M4.  ?:help  ::palette  1/2:sections",
-        };
-        _content.Add(_activeScreen);
+            var listVm = new WorkItemListViewModel(_workItems);
+            _workItemList = new WorkItemListView(_app, listVm);
+            _workItemList.ItemActivated += OpenWorkItemDetail;
+            _activeScreen = _workItemList;
+            _content.Add(_activeScreen);
+            _workItemList.Load();
+        }
+        else
+        {
+            // Pull requests land in M4; work items with no connection show a hint.
+            _activeScreen = new Label
+            {
+                X = 1,
+                Y = 1,
+                Width = Dim.Fill(),
+                Text = _vm.ActiveSection == AppSection.WorkItems
+                    ? "no Azure DevOps connection — run: cobalt auth login"
+                    : "Pull requests land in M4.  ?:help  ::palette  1/2:sections",
+            };
+            _content.Add(_activeScreen);
+        }
+
+        // Re-establish focus: disposing the previously-focused screen leaves focus
+        // dangling, which stops Window.KeyDown from routing subsequent keys.
+        _activeScreen.SetFocus();
     }
 
     private void RefreshChrome()
