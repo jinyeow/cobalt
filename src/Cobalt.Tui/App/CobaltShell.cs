@@ -176,7 +176,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new PrDetailViewModel(_pullRequests, id);
-        new PrDetailDialog(_app, detailVm, _editor, _vm.Messages.Info).Show();
+        new PrDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _pullRequests).Show();
         _prList?.Load(); // reflect any votes/edits back into the list
     }
 

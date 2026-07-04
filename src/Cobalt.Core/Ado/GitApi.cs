@@ -123,5 +123,83 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
         return PullRequest.From(dto);
     }
 
+    // ---- diff / review (SPEC §3, M5) ----
+
+    public async Task<PrIteration?> GetLatestIterationAsync(
+        string repositoryId, int prId, CancellationToken cancellationToken = default)
+    {
+        var result = await http.GetJsonAsync(
+            $"{Project}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/iterations?{PrApiVersion}",
+            GitJsonContext.Default.PrIterationListResult,
+            cancellationToken).ConfigureAwait(false);
+
+        var latest = result.Value.MaxBy(i => i.Id);
+        return latest is null
+            ? null
+            : new PrIteration(
+                latest.Id,
+                latest.SourceRefCommit?.CommitId,
+                latest.TargetRefCommit?.CommitId,
+                latest.CommonRefCommit?.CommitId);
+    }
+
+    public async Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(
+        string repositoryId, int prId, int iterationId, CancellationToken cancellationToken = default)
+    {
+        var result = await http.GetJsonAsync(
+            $"{Project}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/iterations/{iterationId}/changes?{ThreadApiVersion}",
+            GitJsonContext.Default.PrIterationChangesResult,
+            cancellationToken).ConfigureAwait(false);
+
+        return
+        [
+            .. result.ChangeEntries
+                .Where(c => c.Item?.Path is not null && !c.Item.IsFolder)
+                .Select(c => new FileChange(c.Item!.Path!, FileChange.ParseKind(c.ChangeType))),
+        ];
+    }
+
+    /// <summary>File content at a commit; empty string when the file doesn't exist on that side.</summary>
+    public async Task<string> GetFileContentAsync(
+        string repositoryId, string path, string commitId, CancellationToken cancellationToken = default)
+    {
+        var query =
+            $"path={Uri.EscapeDataString(path)}" +
+            $"&versionDescriptor.version={Uri.EscapeDataString(commitId)}" +
+            "&versionDescriptor.versionType=commit" +
+            "&includeContent=true&$format=text&api-version=7.2-preview.1";
+        var content = await http.GetTextOrNullAsync(
+            $"{Project}/_apis/git/repositories/{Enc(repositoryId)}/items?{query}",
+            cancellationToken).ConfigureAwait(false);
+        return content ?? "";
+    }
+
+    public Task<PrThreadDto> AddLineCommentAsync(
+        string repositoryId,
+        int prId,
+        string filePath,
+        int line,
+        bool rightSide,
+        string content,
+        CancellationToken cancellationToken = default)
+    {
+        var position = new PrCommentPositionDto { Line = line, Offset = 1 };
+        var context = new PrThreadContextDto
+        {
+            FilePath = filePath,
+            RightFileStart = rightSide ? position : null,
+            RightFileEnd = rightSide ? position : null,
+            LeftFileStart = rightSide ? null : position,
+            LeftFileEnd = rightSide ? null : position,
+        };
+        var thread = new NewThreadRequest
+        {
+            Comments = [new NewCommentRequest { Content = content }],
+            Status = 1, // active
+            ThreadContext = context,
+        };
+        return AddThreadAsync(repositoryId, prId, thread, cancellationToken);
+    }
+
     private static string Enc(string segment) => Uri.EscapeDataString(segment);
 }

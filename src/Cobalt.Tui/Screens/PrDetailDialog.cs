@@ -13,7 +13,11 @@ namespace Cobalt.Tui.Screens;
 /// actions (vote, reply, resolve/reactivate, complete, abandon).
 /// </summary>
 public sealed class PrDetailDialog(
-    IApplication app, PrDetailViewModel vm, EditorService editor, Action<string> log)
+    IApplication app,
+    PrDetailViewModel vm,
+    EditorService editor,
+    Action<string> log,
+    IPrDiffSource? diffSource = null)
 {
     private readonly CancellationTokenSource _cts = new();
     private bool _closed;
@@ -24,7 +28,7 @@ public sealed class PrDetailDialog(
     {
         using var dialog = new Dialog
         {
-            Title = $"PR !{vm.Id} — q close · v vote · c reply · x resolve · u reactivate · C complete · A abandon",
+            Title = $"PR !{vm.Id} — q close · d diff · v vote · c reply · x resolve · u reactivate · C complete · A abandon",
             Width = Dim.Percent(92),
             Height = Dim.Percent(92),
         };
@@ -84,6 +88,10 @@ public sealed class PrDetailDialog(
                 case "C":
                     key.Handled = true;
                     ConfirmComplete();
+                    break;
+                case "d":
+                    key.Handled = true;
+                    OpenDiff();
                     break;
                 default:
                     break;
@@ -232,6 +240,17 @@ public sealed class PrDetailDialog(
                 _ = RunAndLog(vm.CompleteAsync(strategies[i], deleteSource: false, Token), "PR completed");
             }
         }
+    }
+
+    private void OpenDiff()
+    {
+        if (diffSource is null || vm.PullRequest is null)
+        {
+            log("diff review needs a loaded PR");
+            return;
+        }
+        var diffVm = new PrDiffViewModel(diffSource, vm.PullRequest);
+        new DiffReviewDialog(app, diffVm, editor, log).Show();
     }
 
     private async Task RunAndLog(Task work, string success)

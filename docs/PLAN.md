@@ -10,7 +10,7 @@ and demoable. Estimated relative sizes in ⬤ (1–5).
 - [x] M2 — TUI shell + vim input layer (done 2026-07-04; M1 review fixes folded in, ADR 0007)
 - [x] M3 — Work items slice (done 2026-07-04; M2 review fixes folded in)
 - [x] M4 — PR lists, threads, votes (done 2026-07-04; M3 review fixes folded in)
-- [ ] M5 — Diff review + line comments
+- [x] M5 — Diff review + line comments (done 2026-07-04; ADR 0008)
 - [ ] M6 — Polish & release
 
 ## Architecture

@@ -155,6 +155,77 @@ public sealed record NewThreadRequest
     public PrThreadContextDto? ThreadContext { get; init; }
 }
 
+// ---- diff / iteration DTOs ----
+
+public sealed record PrIterationListResult
+{
+    public IReadOnlyList<PrIterationDto> Value { get; init; } = [];
+}
+
+public sealed record PrIterationDto
+{
+    public int Id { get; init; }
+    public GitCommitRefDto? SourceRefCommit { get; init; }
+    public GitCommitRefDto? TargetRefCommit { get; init; }
+    public GitCommitRefDto? CommonRefCommit { get; init; }
+}
+
+public sealed record PrIterationChangesResult
+{
+    public IReadOnlyList<PrChangeEntryDto> ChangeEntries { get; init; } = [];
+}
+
+public sealed record PrChangeEntryDto
+{
+    public string ChangeType { get; init; } = "";
+    public GitItemDto? Item { get; init; }
+}
+
+public sealed record GitItemDto
+{
+    public string? Path { get; init; }
+    public bool IsFolder { get; init; }
+}
+
+// ---- diff domain projections ----
+
+public enum FileChangeKind
+{
+    Add,
+    Edit,
+    Delete,
+    Rename,
+    Unknown,
+}
+
+public sealed record PrIteration(int Id, string? SourceCommitId, string? TargetCommitId, string? BaseCommitId);
+
+public sealed record FileChange(string Path, FileChangeKind ChangeType)
+{
+    public static FileChangeKind ParseKind(string changeType)
+    {
+        // ADO sends composite flags like "edit, rename"; take the most meaningful.
+        var lower = changeType.ToLowerInvariant();
+        if (lower.Contains("delete"))
+        {
+            return FileChangeKind.Delete;
+        }
+        if (lower.Contains("add"))
+        {
+            return FileChangeKind.Add;
+        }
+        if (lower.Contains("rename"))
+        {
+            return FileChangeKind.Rename;
+        }
+        if (lower.Contains("edit"))
+        {
+            return FileChangeKind.Edit;
+        }
+        return FileChangeKind.Unknown;
+    }
+}
+
 // ---- domain projections ----
 
 public sealed record PrReviewer(string Id, string DisplayName, PrVote Vote, bool IsRequired);
@@ -256,4 +327,6 @@ public sealed record PrThread(
 [JsonSerializable(typeof(PrStatusPatch))]
 [JsonSerializable(typeof(NewCommentRequest))]
 [JsonSerializable(typeof(NewThreadRequest))]
+[JsonSerializable(typeof(PrIterationListResult))]
+[JsonSerializable(typeof(PrIterationChangesResult))]
 public sealed partial class GitJsonContext : JsonSerializerContext;

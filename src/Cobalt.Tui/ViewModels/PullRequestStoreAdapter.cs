@@ -9,7 +9,7 @@ namespace Cobalt.Tui.ViewModels;
 /// cached, so constructing the adapter never blocks on the network.
 /// </summary>
 public sealed class PullRequestStoreAdapter(GitApi api, Func<CancellationToken, Task<Guid>> resolveMe)
-    : IPullRequestSource, IPullRequestStore
+    : IPullRequestSource, IPullRequestStore, IPrDiffSource
 {
     private Guid? _me;
 
@@ -48,4 +48,21 @@ public sealed class PullRequestStoreAdapter(GitApi api, Func<CancellationToken, 
         await api.CompleteAsync(repositoryId, id, pr.LastMergeSourceCommitId, mergeStrategy, deleteSource, ct)
             .ConfigureAwait(false);
     }
+
+    // ---- IPrDiffSource ----
+
+    public Task<PrIteration?> GetLatestIterationAsync(string repositoryId, int prId, CancellationToken ct) =>
+        api.GetLatestIterationAsync(repositoryId, prId, ct);
+
+    public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string repositoryId, int prId, int iterationId, CancellationToken ct) =>
+        api.GetIterationChangesAsync(repositoryId, prId, iterationId, ct);
+
+    public Task<string> GetFileContentAsync(string repositoryId, string path, string commit, CancellationToken ct) =>
+        api.GetFileContentAsync(repositoryId, path, commit, ct);
+
+    Task<IReadOnlyList<PrThread>> IPrDiffSource.GetThreadsAsync(string repositoryId, int prId, CancellationToken ct) =>
+        api.GetThreadsAsync(repositoryId, prId, ct);
+
+    public async Task AddLineCommentAsync(string repositoryId, int prId, string path, int line, bool rightSide, string text, CancellationToken ct) =>
+        await api.AddLineCommentAsync(repositoryId, prId, path, line, rightSide, text, ct).ConfigureAwait(false);
 }

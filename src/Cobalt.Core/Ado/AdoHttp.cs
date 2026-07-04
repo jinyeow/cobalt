@@ -37,6 +37,29 @@ public sealed class AdoHttp(HttpClient client)
         return await ReadAsync(response, responseType, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>GETs a text resource (e.g. a file blob). Returns null on 404 so callers can treat a missing side as empty.</summary>
+    public async Task<string?> GetTextOrNullAsync(string path, CancellationToken cancellationToken = default)
+    {
+        using var response = await client.GetAsync(
+            new Uri(path, UriKind.Relative), cancellationToken).ConfigureAwait(false);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        if (response.StatusCode == HttpStatusCode.NonAuthoritativeInformation)
+        {
+            throw new AdoApiException(HttpStatusCode.Unauthorized, "Azure DevOps did not accept the access token");
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new AdoApiException(response.StatusCode, $"Azure DevOps returned {(int)response.StatusCode}");
+        }
+        return body;
+    }
+
     /// <summary>Sends a pre-serialized body (e.g. a JSON Patch document) and reads a typed response.</summary>
     public async Task<TResponse> SendRawAsync<TResponse>(
         HttpMethod method,

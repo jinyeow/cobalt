@@ -3,8 +3,8 @@
 A vim-flavored terminal UI for Azure DevOps: work items, pull requests,
 reviews, and votes — without leaving your terminal.
 
-Status: **in development** (M0–M4 complete: auth, config, work items, pull
-requests). The
+Status: **in development** (M0–M5 complete: auth, config, work items, pull
+requests, diff review with line comments). The
 agreed specification lives in [docs/SPEC.md](docs/SPEC.md), the milestone plan
 in [docs/PLAN.md](docs/PLAN.md), and design decisions in
 [docs/adr/](docs/adr/).
@@ -47,4 +47,6 @@ cobalt --context oss  # launch against a named context
 `r` refresh. In a work item: `s` state · `c` comment · `e` edit description in
 `$EDITOR` · `a` assign · `t` tags. In the PR section: `Tab` cycles the review
 queue / mine / active sub-tabs; in a PR: `v` vote · `c` reply · `x` resolve
-thread · `u` reactivate · `C` complete · `A` abandon.
+thread · `u` reactivate · `C` complete · `A` abandon · `d` open diff review.
+In diff review: `Tab` switches file list / diff pane · `[`/`]` prev/next file ·
+`c` comment on the selected line.
