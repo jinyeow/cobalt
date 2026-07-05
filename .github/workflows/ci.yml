@@ -18,13 +18,24 @@ env:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    name: build-test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
       - name: Restore
         run: dotnet restore Cobalt.slnx
       - name: Build
@@ -32,4 +43,5 @@ jobs:
       - name: Test
         run: dotnet test Cobalt.slnx --no-build --configuration Release
       - name: Pack (smoke)
+        if: matrix.os == 'ubuntu-latest'
         run: dotnet pack src/Cobalt --no-build --configuration Release -o nupkg

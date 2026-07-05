@@ -56,22 +56,25 @@ In diff review: `Tab` switches file list / diff pane · `[`/`]` prev/next file �
 `c` comment on the selected line. Anywhere in a list: `yy` yanks the item's web
 URL to the clipboard · `gx` opens it in your browser.
 
-## Known limitations (v1)
+## Known limitations
 
-- Editing long text via `$EDITOR` from a detail view is wired but the terminal
-  hand-off (suspend/resume around a full-screen editor) is not yet driven — see
-  the M6 TODO in `CobaltShell`. Single-line edits work in-app.
+- Diffs colour changed *words* (intra-line) and code tokens for C#/JS-TS/JSON/
+  Python; syntax highlighting is **line-local**, so a cross-line block comment or
+  triple-quoted string is tokenised per line. Wide characters (CJK/emoji) can make
+  the full-width diff tint stop short of the row edge — cosmetic, see
+  [ADR 0010](docs/adr/0010-diff-pane-colored-listview-data-source.md).
 - Line comments anchor to the latest PR iteration only; the diff is computed
   client-side (see [ADR 0008](docs/adr/0008-client-side-diff-and-line-comments.md)).
-- Diffs colour whole added/removed lines; word-level intra-line highlighting and
-  syntax highlighting are deferred to a later release. Renames currently render
-  as a whole-file add.
-- Keybindings are fixed in v1; a remapping config is post-v1.
+- `$EDITOR` needs a real interactive terminal (it suspends Terminal.Gui and hands
+  over the tty — see [ADR 0009](docs/adr/0009-editor-suspend-resume.md)).
+- `:ctx` switching updates the status bar but does not yet reconnect the data
+  screens to the new org/project (restart with `--context` for now).
+- Keybindings are fixed; a remapping config is post-v1.
 
 ## Development
 
 ```sh
-dotnet test Cobalt.slnx      # 189 tests
+dotnet test Cobalt.slnx      # unit + fuzz + integration tests
 dotnet build Cobalt.slnx
 dotnet run --project src/Cobalt -- --help
 ```
