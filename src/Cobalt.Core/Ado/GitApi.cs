@@ -155,7 +155,17 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
         [
             .. result.ChangeEntries
                 .Where(c => c.Item?.Path is not null && !c.Item.IsFolder)
-                .Select(c => new FileChange(c.Item!.Path!, FileChange.ParseKind(c.ChangeType))),
+                .Select(c =>
+                {
+                    var path = c.Item!.Path!;
+                    var original = c.SourceServerItem ?? c.OriginalPath;
+                    // Normalize to null when it doesn't actually differ from the current path.
+                    if (string.Equals(original, path, StringComparison.Ordinal))
+                    {
+                        original = null;
+                    }
+                    return new FileChange(path, FileChange.ParseKind(c.ChangeType), original);
+                }),
         ];
     }
 

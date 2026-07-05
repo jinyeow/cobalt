@@ -1,0 +1,154 @@
+using Cobalt.Core.Text.Syntax;
+
+namespace Cobalt.Core.Tests.Text;
+
+public class SyntaxTokenizerTests
+{
+    private static void AssertPartitions(string line, IReadOnlyList<SyntaxToken> tokens)
+    {
+        var pos = 0;
+        foreach (var t in tokens)
+        {
+            Assert.Equal(pos, t.Start);
+            Assert.True(t.Length > 0, "tokens are non-empty");
+            pos += t.Length;
+        }
+        Assert.Equal(line.Length, pos);
+    }
+
+    private static SyntaxToken Find(string line, IReadOnlyList<SyntaxToken> tokens, string text) =>
+        tokens.Single(t => line.Substring(t.Start, t.Length) == text);
+
+    [Theory]
+    [InlineData("public static void Main() { return 42; }", Language.CSharp)]
+    [InlineData("const f = (a) => a + 1; // add", Language.JsTs)]
+    [InlineData("def foo(self): return None  # x", Language.Python)]
+    [InlineData("{ \"a\": [1, true, null] }", Language.Json)]
+    [InlineData("just some plain text 123", Language.None)]
+    [InlineData("   ", Language.CSharp)]
+    public void Tokens_Partition_The_Line_Exactly(string line, Language lang)
+    {
+        AssertPartitions(line, SyntaxTokenizer.Tokenize(line, lang));
+    }
+
+    [Fact]
+    public void Empty_Line_Yields_No_Tokens()
+    {
+        Assert.Empty(SyntaxTokenizer.Tokenize("", Language.CSharp));
+        Assert.Empty(SyntaxTokenizer.Tokenize("", Language.None));
+    }
+
+    [Fact]
+    public void None_Language_Is_A_Single_Plain_Token()
+    {
+        var line = "whatever goes here";
+        var tokens = SyntaxTokenizer.Tokenize(line, Language.None);
+
+        Assert.Single(tokens);
+        Assert.Equal(new SyntaxToken(0, line.Length, TokenKind.Plain), tokens[0]);
+    }
+
+    [Fact]
+    public void CSharp_Keywords_Identifiers_Punctuation()
+    {
+        const string line = "public static void Main()";
+        var tokens = SyntaxTokenizer.Tokenize(line, Language.CSharp);
+
+        Assert.Equal(TokenKind.Keyword, Find(line, tokens, "public").Kind);
+        Assert.Equal(TokenKind.Keyword, Find(line, tokens, "static").Kind);
+        Assert.Equal(TokenKind.Keyword, Find(line, tokens, "void").Kind);
+        Assert.Equal(TokenKind.Identifier, Find(line, tokens, "Main").Kind);
+        Assert.Equal(TokenKind.Punctuation, Find(line, tokens, "(").Kind);
+        Assert.Equal(TokenKind.Punctuation, Find(line, tokens, ")").Kind);
+    }
+
+    [Fact]
+    public void CSharp_String_With_Escaped_Quote()
+    {
+        // Source line: s = "a\"b";
+        const string line = "s = \"a\\\"b\";";
+        var tokens = SyntaxTokenizer.Tokenize(line, Language.CSharp);
+
+        var str = tokens.Single(t => t.Kind == TokenKind.String);
+        Assert.Equal("\"a\\\"b\"", line.Substring(str.Start, str.Length));
+    }
+
+    [Fact]
+    public void CSharp_Line_Comment_Swallows_To_Eol()
+    {
+        const string line = "x++; // trailing note";
+        var tokens = SyntaxTokenizer.Tokenize(line, Language.CSharp);
+
+        var comment = tokens.Single(t => t.Kind == TokenKind.Comment);
+        Assert.Equal("// trailing note", line.Substring(comment.Start, comment.Length));
+    }
+
+    [Fact]
+    public void CSharp_Numbers_Decimal_Hex_And_Float()
+    {
+        const string line = "a 42 0x1F 3.14";
+        var tokens = SyntaxTokenizer.Tokenize(line, Language.CSharp);
+
+        Assert.Equal(TokenKind.Number, Find(line, tokens, "42").Kind);
+        Assert.Equal(TokenKind.Number, Find(line, tokens, "0x1F").Kind);
+        Assert.Equal(TokenKind.Number, Find(line, tokens, "3.14").Kind);
+    }
+
+    [Fact]
+    public void JsTs_Const_Arrow_And_Comment()
+    {
+        const string line = "const f = () => 1; // c";
+        var tokens = SyntaxTokenizer.Tokenize(line, Language.JsTs);
+
+        Assert.Equal(TokenKind.Keyword, Find(line, tokens, "const").Kind);
+        Assert.Equal(TokenKind.Operator, Find(line, tokens, "=>").Kind);
+        Assert.Equal(TokenKind.Comment, tokens.Single(t => t.Kind == TokenKind.Comment).Kind);
+    }
+
+    [Fact]
+    public void JsTs_Template_String_To_Closing_Backtick()
+    {
+        const string line = "const s = `hi ${x}`;";
+        var tokens = SyntaxTokenizer.Tokenize(line, Language.JsTs);
+
+        var str = tokens.Single(t => t.Kind == TokenKind.String);
+        Assert.Equal("`hi ${x}`", line.Substring(str.Start, str.Length));
+    }
+
+    [Fact]
+    public void Python_Comment_Keywords_And_String()
+    {
+        const string line = "def run(self): x = 'hi'  # note";
+        var tokens = SyntaxTokenizer.Tokenize(line, Language.Python);
+
+        Assert.Equal(TokenKind.Keyword, Find(line, tokens, "def").Kind);
+        Assert.Equal(TokenKind.Keyword, Find(line, tokens, "self").Kind);
+        Assert.Equal("'hi'", line.Substring(tokens.Single(t => t.Kind == TokenKind.String).Start,
+            tokens.Single(t => t.Kind == TokenKind.String).Length));
+        Assert.Equal("# note", line.Substring(tokens.Single(t => t.Kind == TokenKind.Comment).Start,
+            tokens.Single(t => t.Kind == TokenKind.Comment).Length));
+    }
+
+    [Fact]
+    public void Python_None_Is_A_Keyword()
+    {
+        const string line = "return None";
+        var tokens = SyntaxTokenizer.Tokenize(line, Language.Python);
+
+        Assert.Equal(TokenKind.Keyword, Find(line, tokens, "None").Kind);
+    }
+
+    [Fact]
+    public void Json_Strings_And_Literals_And_Numbers()
+    {
+        const string line = "\"key\": \"value\", true, false, null, 42";
+        var tokens = SyntaxTokenizer.Tokenize(line, Language.Json);
+
+        Assert.Equal(TokenKind.String, Find(line, tokens, "\"key\"").Kind);
+        Assert.Equal(TokenKind.String, Find(line, tokens, "\"value\"").Kind);
+        Assert.Equal(TokenKind.Keyword, Find(line, tokens, "true").Kind);
+        Assert.Equal(TokenKind.Keyword, Find(line, tokens, "false").Kind);
+        Assert.Equal(TokenKind.Keyword, Find(line, tokens, "null").Kind);
+        Assert.Equal(TokenKind.Number, Find(line, tokens, "42").Kind);
+    }
+}

@@ -159,9 +159,11 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         }
 
         // Added files have no base version; deleted files have no source version.
+        // Renamed/moved files have their base blob at the old path.
+        var basePath = file.OriginalPath ?? file.Path;
         var baseText = file.ChangeType == FileChangeKind.Add
             ? ""
-            : await source.GetFileContentAsync(pr.RepositoryId, file.Path, _iteration.BaseCommitId ?? "", ct).ConfigureAwait(false);
+            : await source.GetFileContentAsync(pr.RepositoryId, basePath, _iteration.BaseCommitId ?? "", ct).ConfigureAwait(false);
         var sourceText = file.ChangeType == FileChangeKind.Delete
             ? ""
             : await source.GetFileContentAsync(pr.RepositoryId, file.Path, _iteration.SourceCommitId ?? "", ct).ConfigureAwait(false);

@@ -11,7 +11,15 @@ public enum DiffLineKind
     Removed,
 }
 
-public sealed record DiffLine(DiffLineKind Kind, int? OldLineNumber, int? NewLineNumber, string Text);
+/// <summary>A half-open character range [Start, Start+Length) within a diff line's text.</summary>
+public sealed record LineSpan(int Start, int Length);
+
+public sealed record DiffLine(
+    DiffLineKind Kind,
+    int? OldLineNumber,
+    int? NewLineNumber,
+    string Text,
+    IReadOnlyList<LineSpan>? ChangedSpans = null);
 
 public sealed record FileDiff(
     IReadOnlyList<DiffLine> Lines,
@@ -83,7 +91,57 @@ public static class DiffService
             }
         }
 
+        FillIntraLineSpans(lines);
         return new FileDiff(lines, additions, deletions, IsBinary: false, TooLarge: false);
+    }
+
+    /// <summary>
+    /// Post-processing pass (pure): for each maximal run of Removed lines
+    /// immediately followed by a run of Added lines, pair the k-th removed with
+    /// the k-th added (min of the two counts; leftovers unpaired) and fill each
+    /// side's <see cref="DiffLine.ChangedSpans"/> from the word-level diff.
+    /// </summary>
+    private static void FillIntraLineSpans(List<DiffLine> lines)
+    {
+        var i = 0;
+        while (i < lines.Count)
+        {
+            if (lines[i].Kind != DiffLineKind.Removed)
+            {
+                i++;
+                continue;
+            }
+
+            var removedStart = i;
+            while (i < lines.Count && lines[i].Kind == DiffLineKind.Removed)
+            {
+                i++;
+            }
+            var removedCount = i - removedStart;
+
+            var addedStart = i;
+            while (i < lines.Count && lines[i].Kind == DiffLineKind.Added)
+            {
+                i++;
+            }
+            var addedCount = i - addedStart;
+
+            var pairs = Math.Min(removedCount, addedCount);
+            for (var k = 0; k < pairs; k++)
+            {
+                var removed = lines[removedStart + k];
+                var added = lines[addedStart + k];
+                var (oldSpans, newSpans) = IntraLineDiff.Compute(removed.Text, added.Text);
+                if (oldSpans.Count > 0)
+                {
+                    lines[removedStart + k] = removed with { ChangedSpans = oldSpans };
+                }
+                if (newSpans.Count > 0)
+                {
+                    lines[addedStart + k] = added with { ChangedSpans = newSpans };
+                }
+            }
+        }
     }
 
     private static string TrimOneEol(string text)

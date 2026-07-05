@@ -171,6 +171,40 @@ public class PrDiffViewModelTests
     }
 
     [Fact]
+    public async Task Renamed_File_Diffs_Base_At_Old_Path()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/new.cs", FileChangeKind.Rename, "/old.cs")],
+        };
+        source.Blobs[("/old.cs", "base")] = "a\nb\n";
+        source.Blobs[("/new.cs", "src")] = "a\nB\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, vm.CurrentDiff!.Additions);
+        Assert.Equal(1, vm.CurrentDiff!.Deletions);
+    }
+
+    [Fact]
+    public async Task Rename_Without_Original_Path_Uses_New_Path()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/moved.cs", FileChangeKind.Rename)],
+        };
+        source.Blobs[("/moved.cs", "base")] = "a\nb\n";
+        source.Blobs[("/moved.cs", "src")] = "a\nB\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, vm.CurrentDiff!.Additions);
+        Assert.Equal(1, vm.CurrentDiff!.Deletions);
+    }
+
+    [Fact]
     public async Task No_Iteration_Sets_Friendly_Error()
     {
         var source = new FakeDiffSource { Iteration = null };

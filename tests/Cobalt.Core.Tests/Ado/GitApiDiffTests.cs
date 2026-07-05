@@ -72,6 +72,60 @@ public class GitApiDiffTests
     }
 
     [Fact]
+    public async Task GetIterationChanges_Maps_Rename_Source_Path()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """
+            {"changeEntries":[
+              {"changeType":"edit, rename","sourceServerItem":"/old/name.cs","item":{"path":"/new/name.cs"}}
+            ]}
+            """);
+
+        var changes = await Api(handler).GetIterationChangesAsync(
+            "repo-1", 10, iterationId: 2, TestContext.Current.CancellationToken);
+
+        Assert.Single(changes);
+        Assert.Equal("/new/name.cs", changes[0].Path);
+        Assert.Equal(FileChangeKind.Rename, changes[0].ChangeType);
+        Assert.Equal("/old/name.cs", changes[0].OriginalPath);
+    }
+
+    [Fact]
+    public async Task GetIterationChanges_Falls_Back_To_OriginalPath()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """
+            {"changeEntries":[
+              {"changeType":"rename","originalPath":"/from.cs","item":{"path":"/to.cs"}}
+            ]}
+            """);
+
+        var changes = await Api(handler).GetIterationChangesAsync(
+            "repo-1", 10, iterationId: 2, TestContext.Current.CancellationToken);
+
+        Assert.Single(changes);
+        Assert.Equal("/to.cs", changes[0].Path);
+        Assert.Equal("/from.cs", changes[0].OriginalPath);
+    }
+
+    [Fact]
+    public async Task GetIterationChanges_Non_Rename_Has_Null_OriginalPath()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """
+            {"changeEntries":[
+              {"changeType":"edit","item":{"path":"/src/a.cs"}}
+            ]}
+            """);
+
+        var changes = await Api(handler).GetIterationChangesAsync(
+            "repo-1", 10, iterationId: 2, TestContext.Current.CancellationToken);
+
+        Assert.Single(changes);
+        Assert.Null(changes[0].OriginalPath);
+    }
+
+    [Fact]
     public async Task GetFileContent_Requests_Path_At_Commit_And_Returns_Text()
     {
         var handler = new FakeHttpHandler().Respond(_ => new HttpResponseMessage(HttpStatusCode.OK)

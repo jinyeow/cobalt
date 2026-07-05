@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Cobalt.Core.Models;
 using Cobalt.Core.Text;
+using Cobalt.Core.Text.Syntax;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Editor;
 using Cobalt.Tui.ViewModels;
@@ -53,7 +54,17 @@ public sealed class DiffReviewDialog(
             Width = Dim.Fill(),
             Height = Dim.Fill(),
             CanFocus = true,
+            // The diff pane is a code view: use the code-oriented Base scheme so
+            // the theme's distinct VisualRole.Code* token foregrounds resolve
+            // (the Dialog scheme collapses them all to its Normal foreground).
+            SchemeName = "Base",
         };
+
+        // Vim command keys (q, c, j, k, …) drive this dialog, so disable ListView
+        // type-ahead search — otherwise the CollectionNavigator swallows those
+        // letters before they reach the dialog's key handler.
+        _fileList.KeystrokeNavigator = null;
+        _diffPane.KeystrokeNavigator = null;
 
         // Enter on the file list opens the highlighted file (SelectedItem is valid at that moment).
         _fileList.Accepting += (_, e) =>
@@ -103,6 +114,14 @@ public sealed class DiffReviewDialog(
                 case "c":
                     key.Handled = true;
                     _ = CommentAsync();
+                    break;
+                case "j":
+                    key.Handled = true;
+                    (_fileList.HasFocus ? _fileList : _diffPane).MoveDown(false);
+                    break;
+                case "k":
+                    key.Handled = true;
+                    (_fileList.HasFocus ? _fileList : _diffPane).MoveUp(false);
                     break;
                 default:
                     break;
@@ -208,7 +227,15 @@ public sealed class DiffReviewDialog(
             var sameFile = file?.Path == _renderedDiffPath;
             var keepLine = sameFile ? _diffPane.SelectedItem : 0;
             _renderedDiffPath = file?.Path;
-            _diffPane.SetSource(new ObservableCollection<string>(diff.Lines.Select(FormatLine)));
+
+            var language = LanguageDetector.FromPath(file?.Path ?? "");
+            var styled = diff.Lines
+                .Select(l => DiffLineStyler.Compose(
+                    l,
+                    SyntaxTokenizer.Tokenize(l.Text, language),
+                    vm.ThreadsForDiffLine(l).Count > 0))
+                .ToList();
+            _diffPane.Source = new DiffListDataSource(styled);
             if (diff.Lines.Count > 0)
             {
                 _diffPane.SelectedItem = Math.Clamp(keepLine ?? 0, 0, diff.Lines.Count - 1);
@@ -229,19 +256,5 @@ public sealed class DiffReviewDialog(
         };
         var name = f.Path.Length <= 34 ? f.Path : "…" + f.Path[^33..];
         return $"{glyph} {name}";
-    }
-
-    private string FormatLine(DiffLine line)
-    {
-        var marker = vm.ThreadsForDiffLine(line).Count > 0 ? "●" : " ";
-        var sign = line.Kind switch
-        {
-            DiffLineKind.Added => "+",
-            DiffLineKind.Removed => "-",
-            _ => " ",
-        };
-        var oldNo = line.OldLineNumber?.ToString() ?? "";
-        var newNo = line.NewLineNumber?.ToString() ?? "";
-        return $"{marker}{oldNo,4} {newNo,4} {sign}{line.Text}";
     }
 }

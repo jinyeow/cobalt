@@ -179,6 +179,8 @@ public sealed record PrChangeEntryDto
 {
     public string ChangeType { get; init; } = "";
     public GitItemDto? Item { get; init; }
+    public string? SourceServerItem { get; init; }
+    public string? OriginalPath { get; init; }
 }
 
 public sealed record GitItemDto
@@ -200,7 +202,7 @@ public enum FileChangeKind
 
 public sealed record PrIteration(int Id, string? SourceCommitId, string? TargetCommitId, string? BaseCommitId);
 
-public sealed record FileChange(string Path, FileChangeKind ChangeType)
+public sealed record FileChange(string Path, FileChangeKind ChangeType, string? OriginalPath = null)
 {
     public static FileChangeKind ParseKind(string changeType)
     {

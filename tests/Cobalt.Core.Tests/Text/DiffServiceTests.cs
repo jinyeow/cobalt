@@ -73,6 +73,52 @@ public class DiffServiceTests
     }
 
     [Fact]
+    public void Modified_Line_Fills_ChangedSpans_On_Both_Sides()
+    {
+        var diff = DiffService.Unified("var total = price * q;\n", "var total = cost * q;\n");
+
+        var removed = diff.Lines.Single(l => l.Kind == DiffLineKind.Removed);
+        var added = diff.Lines.Single(l => l.Kind == DiffLineKind.Added);
+
+        Assert.NotNull(removed.ChangedSpans);
+        Assert.Single(removed.ChangedSpans!);
+        var rs = removed.ChangedSpans![0];
+        Assert.Equal("price", removed.Text.Substring(rs.Start, rs.Length));
+
+        Assert.NotNull(added.ChangedSpans);
+        Assert.Single(added.ChangedSpans!);
+        var as0 = added.ChangedSpans![0];
+        Assert.Equal("cost", added.Text.Substring(as0.Start, as0.Length));
+    }
+
+    [Fact]
+    public void Pure_Insertion_Has_No_ChangedSpans()
+    {
+        var diff = DiffService.Unified("a\nc\n", "a\nb\nc\n");
+
+        var added = diff.Lines.Single(l => l.Kind == DiffLineKind.Added);
+        Assert.True(added.ChangedSpans is null || added.ChangedSpans.Count == 0);
+    }
+
+    [Fact]
+    public void Two_Removed_One_Added_Pairs_Only_The_First_Removed()
+    {
+        var diff = DiffService.Unified("price one\nprice two\n", "cost one\n");
+
+        var removed = diff.Lines.Where(l => l.Kind == DiffLineKind.Removed).ToList();
+        Assert.Equal(2, removed.Count);
+
+        // First removed pairs with the single added line and gets a word span.
+        var first = removed[0].ChangedSpans;
+        Assert.NotNull(first);
+        Assert.NotEmpty(first);
+
+        // Second removed line is unpaired: no intra-line info.
+        var second = removed[1].ChangedSpans;
+        Assert.True(second is null || second.Count == 0);
+    }
+
+    [Fact]
     public void Large_File_Over_Limit_Is_Skipped()
     {
         var big = string.Concat(Enumerable.Repeat("line\n", 60_000));
