@@ -144,6 +144,15 @@ public sealed class CobaltShell : Window
             return;
         }
 
+        // Vim movement: the router matched and consumed the key, so forward it to the
+        // active list (ListView only navigates on arrow keys natively).
+        if (ListNavigation.Applies(command))
+        {
+            _workItemList?.Navigate(command);
+            _prList?.Navigate(command);
+            return;
+        }
+
         if (_vm.HandleCommand(command))
         {
             return;

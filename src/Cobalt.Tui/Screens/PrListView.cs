@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Cobalt.Core.Models;
+using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
 using Terminal.Gui.ViewBase;
@@ -34,6 +35,8 @@ public sealed class PrListView : View
             Height = Dim.Fill(),
             CanFocus = true,
         };
+        // Disable type-ahead search so vim keys (j/k/g/G/…) bubble to the shell router.
+        _list.KeystrokeNavigator = null;
         Add(_header, _list);
 
         _vm.Changed += OnVmChanged;
@@ -56,6 +59,9 @@ public sealed class PrListView : View
             ItemActivated?.Invoke(pr.PullRequestId);
         }
     }
+
+    /// <summary>Vim movement forwarded from the shell router to the bound ListView.</summary>
+    public void Navigate(AppCommand command) => ListNavigation.Apply(_list, command);
 
     public PullRequest? SelectedPr
     {

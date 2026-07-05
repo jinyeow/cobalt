@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Cobalt.Core.Models;
+using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
 using Terminal.Gui.ViewBase;
@@ -37,6 +38,9 @@ public sealed class WorkItemListView : View
             Height = Dim.Fill(1),
             CanFocus = true,
         };
+        // Disable type-ahead search: it consumes j/k/g/G and the shell's vim keys
+        // before they can bubble up to the router. Navigation goes through the shell.
+        _list.KeystrokeNavigator = null;
         _filterLabel = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = 1, Text = "/", Visible = false };
         _filter = new TextField { X = 1, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Visible = false };
 
@@ -110,6 +114,9 @@ public sealed class WorkItemListView : View
             ItemActivated?.Invoke(item.Id);
         }
     }
+
+    /// <summary>Vim movement forwarded from the shell router to the bound ListView.</summary>
+    public void Navigate(AppCommand command) => ListNavigation.Apply(_list, command);
 
     public long? SelectedId
     {
