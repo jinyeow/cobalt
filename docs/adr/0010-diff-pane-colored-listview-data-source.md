@@ -105,3 +105,22 @@ assertions):
   dialog. As with ADR 0009, the harness must answer the terminal's size/DA/color
   queries or Terminal.Gui draws empty frames — a property of the emulator, not the
   code.
+
+## Known limitations
+
+- **Wide characters (CJK, emoji).** `DiffListDataSource` computes column offsets,
+  clipping, padding, and `MaxItemLength` in UTF-16 char units, while `AddStr`
+  advances by display cells (a wide rune spans two). On a diff line containing a
+  double-width character the full-width diff-state tint can stop short of the row
+  edge and horizontal scroll bounds are slightly off. No crash — the run partition
+  is still gapless in code units, so `Substring`/`Render` never throw (fuzz-verified
+  over 200k styler cases). Source is overwhelmingly ASCII, so impact is cosmetic;
+  a cell-space rework (rune-width accounting) is a fast follow.
+- **Surrogate pairs.** Word-diff and token boundaries index by UTF-16 code unit, so
+  a boundary can fall between an emoji's surrogate halves and render `U+FFFD` on
+  that slice. Rare in code; deferred with the wide-char work.
+- Syntax highlighting is line-local (see above): cross-line block comments and
+  triple-quoted/verbatim strings tokenize per line.
+
+These are the only behaviours the invariant fuzzing (1M tokenizer, 200k styler,
+500k intra-line-diff cases) surfaced; none can throw or corrupt the run partition.

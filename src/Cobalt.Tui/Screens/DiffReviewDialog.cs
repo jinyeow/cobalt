@@ -62,7 +62,8 @@ public sealed class DiffReviewDialog(
 
         // Vim command keys (q, c, j, k, …) drive this dialog, so disable ListView
         // type-ahead search — otherwise the CollectionNavigator swallows those
-        // letters before they reach the dialog's key handler.
+        // letters before they reach the dialog's key handler. Tradeoff: no
+        // type-a-filename-to-jump in the file list; j/k and [ ] cover navigation.
         _fileList.KeystrokeNavigator = null;
         _diffPane.KeystrokeNavigator = null;
 

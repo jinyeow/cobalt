@@ -35,13 +35,21 @@ public static class IntraLineDiff
             {
                 var start = oldOffsets[block.DeleteStartA];
                 var end = oldOffsets[block.DeleteStartA + block.DeleteCountA];
-                oldSpans.Add(new LineSpan(start, end - start));
+                // WordChunker can emit empty pieces (e.g. on whitespace-only lines);
+                // skip the resulting zero-length spans so ChangedSpans stays well-formed.
+                if (end > start)
+                {
+                    oldSpans.Add(new LineSpan(start, end - start));
+                }
             }
             if (block.InsertCountB > 0)
             {
                 var start = newOffsets[block.InsertStartB];
                 var end = newOffsets[block.InsertStartB + block.InsertCountB];
-                newSpans.Add(new LineSpan(start, end - start));
+                if (end > start)
+                {
+                    newSpans.Add(new LineSpan(start, end - start));
+                }
             }
         }
 
