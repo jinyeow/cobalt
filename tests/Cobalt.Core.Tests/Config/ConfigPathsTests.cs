@@ -12,7 +12,9 @@ public class ConfigPathsTests
             homeDirectory: "/home/u",
             isWindows: false);
 
-        Assert.Equal("/custom/xdg/cobalt/config.toml", path);
+        // ConfigPaths uses Path.Combine, so the separator is the host OS's ('\' on
+        // Windows CI). Build the expected value the same way to stay OS-agnostic.
+        Assert.Equal(Path.Combine("/custom/xdg", "cobalt", "config.toml"), path);
     }
 
     [Fact]
@@ -20,7 +22,7 @@ public class ConfigPathsTests
     {
         var path = ConfigPaths.ConfigFile(env: _ => null, homeDirectory: "/home/u", isWindows: false);
 
-        Assert.Equal("/home/u/.config/cobalt/config.toml", path);
+        Assert.Equal(Path.Combine("/home/u", ".config", "cobalt", "config.toml"), path);
     }
 
     [Fact]
