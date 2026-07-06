@@ -38,7 +38,7 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
     public event Action<PrScope>? ScopeChangeRequested;
 
     public string StatusLine =>
-        $" ctx:{ContextName}  scope:{ScopeName(Scope)}" + (UserName is null ? "" : $"  {UserName}");
+        $" context:{ContextName}  scope:{ScopeName(Scope)}" + (UserName is null ? "" : $"  {UserName}");
 
     private static string ScopeName(PrScope scope) => scope == PrScope.Org ? "org" : "project";
 
@@ -63,6 +63,11 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
                 HelpRequested?.Invoke();
                 return true;
             case AppCommand.Quit:
+                QuitRequested?.Invoke();
+                return true;
+            case AppCommand.Back:
+                // From the top-level lists there's nothing to close, so `q` exits the app
+                // (matches the user's expectation; `:q` still works too).
                 QuitRequested?.Invoke();
                 return true;
             default:

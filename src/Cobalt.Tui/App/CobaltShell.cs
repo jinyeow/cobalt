@@ -185,9 +185,6 @@ public sealed class CobaltShell : Window
             case AppCommand.CommandPalette:
                 OpenPalette();
                 break;
-            case AppCommand.Back:
-                _vm.Messages.Info("nothing to close — quit with :q");
-                break;
             case AppCommand.Refresh:
                 _workItemList?.OnRefresh();
                 _prList?.Load();

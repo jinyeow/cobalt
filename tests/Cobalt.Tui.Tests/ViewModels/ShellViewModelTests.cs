@@ -59,6 +59,28 @@ public class ShellViewModelTests
     }
 
     [Fact]
+    public void Back_Command_Quits_From_The_Main_View()
+    {
+        var vm = Vm();
+        var quit = false;
+        vm.QuitRequested += () => quit = true;
+
+        var handled = vm.HandleCommand(AppCommand.Back);
+
+        Assert.True(handled);
+        Assert.True(quit);
+    }
+
+    [Fact]
+    public void StatusLine_Shows_Full_Word_Context()
+    {
+        var vm = Vm();
+
+        Assert.Contains("context:", vm.StatusLine);
+        Assert.DoesNotContain("ctx:", vm.StatusLine);
+    }
+
+    [Fact]
     public void Palette_Ctx_Switches_To_Known_Context()
     {
         var vm = Vm();

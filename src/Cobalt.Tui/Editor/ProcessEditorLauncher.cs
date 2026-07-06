@@ -42,12 +42,14 @@ public sealed class ProcessEditorLauncher(
             try
             {
                 process = Process.Start(info)
-                    ?? throw new EditorLaunchException($"could not start editor '{parts[0]}'");
+                    ?? throw new EditorLaunchException(
+                        $"could not start editor '{parts[0]}' — set $VISUAL or $EDITOR to your editor");
             }
             catch (Win32Exception ex)
             {
                 throw new EditorLaunchException(
-                    $"could not start editor '{parts[0]}' — check $VISUAL/$EDITOR", ex);
+                    $"could not start editor '{parts[0]}' — set $VISUAL or $EDITOR to your editor " +
+                    "(e.g. $env:EDITOR='nvim' on Windows, export EDITOR=nvim elsewhere)", ex);
             }
             using (process)
             {
