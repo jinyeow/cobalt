@@ -86,6 +86,7 @@ public sealed class WorkItem(long id, IReadOnlyDictionary<string, JsonElement> f
     public string WorkItemType => GetString("System.WorkItemType");
     public string IterationPath => GetString("System.IterationPath");
     public string AreaPath => GetString("System.AreaPath");
+    public string TeamProject => GetString("System.TeamProject");
     public string? AssignedToDisplayName => GetIdentityDisplayName("System.AssignedTo");
     public string? AssignedToUniqueName => GetIdentityUniqueName("System.AssignedTo");
     public string DescriptionHtml => GetString("System.Description");

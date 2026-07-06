@@ -59,6 +59,38 @@ Two facts about the Azure DevOps REST surface shaped the design:
   adapter's mutable `Scope`, and reloads the list. The active scope shows in the
   status line (`scope:org` / `scope:project`).
 
+## Update — work items honor scope, plus `:done` / `:project` (P2)
+
+The same `:scope` now drives the **work-item** list, not just PRs:
+
+- **Org-wide WIQL uses the project-less route.** `POST _apis/wit/wiql` (no project
+  segment) runs the query across every project; `{project}/_apis/wit/wiql` narrows to
+  one. `WorkItemsApi.QueryMyWorkItemsAsync` takes a `PrScope` and drops the project
+  prefix under `Org` (and threads the same decision into `workitemsbatch`, which is
+  likewise org-capable). The WIQL two-step (ids → `workitemsbatch`) is documented; the
+  Query By Wiql REST API accepts both the org- and project-level route. A
+  `[System.TeamProject] = '…'` clause narrows within either route, so an explicit
+  `:project` filter forces the org route even under project scope (so it can reach a
+  project other than the context's). `WorkItem` now surfaces `TeamProject` and the
+  list request asks for `System.TeamProject`.
+- **`WorkItemQuery` + `WiqlBuilder` (pure).** The WIQL is built by a pure
+  `WiqlBuilder.MyItems(WorkItemQuery)` (string-exact unit tested), keeping the
+  route/HTTP concerns in `WorkItemsApi`. `WorkItemQuery(IncludeCompleted, Project)`
+  carries the two tunables.
+- **`:done` (server-side) and `:project` (server + client).** `:done show|hide`
+  toggles `IncludeCompleted`; the default excludes
+  `Closed/Done/Completed/Resolved/Removed` (`Resolved` was previously missing from
+  the WIQL). Because the client can only narrow rows it already fetched,
+  hide-completed must stay WIQL-side. `:project NAME` narrows the work-item list
+  server-side (`[System.TeamProject]`) and the PR list client-side (on
+  `PullRequest.ProjectName`, mirroring the existing `RepositoryFilter`). Both flow
+  through `ShellViewModel` events (`DoneFilterChanged`, `ProjectFilterChanged`) like
+  `:scope`.
+- **Risk: the org-wide *WIQL/workitemsbatch* route without a project segment is
+  validated only by URL/body shape here** (the hand-rolled client can unit-test the
+  request, not a live org). It is implemented to the documented shape and flagged for
+  UAT against a real org, same posture as the org PR-list route above.
+
 ## Consequences
 
 - The optional `project` parameters keep every existing `GitApi` construction and

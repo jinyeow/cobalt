@@ -1,13 +1,18 @@
 using Cobalt.Core.Ado;
+using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 
 namespace Cobalt.Tui.ViewModels;
 
 /// <summary>Adapts the transport-level <see cref="WorkItemsApi"/> to the view-model interfaces.</summary>
-public sealed class WorkItemStoreAdapter(WorkItemsApi api) : IWorkItemSource, IWorkItemStore
+public sealed class WorkItemStoreAdapter(WorkItemsApi api, PrScope initialScope = PrScope.Org)
+    : IWorkItemSource, IWorkItemStore
 {
-    public Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(CancellationToken ct) =>
-        api.QueryMyWorkItemsAsync(ct);
+    /// <summary>The active list breadth (org = all projects, project = the context project); flipped by <c>:scope</c>.</summary>
+    public PrScope Scope { get; set; } = initialScope;
+
+    public Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(WorkItemQuery query, CancellationToken ct) =>
+        api.QueryMyWorkItemsAsync(query, Scope, ct);
 
     public Task<WorkItem> GetWorkItemAsync(long id, CancellationToken ct) =>
         api.GetWorkItemAsync(id, ct);

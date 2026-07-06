@@ -33,10 +33,21 @@ project = "YOUR_PROJECT"
                        # or "project" (only this project). Toggle live with :scope.
 ```
 
-Pull-request lists default to the **whole organization**. Set `pr_scope =
+Both the pull-request and work-item lists default to the **whole organization**
+(org scope shows work items assigned to you across every project). Set `pr_scope =
 "project"` to start focused on one project, or flip either way at runtime with
 `:scope org` / `:scope project` (bare `:scope` shows the current value). The
 active scope appears in the status line.
+
+Two more runtime filters narrow the lists:
+
+- `:done show` / `:done hide` reveals or hides completed work items (states
+  `Closed`, `Done`, `Completed`, `Resolved`, `Removed`); the default hides them.
+  Bare `:done` reports the current setting. This is a server-side WIQL change.
+- `:project NAME` narrows both lists to a single project (server-side for work
+  items, client-side for PRs); bare `:project` clears an active filter or reports
+  that none is set. Active `:done` / `:project` filters show in the work-item
+  list header. The `/` substring filter still composes on top.
 
 ## Sign in
 
@@ -55,7 +66,8 @@ cobalt --context oss  # launch against a named context
 `j/k` move · `gg`/`G` top/bottom · `Ctrl-d`/`Ctrl-u` half-page · `/` filter ·
 `Enter`/`o` open · `gt`/`gT` next/prev section · `g1`/`g2` jump to Work Items /
 Pull Requests · `Tab` next tab · `:` command palette
-(`:q` quit, `:ctx NAME` switch context, `:scope org|project` PR breadth,
+(`:q` quit, `:ctx NAME` switch context, `:scope org|project` list breadth,
+`:done show|hide` completed work items, `:project NAME` narrow to one project,
 `:help`, `:messages`) · `?` help ·
 `r` refresh. On a work item (the highlighted list row or its detail): `s` state ·
 `c` comment · `a` assign · `t` tags; the detail additionally has `e` edit

@@ -81,6 +81,12 @@ public sealed class WorkItemListView : View
 
     public void OnRefresh() => Load();
 
+    /// <summary>Toggles the server-side hide-completed filter; the view-model re-queries.</summary>
+    public void SetIncludeCompleted(bool include) => _vm.IncludeCompleted = include;
+
+    /// <summary>Sets the server-side single-project narrowing (null clears it); the view-model re-queries.</summary>
+    public void SetProjectFilter(string? project) => _vm.ProjectFilter = project;
+
     private void OnVmChanged()
     {
         if (_disposed)
@@ -175,7 +181,16 @@ public sealed class WorkItemListView : View
         }
         else
         {
-            _header.Text = $" my work items ({_vm.Rows.Count})";
+            var suffix = "";
+            if (!_vm.IncludeCompleted)
+            {
+                suffix += " · hiding done";
+            }
+            if (_vm.ProjectFilter is { } project)
+            {
+                suffix += $" · project:{project}";
+            }
+            _header.Text = $" my work items ({_vm.Rows.Count}){suffix}";
         }
 
         var width = _list.Viewport.Width;

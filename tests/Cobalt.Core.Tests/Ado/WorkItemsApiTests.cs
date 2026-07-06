@@ -85,6 +85,89 @@ public class WorkItemsApiTests : IDisposable
         $"{{\"id\":{id},\"fields\":{{\"System.Title\":\"item {id}\",\"System.State\":\"New\",\"System.WorkItemType\":\"Task\"}}}}";
 
     [Fact]
+    public async Task QueryMyWorkItems_Project_Scope_Uses_Project_Route_For_Wiql_And_Batch()
+    {
+        var handler = new FakeHttpHandler()
+            .Respond(HttpStatusCode.OK, """{"workItems":[{"id":42}]}""")
+            .Respond(HttpStatusCode.OK,
+                """{"value":[{"id":42,"fields":{"System.Title":"t","System.State":"Active","System.WorkItemType":"Bug"}}]}""");
+
+        await Api(handler).QueryMyWorkItemsAsync(
+            new WorkItemQuery(), PrScope.Project, TestContext.Current.CancellationToken);
+
+        Assert.Contains("My%20Project/_apis/wit/wiql", handler.Requests[0].RequestUri!.AbsoluteUri);
+        Assert.Contains("My%20Project/_apis/wit/workitemsbatch", handler.Requests[1].RequestUri!.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task QueryMyWorkItems_Org_Scope_Uses_Org_Route_For_Wiql_And_Batch()
+    {
+        var handler = new FakeHttpHandler()
+            .Respond(HttpStatusCode.OK, """{"workItems":[{"id":42}]}""")
+            .Respond(HttpStatusCode.OK,
+                """{"value":[{"id":42,"fields":{"System.Title":"t","System.State":"Active","System.WorkItemType":"Bug"}}]}""");
+
+        await Api(handler).QueryMyWorkItemsAsync(
+            new WorkItemQuery(), PrScope.Org, TestContext.Current.CancellationToken);
+
+        // Org scope drops the project segment entirely for both routes.
+        var wiql = handler.Requests[0].RequestUri!.AbsoluteUri;
+        var batch = handler.Requests[1].RequestUri!.AbsoluteUri;
+        Assert.Contains("/_apis/wit/wiql", wiql);
+        Assert.DoesNotContain("My%20Project", wiql);
+        Assert.Contains("/_apis/wit/workitemsbatch", batch);
+        Assert.DoesNotContain("My%20Project", batch);
+    }
+
+    [Fact]
+    public async Task QueryMyWorkItems_Project_Filter_Forces_Org_Route_And_Wiql_Clause()
+    {
+        var handler = new FakeHttpHandler()
+            .Respond(HttpStatusCode.OK, """{"workItems":[{"id":42}]}""")
+            .Respond(HttpStatusCode.OK,
+                """{"value":[{"id":42,"fields":{"System.Title":"t","System.State":"Active","System.WorkItemType":"Bug"}}]}""");
+
+        // Project-scoped but filtering to a *different* project must use the org route so
+        // the [System.TeamProject] clause can reach across projects.
+        await Api(handler).QueryMyWorkItemsAsync(
+            new WorkItemQuery(Project: "Fabrikam"), PrScope.Project, TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("My%20Project", handler.Requests[0].RequestUri!.AbsoluteUri);
+        // The JSON encoder escapes the single quotes around the project name, so match the
+        // stable identifiers instead of the quoted literal.
+        Assert.Contains("System.TeamProject", handler.RequestBodies[0]);
+        Assert.Contains("Fabrikam", handler.RequestBodies[0]);
+    }
+
+    [Fact]
+    public async Task QueryMyWorkItems_IncludeCompleted_Sends_Body_Without_State_Clause()
+    {
+        var handler = new FakeHttpHandler()
+            .Respond(HttpStatusCode.OK, """{"workItems":[]}""");
+
+        await Api(handler).QueryMyWorkItemsAsync(
+            new WorkItemQuery(IncludeCompleted: true), PrScope.Org, TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("System.State", handler.RequestBodies[0]);
+        Assert.Contains("@Me", handler.RequestBodies[0]);
+    }
+
+    [Fact]
+    public async Task QueryMyWorkItems_ListFields_Request_Includes_TeamProject()
+    {
+        var handler = new FakeHttpHandler()
+            .Respond(HttpStatusCode.OK, """{"workItems":[{"id":42}]}""")
+            .Respond(HttpStatusCode.OK,
+                """{"value":[{"id":42,"fields":{"System.Title":"t","System.State":"Active","System.WorkItemType":"Bug","System.TeamProject":"Fabrikam"}}]}""");
+
+        var items = await Api(handler).QueryMyWorkItemsAsync(
+            new WorkItemQuery(), PrScope.Org, TestContext.Current.CancellationToken);
+
+        Assert.Contains("System.TeamProject", handler.RequestBodies[1]); // batch fields list
+        Assert.Equal("Fabrikam", items[0].TeamProject);
+    }
+
+    [Fact]
     public async Task QueryMyWorkItems_Empty_Skips_Batch_Call()
     {
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"workItems":[]}""");

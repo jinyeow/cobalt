@@ -34,7 +34,7 @@ public static class CobaltTuiApp
             [.. config.Contexts.Keys.Order(StringComparer.Ordinal)], context.Name, context.PrScope);
 
         using var connection = AdoConnection.Create(context, tokens);
-        var workItems = new WorkItemStoreAdapter(new WorkItemsApi(connection.Http, context));
+        var workItems = new WorkItemStoreAdapter(new WorkItemsApi(connection.Http, context), context.PrScope);
 
         // Resolve the signed-in user once and share it: the status bar and the PR
         // reviewer/creator filters both consume this single cached call.

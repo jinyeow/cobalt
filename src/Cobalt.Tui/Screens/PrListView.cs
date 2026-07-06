@@ -69,6 +69,9 @@ public sealed class PrListView : View
 
     public void NextTab() => _ = Observe(_vm.NextTabAsync(CycleLoadToken()));
 
+    /// <summary>Applies the client-side project narrowing to the already-loaded rows (null clears it).</summary>
+    public void SetProjectFilter(string? project) => _vm.ProjectFilter = project ?? "";
+
     public void PrevTab() => _ = Observe(_vm.PrevTabAsync(CycleLoadToken()));
 
     /// <summary>

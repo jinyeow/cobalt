@@ -72,7 +72,7 @@ public class ListSnapBackTests
 
     private sealed class FakeWiSource(IReadOnlyList<WorkItem> items) : IWorkItemSource
     {
-        public Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(CancellationToken ct) =>
+        public Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(Cobalt.Core.Ado.WorkItemQuery query, CancellationToken ct) =>
             Task.FromResult(items);
     }
 

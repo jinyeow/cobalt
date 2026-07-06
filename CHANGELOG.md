@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Added
+- **Structured work-item filters.** The work-item list now follows the org/project
+  `:scope` like the PR list — org scope shows items assigned to you across every
+  project, project scope only the context project. Two new palette commands narrow
+  the lists: `:done show|hide` reveals/hides completed work items (states `Closed`,
+  `Done`, `Completed`, `Resolved`, `Removed` — default hides, and `Resolved` is now
+  in the excluded set), a server-side WIQL change; and `:project NAME` narrows both
+  lists to one project (server-side WIQL `[System.TeamProject]` for work items,
+  client-side on `ProjectName` for PRs), with bare `:project` clearing/reporting.
+  Active filters show in the work-item header (`my work items (12) · hiding done ·
+  project:Fabrikam`); the `/` substring filter composes on top. Org-wide work-item
+  querying drops the project segment from the `wiql`/`workitemsbatch` routes (see
+  [ADR 0011](docs/adr/0011-cross-project-org-pr-scope.md)).
 - **Vim count prefixes.** Motions now take a numeric count everywhere: `5j` moves down
   five rows, `10G` jumps to line 10, `3]` advances three files in diff review, and a
   count multiplies `Ctrl-d`/`Ctrl-u`. A bare `0` stays the line-start motion, not a

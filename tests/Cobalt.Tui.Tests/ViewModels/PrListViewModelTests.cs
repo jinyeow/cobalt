@@ -5,8 +5,8 @@ namespace Cobalt.Tui.Tests.ViewModels;
 
 public class PrListViewModelTests
 {
-    private static PullRequest Pr(int id, string title, string repo = "web") =>
-        new(id, title, null, "active", false, "feature", "main", "succeeded", "Jin", "r1", repo, [], [], "abc123");
+    private static PullRequest Pr(int id, string title, string repo = "web", string project = "Fabrikam") =>
+        new(id, title, null, "active", false, "feature", "main", "succeeded", "Jin", "r1", repo, [], [], "abc123", project);
 
     private sealed class FakeSource : IPullRequestSource
     {
@@ -197,6 +197,41 @@ public class PrListViewModelTests
         var vm = new PrListViewModel(source);
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
+        vm.RepositoryFilter = "api";
+
+        Assert.Single(vm.Rows);
+        Assert.Equal(2, vm.Rows[0].PullRequestId);
+    }
+
+    [Fact]
+    public async Task ProjectFilter_Narrows_Rows_By_Project_Name()
+    {
+        var source = new FakeSource();
+        source.ByFilter[PrListFilter.ReviewQueue] =
+            [Pr(1, "a", "web", "Fabrikam"), Pr(2, "b", "api", "Contoso")];
+        var vm = new PrListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.ProjectFilter = "Contoso";
+
+        Assert.Single(vm.Rows);
+        Assert.Equal(2, vm.Rows[0].PullRequestId);
+    }
+
+    [Fact]
+    public async Task ProjectFilter_And_RepoFilter_Compose()
+    {
+        var source = new FakeSource();
+        source.ByFilter[PrListFilter.ReviewQueue] =
+        [
+            Pr(1, "a", "web", "Fabrikam"),
+            Pr(2, "b", "api", "Fabrikam"),
+            Pr(3, "c", "api", "Contoso"),
+        ];
+        var vm = new PrListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.ProjectFilter = "Fabrikam";
         vm.RepositoryFilter = "api";
 
         Assert.Single(vm.Rows);

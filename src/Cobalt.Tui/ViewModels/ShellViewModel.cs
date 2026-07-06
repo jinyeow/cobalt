@@ -25,6 +25,12 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
     /// <summary>The active PR-list breadth, shown in the status line and flipped by <c>:scope</c>.</summary>
     public PrScope Scope { get; private set; } = initialScope;
 
+    /// <summary>Whether the work-item list shows completed states; default hides them (<c>:done</c>).</summary>
+    public bool IncludeCompletedWorkItems { get; private set; }
+
+    /// <summary>Active single-project narrowing for both lists, or null for all projects (<c>:project</c>).</summary>
+    public string? ProjectFilter { get; private set; }
+
     public event Action? SectionChanged;
     public event Action? QuitRequested;
     public event Action? HelpRequested;
@@ -34,8 +40,14 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
     /// <summary>Raised with a validated context name; the shell performs the actual reconnect.</summary>
     public event Action<string>? ContextSwitchRequested;
 
-    /// <summary>Raised with the new PR scope; the shell repoints the adapter and reloads the list.</summary>
+    /// <summary>Raised with the new PR scope; the shell repoints the adapters and reloads the lists.</summary>
     public event Action<PrScope>? ScopeChangeRequested;
+
+    /// <summary>Raised with whether completed items are now included; the shell reloads the work-item list.</summary>
+    public event Action<bool>? DoneFilterChanged;
+
+    /// <summary>Raised with the new project narrowing (null clears it); the shell reloads both lists.</summary>
+    public event Action<string?>? ProjectFilterChanged;
 
     public string StatusLine =>
         $" context:{ContextName}  scope:{ScopeName(Scope)}" + (UserName is null ? "" : $"  {UserName}");
@@ -105,6 +117,12 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
             case PaletteActionKind.SetScope:
                 SetScope(action.Argument);
                 break;
+            case PaletteActionKind.ToggleDone:
+                SetDoneFilter(action.Argument);
+                break;
+            case PaletteActionKind.SetProjectFilter:
+                SetProjectFilter(action.Argument);
+                break;
             case PaletteActionKind.Unknown:
                 Messages.Error(action.Argument);
                 break;
@@ -140,6 +158,61 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
                 Messages.Error($"unknown scope '{argument}' (use: org or project)");
                 break;
         }
+    }
+
+    private static string DoneStateName(bool includeCompleted) => includeCompleted ? "showing done" : "hiding done";
+
+    private void SetDoneFilter(string argument)
+    {
+        // Bare `:done` just reports current state; show|hide are the explicit toggles.
+        if (argument.Length == 0)
+        {
+            Messages.Info($"work items: {DoneStateName(IncludeCompletedWorkItems)} (toggle with :done show|hide)");
+            return;
+        }
+        switch (argument.ToLowerInvariant())
+        {
+            case "show":
+            case "hide":
+                var include = argument.Equals("show", StringComparison.OrdinalIgnoreCase);
+                if (include == IncludeCompletedWorkItems)
+                {
+                    Messages.Info($"work items already {DoneStateName(IncludeCompletedWorkItems)}");
+                    return;
+                }
+                IncludeCompletedWorkItems = include;
+                Messages.Info($"work items: {DoneStateName(IncludeCompletedWorkItems)}");
+                DoneFilterChanged?.Invoke(IncludeCompletedWorkItems);
+                break;
+            default:
+                Messages.Error($"unknown :done option '{argument}' (use: show or hide)");
+                break;
+        }
+    }
+
+    private void SetProjectFilter(string argument)
+    {
+        // Bare `:project` clears an active filter, or reports that none is set.
+        if (argument.Length == 0)
+        {
+            if (ProjectFilter is null)
+            {
+                Messages.Info("no project filter (set with :project NAME)");
+                return;
+            }
+            ProjectFilter = null;
+            Messages.Info("project filter cleared");
+            ProjectFilterChanged?.Invoke(null);
+            return;
+        }
+        if (string.Equals(ProjectFilter, argument, StringComparison.Ordinal))
+        {
+            Messages.Info($"project filter already '{argument}'");
+            return;
+        }
+        ProjectFilter = argument;
+        Messages.Info($"project filter: {argument}");
+        ProjectFilterChanged?.Invoke(argument);
     }
 
     public void OnContextSwitched(string contextName, string? userName)

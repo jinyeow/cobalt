@@ -176,4 +176,105 @@ public class ShellViewModelTests
         Assert.Equal(MessageLevel.Error, vm.Messages.Current?.Level);
         Assert.Equal(PrScope.Org, vm.Scope);
     }
+
+    [Fact]
+    public void Default_Hides_Completed_Work_Items()
+    {
+        var vm = Vm();
+
+        Assert.False(vm.IncludeCompletedWorkItems);
+    }
+
+    [Fact]
+    public void Palette_Done_Show_Reveals_Completed_And_Raises_Event()
+    {
+        var vm = Vm();
+        bool? raised = null;
+        vm.DoneFilterChanged += include => raised = include;
+
+        vm.HandlePaletteInput("done show");
+
+        Assert.True(vm.IncludeCompletedWorkItems);
+        Assert.True(raised);
+    }
+
+    [Fact]
+    public void Palette_Done_Hide_Hides_Completed_And_Raises_Event()
+    {
+        var vm = Vm();
+        vm.HandlePaletteInput("done show");
+        bool? raised = null;
+        vm.DoneFilterChanged += include => raised = include;
+
+        vm.HandlePaletteInput("done hide");
+
+        Assert.False(vm.IncludeCompletedWorkItems);
+        Assert.False(raised);
+    }
+
+    [Fact]
+    public void Bare_Palette_Done_Reports_Current_Without_Changing_Or_Raising()
+    {
+        var vm = Vm();
+        var raised = false;
+        vm.DoneFilterChanged += _ => raised = true;
+
+        vm.HandlePaletteInput("done");
+
+        Assert.False(raised);
+        Assert.False(vm.IncludeCompletedWorkItems);
+        Assert.NotNull(vm.Messages.Current);
+    }
+
+    [Fact]
+    public void Palette_Done_Invalid_Value_Logs_Error()
+    {
+        var vm = Vm();
+
+        vm.HandlePaletteInput("done maybe");
+
+        Assert.Equal(MessageLevel.Error, vm.Messages.Current?.Level);
+        Assert.False(vm.IncludeCompletedWorkItems);
+    }
+
+    [Fact]
+    public void Palette_Project_Name_Sets_Filter_And_Raises_Event()
+    {
+        var vm = Vm();
+        string? raised = "unset";
+        vm.ProjectFilterChanged += p => raised = p;
+
+        vm.HandlePaletteInput("project Fabrikam");
+
+        Assert.Equal("Fabrikam", vm.ProjectFilter);
+        Assert.Equal("Fabrikam", raised);
+    }
+
+    [Fact]
+    public void Bare_Palette_Project_Clears_Active_Filter_And_Raises_Null()
+    {
+        var vm = Vm();
+        vm.HandlePaletteInput("project Fabrikam");
+        string? raised = "unset";
+        vm.ProjectFilterChanged += p => raised = p;
+
+        vm.HandlePaletteInput("project");
+
+        Assert.Null(vm.ProjectFilter);
+        Assert.Null(raised);
+    }
+
+    [Fact]
+    public void Bare_Palette_Project_With_No_Filter_Reports_Without_Raising()
+    {
+        var vm = Vm();
+        var raised = false;
+        vm.ProjectFilterChanged += _ => raised = true;
+
+        vm.HandlePaletteInput("project");
+
+        Assert.False(raised);
+        Assert.Null(vm.ProjectFilter);
+        Assert.NotNull(vm.Messages.Current);
+    }
 }

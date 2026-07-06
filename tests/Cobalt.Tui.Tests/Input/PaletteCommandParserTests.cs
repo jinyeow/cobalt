@@ -69,4 +69,34 @@ public class PaletteCommandParserTests
         Assert.Equal(PaletteActionKind.SetScope, action.Kind);
         Assert.Equal("", action.Argument);
     }
+
+    [Theory]
+    [InlineData("done", "")]
+    [InlineData("done show", "show")]
+    [InlineData("done hide", "hide")]
+    public void Done_Forms_Parse_As_ToggleDone(string input, string expectedArg)
+    {
+        var action = PaletteCommandParser.Parse(input);
+
+        Assert.Equal(PaletteActionKind.ToggleDone, action.Kind);
+        Assert.Equal(expectedArg, action.Argument);
+    }
+
+    [Fact]
+    public void Project_With_Name_Sets_Project_Filter()
+    {
+        var action = PaletteCommandParser.Parse("project Fabrikam");
+
+        Assert.Equal(PaletteActionKind.SetProjectFilter, action.Kind);
+        Assert.Equal("Fabrikam", action.Argument);
+    }
+
+    [Fact]
+    public void Bare_Project_Sets_Project_Filter_With_Empty_Argument()
+    {
+        var action = PaletteCommandParser.Parse("project");
+
+        Assert.Equal(PaletteActionKind.SetProjectFilter, action.Kind);
+        Assert.Equal("", action.Argument);
+    }
 }

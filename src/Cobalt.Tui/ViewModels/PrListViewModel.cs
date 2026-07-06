@@ -16,6 +16,7 @@ public sealed class PrListViewModel(IPullRequestSource source)
 
     private IReadOnlyList<PullRequest> _all = [];
     private string _repositoryFilter = "";
+    private string _projectFilter = "";
     private int _selectedIndex;
     private int _loadSeq;
 
@@ -32,6 +33,17 @@ public sealed class PrListViewModel(IPullRequestSource source)
         set
         {
             _repositoryFilter = value;
+            ApplyFilter();
+        }
+    }
+
+    /// <summary>Client-side narrowing by <see cref="PullRequest.ProjectName"/>; empty clears it.</summary>
+    public string ProjectFilter
+    {
+        get => _projectFilter;
+        set
+        {
+            _projectFilter = value ?? "";
             ApplyFilter();
         }
     }
@@ -108,9 +120,14 @@ public sealed class PrListViewModel(IPullRequestSource source)
 
     private void ApplyFilter()
     {
-        Rows = _repositoryFilter.Length == 0
-            ? _all
-            : [.. _all.Where(pr => pr.RepositoryName.Contains(_repositoryFilter, StringComparison.OrdinalIgnoreCase))];
+        Rows =
+        [
+            .. _all.Where(pr =>
+                (_repositoryFilter.Length == 0 ||
+                 pr.RepositoryName.Contains(_repositoryFilter, StringComparison.OrdinalIgnoreCase)) &&
+                (_projectFilter.Length == 0 ||
+                 pr.ProjectName.Contains(_projectFilter, StringComparison.OrdinalIgnoreCase))),
+        ];
         _selectedIndex = Math.Clamp(_selectedIndex, 0, Math.Max(0, Rows.Count - 1));
         Changed?.Invoke();
     }

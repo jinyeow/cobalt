@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Cobalt.Core.Ado;
 using Cobalt.Core.Models;
 using Cobalt.Tui.ViewModels;
 
@@ -20,10 +21,12 @@ public class WorkItemListViewModelTests
     {
         public Exception? Throw { get; init; }
         public int Calls { get; private set; }
+        public WorkItemQuery? LastQuery { get; private set; }
 
-        public Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(CancellationToken ct)
+        public Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(WorkItemQuery query, CancellationToken ct)
         {
             Calls++;
+            LastQuery = query;
             return Throw is not null ? Task.FromException<IReadOnlyList<WorkItem>>(Throw) : Task.FromResult(items);
         }
     }
@@ -123,5 +126,89 @@ public class WorkItemListViewModelTests
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         Assert.Null(vm.Selected);
+    }
+
+    [Fact]
+    public async Task Default_Query_Hides_Completed_And_Has_No_Project_Filter()
+    {
+        var source = new FakeSource([Item(1, "A", "Active")]);
+        var vm = new WorkItemListViewModel(source);
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(vm.IncludeCompleted);
+        Assert.Null(vm.ProjectFilter);
+        Assert.False(source.LastQuery!.IncludeCompleted);
+        Assert.Null(source.LastQuery.Project);
+    }
+
+    [Fact]
+    public async Task Toggling_IncludeCompleted_Requeries_With_New_Option()
+    {
+        var source = new FakeSource([Item(1, "A", "Active")]);
+        var vm = new WorkItemListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var before = source.Calls;
+
+        vm.IncludeCompleted = true; // setter triggers a reload (fake completes synchronously)
+
+        Assert.Equal(before + 1, source.Calls);
+        Assert.True(source.LastQuery!.IncludeCompleted);
+    }
+
+    [Fact]
+    public async Task Setting_ProjectFilter_Requeries_With_Project_Clause()
+    {
+        var source = new FakeSource([Item(1, "A", "Active")]);
+        var vm = new WorkItemListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.ProjectFilter = "Fabrikam";
+
+        Assert.Equal("Fabrikam", vm.ProjectFilter);
+        Assert.Equal("Fabrikam", source.LastQuery!.Project);
+    }
+
+    [Fact]
+    public async Task Clearing_ProjectFilter_Requeries_Without_Project_Clause()
+    {
+        var source = new FakeSource([Item(1, "A", "Active")]);
+        var vm = new WorkItemListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        vm.ProjectFilter = "Fabrikam";
+
+        vm.ProjectFilter = null;
+
+        Assert.Null(vm.ProjectFilter);
+        Assert.Null(source.LastQuery!.Project);
+    }
+
+    [Fact]
+    public async Task Setting_Same_Filter_Value_Does_Not_Requery()
+    {
+        var source = new FakeSource([Item(1, "A", "Active")]);
+        var vm = new WorkItemListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var before = source.Calls;
+
+        vm.IncludeCompleted = false; // already false — no-op
+
+        Assert.Equal(before, source.Calls);
+    }
+
+    [Fact]
+    public async Task Substring_Filter_Composes_On_Top_Of_Server_Query()
+    {
+        // The `/` client filter narrows within whatever the server returned.
+        var source = new FakeSource([Item(1, "Fix login", "Active"), Item(2, "Add logs", "New")]);
+        var vm = new WorkItemListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.Filter = "login";
+        Assert.Single(vm.Rows);
+
+        vm.IncludeCompleted = true; // server re-query keeps the same 2 rows...
+        Assert.Single(vm.Rows);     // ...but the `/` filter still applies
+        Assert.Equal("Fix login", vm.Rows[0].Title);
     }
 }

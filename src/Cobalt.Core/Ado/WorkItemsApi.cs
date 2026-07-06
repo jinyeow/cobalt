@@ -12,6 +12,7 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
     [
         "System.Id", "System.WorkItemType", "System.Title", "System.State",
         "System.AssignedTo", "System.IterationPath", "System.Tags", "System.ChangedDate",
+        "System.TeamProject",
     ];
 
     private static readonly string[] DetailFields =
@@ -23,21 +24,28 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
 
     private string Project => Uri.EscapeDataString(context.Project);
 
-    /// <summary>Items assigned to the caller, excluding closed/removed, most-recently-changed first.</summary>
-    public async Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(CancellationToken cancellationToken = default)
+    /// <summary>Back-compat overload: project-scoped, hides completed items (the pre-filter default).</summary>
+    public Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(CancellationToken cancellationToken = default) =>
+        QueryMyWorkItemsAsync(new WorkItemQuery(), PrScope.Project, cancellationToken);
+
+    /// <summary>
+    /// Items assigned to the caller, most-recently-changed first, shaped by <paramref name="query"/>.
+    /// <paramref name="scope"/> selects org-wide (all projects) vs the context project. A
+    /// non-null <see cref="WorkItemQuery.Project"/> also forces the org route so its
+    /// <c>[System.TeamProject]</c> clause can reach any project, not just the context's.
+    /// </summary>
+    public async Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(
+        WorkItemQuery query, PrScope scope, CancellationToken cancellationToken = default)
     {
-        var wiql = new WiqlQuery
-        {
-            Query =
-                "SELECT [System.Id] FROM WorkItems " +
-                "WHERE [System.AssignedTo] = @Me " +
-                "AND [System.State] NOT IN ('Closed', 'Done', 'Removed', 'Completed') " +
-                "ORDER BY [System.ChangedDate] DESC",
-        };
+        // Org scope, or any explicit project narrowing, drops the project segment so the
+        // WIQL/batch run org-wide; the [System.TeamProject] clause does the narrowing.
+        var orgRoute = scope == PrScope.Org || !string.IsNullOrEmpty(query.Project);
+        var prefix = orgRoute ? "" : $"{Project}/";
+        var wiql = new WiqlQuery { Query = WiqlBuilder.MyItems(query) };
 
         var result = await http.SendJsonAsync(
             HttpMethod.Post,
-            $"{Project}/_apis/wit/wiql?api-version=7.2-preview.2",
+            $"{prefix}_apis/wit/wiql?api-version=7.2-preview.2",
             wiql,
             WorkItemJsonContext.Default.WiqlQuery,
             WorkItemJsonContext.Default.WiqlResult,
@@ -53,7 +61,7 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
         var byId = new Dictionary<long, WorkItem>();
         foreach (var page in Chunk(ids, 200))
         {
-            var batch = await BatchAsync(page, ListFields, cancellationToken).ConfigureAwait(false);
+            var batch = await BatchAsync(page, ListFields, orgRoute, cancellationToken).ConfigureAwait(false);
             foreach (var dto in batch.Value)
             {
                 byId[dto.Id] = WorkItem.From(dto);
@@ -135,10 +143,10 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
     }
 
     private Task<WorkItemBatchResult> BatchAsync(
-        IReadOnlyList<long> ids, string[] fields, CancellationToken cancellationToken) =>
+        IReadOnlyList<long> ids, string[] fields, bool orgRoute, CancellationToken cancellationToken) =>
         http.SendJsonAsync(
             HttpMethod.Post,
-            $"{Project}/_apis/wit/workitemsbatch?api-version=7.2-preview.1",
+            $"{(orgRoute ? "" : $"{Project}/")}_apis/wit/workitemsbatch?api-version=7.2-preview.1",
             new WorkItemBatchRequest { Ids = ids, Fields = fields },
             WorkItemJsonContext.Default.WorkItemBatchRequest,
             WorkItemJsonContext.Default.WorkItemBatchResult,

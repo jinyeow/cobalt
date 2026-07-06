@@ -9,12 +9,14 @@ public enum PaletteActionKind
     SwitchContext,
     PickContext,
     SetScope,
+    ToggleDone,
+    SetProjectFilter,
     Unknown,
 }
 
 public readonly record struct PaletteAction(PaletteActionKind Kind, string Argument = "");
 
-/// <summary>Parses `:` command-palette input (`q`, `ctx NAME`, `scope [org|project]`, `help`, `messages`).</summary>
+/// <summary>Parses `:` command-palette input (`q`, `ctx NAME`, `scope`, `done`, `project`, `help`, `messages`).</summary>
 public static class PaletteCommandParser
 {
     public static PaletteAction Parse(string input)
@@ -35,6 +37,10 @@ public static class PaletteCommandParser
             ("ctx" or "context", var name) => new PaletteAction(PaletteActionKind.SwitchContext, name),
             ("scope", null) => new PaletteAction(PaletteActionKind.SetScope, ""),
             ("scope", var value) => new PaletteAction(PaletteActionKind.SetScope, value),
+            ("done", null) => new PaletteAction(PaletteActionKind.ToggleDone, ""),
+            ("done", var value) => new PaletteAction(PaletteActionKind.ToggleDone, value),
+            ("project", null) => new PaletteAction(PaletteActionKind.SetProjectFilter, ""),
+            ("project", var name) => new PaletteAction(PaletteActionKind.SetProjectFilter, name),
             _ => new PaletteAction(PaletteActionKind.Unknown, $"unknown command: {trimmed}"),
         };
     }

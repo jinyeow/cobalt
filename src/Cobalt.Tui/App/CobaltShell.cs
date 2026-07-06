@@ -96,14 +96,25 @@ public sealed class CobaltShell : Window
         };
         _vm.ScopeChangeRequested += scope =>
         {
-            // Repoint the adapter and reload the PR list against the new breadth.
+            // Repoint both adapters and reload the active list against the new breadth.
             if (_pullRequests is not null)
             {
                 _pullRequests.Scope = scope;
             }
+            if (_workItems is not null)
+            {
+                _workItems.Scope = scope;
+            }
             // A scope flip changes the row set entirely (org ↔ project); reload from the top.
             _prList?.ReloadFromTop();
+            _workItemList?.OnRefresh();
             RefreshChrome();
+        };
+        _vm.DoneFilterChanged += include => _workItemList?.SetIncludeCompleted(include);
+        _vm.ProjectFilterChanged += project =>
+        {
+            _workItemList?.SetProjectFilter(project); // server-side re-query
+            _prList?.SetProjectFilter(project);       // client-side narrowing
         };
     }
 
@@ -400,7 +411,9 @@ public sealed class CobaltShell : Window
 
         if (_vm.ActiveSection == AppSection.WorkItems && _workItems is not null)
         {
-            var listVm = new WorkItemListViewModel(_workItems);
+            // Seed the fresh view-model with the shell's active filters so switching away
+            // and back doesn't silently drop :done / :project.
+            var listVm = new WorkItemListViewModel(_workItems, _vm.IncludeCompletedWorkItems, _vm.ProjectFilter);
             _workItemList = new WorkItemListView(_app, listVm);
             _workItemList.ItemActivated += OpenWorkItemDetail;
             _activeScreen = _workItemList;
@@ -409,7 +422,7 @@ public sealed class CobaltShell : Window
         }
         else if (_vm.ActiveSection == AppSection.PullRequests && _pullRequests is not null)
         {
-            var listVm = new PrListViewModel(_pullRequests);
+            var listVm = new PrListViewModel(_pullRequests) { ProjectFilter = _vm.ProjectFilter ?? "" };
             var store = _pullRequests;
             var enricher = new PrCommentCountEnricher(async (pr, ct) =>
             {
