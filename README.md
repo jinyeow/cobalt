@@ -79,6 +79,31 @@ remaining terminal width (reflowing on resize), so there's no dead right gutter.
   cached.
 - **Work items**: id · type · state · title (fills) · iteration · changed date.
 
+## Editor
+
+Commenting, editing a description, and similar text entry open your editor on a
+temp file (the git-commit pattern). cobalt resolves it in this order:
+
+1. `$VISUAL`
+2. `$EDITOR`
+3. `vi` (fallback)
+
+The value may include arguments and quoted paths (e.g. `EDITOR="code --wait"`).
+GUI editors must be told to block until the file is closed (`code --wait`,
+`gvim -f`), or the edit is read back before you finish.
+
+Set it in the shell you launch cobalt from:
+
+- **bash/zsh**: `export EDITOR=nvim` (add to your profile to persist)
+- **PowerShell**: `$env:EDITOR = 'nvim'` for the session, or `setx EDITOR nvim`
+  to persist (then open a **new** terminal), or set it under Windows Settings →
+  Environment Variables.
+- **cmd**: `set EDITOR=nvim` for the session.
+
+If neither variable is set, `c`/`e`/comment actions fall back to `vi`; if that
+isn't installed you'll see *"could not start editor … set $VISUAL or $EDITOR"*.
+A full-screen editor gets a clean terminal (the TUI suspends while it runs).
+
 ## Crash logs
 
 Expected Azure DevOps failures (auth, network, API) surface in the message bar. An
