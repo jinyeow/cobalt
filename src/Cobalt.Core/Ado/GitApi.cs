@@ -10,10 +10,16 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
     private const string ThreadApiVersion = "api-version=7.2-preview.1";
     private const string ReviewerApiVersion = "api-version=7.2-preview.1";
 
+    private const int ListTop = 200;
+
     private string Project => Uri.EscapeDataString(context.Project);
 
+    /// <summary>Path segment for a repo-scoped call: the PR's own project, or the context's.</summary>
+    private string ProjectSeg(string? project) =>
+        Uri.EscapeDataString(string.IsNullOrEmpty(project) ? context.Project : project);
+
     public async Task<IReadOnlyList<PullRequest>> ListPullRequestsAsync(
-        PrListFilter filter, Guid me, CancellationToken cancellationToken = default)
+        PrListFilter filter, Guid me, PrScope scope, CancellationToken cancellationToken = default)
     {
         var criteria = filter switch
         {
@@ -22,11 +28,20 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
             _ => "searchCriteria.status=active",
         };
 
+        // Org scope hits the org-wide list route (no project segment); Project scope
+        // keeps the classic per-project route. The org-level *list* endpoint is not
+        // formally documented (unlike the org-level by-id and reviewer routes, which
+        // are), so it's validated during UAT. Keeping the prefix a single local switch
+        // makes a future swap to a documented per-project fan-out a localized change.
+        var prefix = scope == PrScope.Org ? "" : $"{Project}/";
         var result = await http.GetJsonAsync(
-            $"{Project}/_apis/git/pullrequests?{criteria}&$top=100&{PrApiVersion}",
+            $"{prefix}_apis/git/pullrequests?{criteria}&$top={ListTop}&{PrApiVersion}",
             GitJsonContext.Default.PullRequestListResult,
             cancellationToken).ConfigureAwait(false);
-        return [.. result.Value.Select(PullRequest.From)];
+
+        // Fall back to the context project when the repo carries no project (project-scoped
+        // responses often omit it); org-scoped rows carry their own project.
+        return [.. result.Value.Select(dto => PullRequest.From(dto, context.Project))];
     }
 
     public async Task<PullRequest> GetPullRequestAsync(int id, CancellationToken cancellationToken = default)
@@ -39,58 +54,58 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
     }
 
     public async Task<IReadOnlyList<PrThread>> GetThreadsAsync(
-        string repositoryId, int prId, CancellationToken cancellationToken = default)
+        string repositoryId, int prId, string? project = null, CancellationToken cancellationToken = default)
     {
         var result = await http.GetJsonAsync(
-            $"{Project}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/threads?{ThreadApiVersion}",
+            $"{ProjectSeg(project)}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/threads?{ThreadApiVersion}",
             GitJsonContext.Default.PrThreadListResult,
             cancellationToken).ConfigureAwait(false);
         return [.. result.Value.Select(PrThread.From).Where(t => !t.IsSystemOnly)];
     }
 
     public Task VoteAsync(
-        string repositoryId, int prId, Guid reviewerId, PrVote vote, CancellationToken cancellationToken = default) =>
+        string repositoryId, int prId, Guid reviewerId, PrVote vote, string? project = null, CancellationToken cancellationToken = default) =>
         http.SendJsonAsync(
             HttpMethod.Put,
-            $"{Project}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/reviewers/{reviewerId}?{ReviewerApiVersion}",
+            $"{ProjectSeg(project)}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/reviewers/{reviewerId}?{ReviewerApiVersion}",
             new VoteRequest { Vote = (int)vote },
             GitJsonContext.Default.VoteRequest,
             GitJsonContext.Default.ReviewerDto,
             cancellationToken: cancellationToken);
 
     public Task<PrCommentDto> ReplyToThreadAsync(
-        string repositoryId, int prId, int threadId, string content, CancellationToken cancellationToken = default) =>
+        string repositoryId, int prId, int threadId, string content, string? project = null, CancellationToken cancellationToken = default) =>
         http.SendJsonAsync(
             HttpMethod.Post,
-            $"{Project}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/threads/{threadId}/comments?{ThreadApiVersion}",
+            $"{ProjectSeg(project)}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/threads/{threadId}/comments?{ThreadApiVersion}",
             new NewCommentRequest { Content = content },
             GitJsonContext.Default.NewCommentRequest,
             GitJsonContext.Default.PrCommentDto,
             cancellationToken: cancellationToken);
 
     public Task<PrThreadDto> AddThreadAsync(
-        string repositoryId, int prId, NewThreadRequest thread, CancellationToken cancellationToken = default) =>
+        string repositoryId, int prId, NewThreadRequest thread, string? project = null, CancellationToken cancellationToken = default) =>
         http.SendJsonAsync(
             HttpMethod.Post,
-            $"{Project}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/threads?{ThreadApiVersion}",
+            $"{ProjectSeg(project)}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/threads?{ThreadApiVersion}",
             thread,
             GitJsonContext.Default.NewThreadRequest,
             GitJsonContext.Default.PrThreadDto,
             cancellationToken: cancellationToken);
 
     public Task SetThreadStatusAsync(
-        string repositoryId, int prId, int threadId, PrThreadStatus status, CancellationToken cancellationToken = default) =>
+        string repositoryId, int prId, int threadId, PrThreadStatus status, string? project = null, CancellationToken cancellationToken = default) =>
         http.SendJsonAsync(
             HttpMethod.Patch,
-            $"{Project}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/threads/{threadId}?{ThreadApiVersion}",
+            $"{ProjectSeg(project)}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/threads/{threadId}?{ThreadApiVersion}",
             new ThreadStatusPatch { Status = PrThread.StatusToWire(status) },
             GitJsonContext.Default.ThreadStatusPatch,
             GitJsonContext.Default.PrThreadDto,
             cancellationToken: cancellationToken);
 
     public Task<PullRequest> AbandonAsync(
-        string repositoryId, int prId, CancellationToken cancellationToken = default) =>
-        PatchStatusAsync(repositoryId, prId, new PrStatusPatch { Status = "abandoned" }, cancellationToken);
+        string repositoryId, int prId, string? project = null, CancellationToken cancellationToken = default) =>
+        PatchStatusAsync(repositoryId, prId, new PrStatusPatch { Status = "abandoned" }, project, cancellationToken);
 
     public Task<PullRequest> CompleteAsync(
         string repositoryId,
@@ -98,6 +113,7 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
         string lastMergeSourceCommitId,
         string mergeStrategy,
         bool deleteSourceBranch,
+        string? project = null,
         CancellationToken cancellationToken = default) =>
         PatchStatusAsync(repositoryId, prId, new PrStatusPatch
         {
@@ -108,28 +124,28 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
                 MergeStrategy = mergeStrategy,
                 DeleteSourceBranch = deleteSourceBranch,
             },
-        }, cancellationToken);
+        }, project, cancellationToken);
 
     private async Task<PullRequest> PatchStatusAsync(
-        string repositoryId, int prId, PrStatusPatch patch, CancellationToken cancellationToken)
+        string repositoryId, int prId, PrStatusPatch patch, string? project, CancellationToken cancellationToken)
     {
         var dto = await http.SendJsonAsync(
             HttpMethod.Patch,
-            $"{Project}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}?{PrApiVersion}",
+            $"{ProjectSeg(project)}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}?{PrApiVersion}",
             patch,
             GitJsonContext.Default.PrStatusPatch,
             GitJsonContext.Default.PullRequestDto,
             cancellationToken: cancellationToken).ConfigureAwait(false);
-        return PullRequest.From(dto);
+        return PullRequest.From(dto, context.Project);
     }
 
     // ---- diff / review (SPEC §3, M5) ----
 
     public async Task<PrIteration?> GetLatestIterationAsync(
-        string repositoryId, int prId, CancellationToken cancellationToken = default)
+        string repositoryId, int prId, string? project = null, CancellationToken cancellationToken = default)
     {
         var result = await http.GetJsonAsync(
-            $"{Project}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/iterations?{PrApiVersion}",
+            $"{ProjectSeg(project)}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/iterations?{PrApiVersion}",
             GitJsonContext.Default.PrIterationListResult,
             cancellationToken).ConfigureAwait(false);
 
@@ -144,10 +160,10 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
     }
 
     public async Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(
-        string repositoryId, int prId, int iterationId, CancellationToken cancellationToken = default)
+        string repositoryId, int prId, int iterationId, string? project = null, CancellationToken cancellationToken = default)
     {
         var result = await http.GetJsonAsync(
-            $"{Project}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/iterations/{iterationId}/changes?{ThreadApiVersion}",
+            $"{ProjectSeg(project)}/_apis/git/repositories/{Enc(repositoryId)}/pullRequests/{prId}/iterations/{iterationId}/changes?{ThreadApiVersion}",
             GitJsonContext.Default.PrIterationChangesResult,
             cancellationToken).ConfigureAwait(false);
 
@@ -171,7 +187,7 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
 
     /// <summary>File content at a commit; empty string when the file doesn't exist on that side.</summary>
     public async Task<string> GetFileContentAsync(
-        string repositoryId, string path, string commitId, CancellationToken cancellationToken = default)
+        string repositoryId, string path, string commitId, string? project = null, CancellationToken cancellationToken = default)
     {
         var query =
             $"path={Uri.EscapeDataString(path)}" +
@@ -179,7 +195,7 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
             "&versionDescriptor.versionType=commit" +
             "&includeContent=true&$format=text&api-version=7.2-preview.1";
         var content = await http.GetTextOrNullAsync(
-            $"{Project}/_apis/git/repositories/{Enc(repositoryId)}/items?{query}",
+            $"{ProjectSeg(project)}/_apis/git/repositories/{Enc(repositoryId)}/items?{query}",
             cancellationToken).ConfigureAwait(false);
         return content ?? "";
     }
@@ -191,6 +207,7 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
         int line,
         bool rightSide,
         string content,
+        string? project = null,
         CancellationToken cancellationToken = default)
     {
         var position = new PrCommentPositionDto { Line = line, Offset = 1 };
@@ -208,7 +225,7 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
             Status = 1, // active
             ThreadContext = context,
         };
-        return AddThreadAsync(repositoryId, prId, thread, cancellationToken);
+        return AddThreadAsync(repositoryId, prId, thread, project, cancellationToken);
     }
 
     private static string Enc(string segment) => Uri.EscapeDataString(segment);

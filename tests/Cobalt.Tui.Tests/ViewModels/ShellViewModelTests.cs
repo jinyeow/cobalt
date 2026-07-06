@@ -1,3 +1,4 @@
+using Cobalt.Core.Config;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
 
@@ -103,5 +104,54 @@ public class ShellViewModelTests
         Assert.Equal("oss", vm.ContextName);
         Assert.Contains("oss", vm.StatusLine);
         Assert.Contains("Jin", vm.StatusLine);
+    }
+
+    [Fact]
+    public void Default_Scope_Is_Org_And_Shown_In_Status()
+    {
+        var vm = Vm();
+
+        Assert.Equal(PrScope.Org, vm.Scope);
+        Assert.Contains("org", vm.StatusLine);
+    }
+
+    [Fact]
+    public void Palette_Scope_Project_Flips_Scope_And_Raises_Event()
+    {
+        var vm = new ShellViewModel(["work"], "work", PrScope.Org);
+        PrScope? requested = null;
+        vm.ScopeChangeRequested += s => requested = s;
+
+        vm.HandlePaletteInput("scope project");
+
+        Assert.Equal(PrScope.Project, vm.Scope);
+        Assert.Equal(PrScope.Project, requested);
+        Assert.Contains("project", vm.StatusLine);
+    }
+
+    [Fact]
+    public void Bare_Palette_Scope_Reports_Current_Without_Changing()
+    {
+        var vm = new ShellViewModel(["work"], "work", PrScope.Org);
+        var raised = false;
+        vm.ScopeChangeRequested += _ => raised = true;
+
+        vm.HandlePaletteInput("scope");
+
+        Assert.False(raised);
+        Assert.Equal(PrScope.Org, vm.Scope);
+        Assert.NotNull(vm.Messages.Current);
+        Assert.Contains("org", vm.Messages.Current!.Text);
+    }
+
+    [Fact]
+    public void Palette_Scope_Invalid_Value_Logs_Error()
+    {
+        var vm = new ShellViewModel(["work"], "work", PrScope.Org);
+
+        vm.HandlePaletteInput("scope everywhere");
+
+        Assert.Equal(MessageLevel.Error, vm.Messages.Current?.Level);
+        Assert.Equal(PrScope.Org, vm.Scope);
     }
 }

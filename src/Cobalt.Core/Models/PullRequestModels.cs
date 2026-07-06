@@ -52,12 +52,22 @@ public sealed record PullRequestDto
     public IReadOnlyList<ReviewerDto>? Reviewers { get; init; }
     public IReadOnlyList<ResourceRefDto>? WorkItemRefs { get; init; }
     public GitCommitRefDto? LastMergeSourceCommit { get; init; }
+    public DateTimeOffset? CreationDate { get; init; }
 }
 
 public sealed record GitRepositoryDto
 {
     public string Id { get; init; } = "";
     public string Name { get; init; } = "";
+
+    /// <summary>The owning project — populated on org-wide list responses; may be null.</summary>
+    public TeamProjectRefDto? Project { get; init; }
+}
+
+public sealed record TeamProjectRefDto
+{
+    public string? Id { get; init; }
+    public string? Name { get; init; }
 }
 
 public sealed record ReviewerDto
@@ -246,9 +256,16 @@ public sealed record PullRequest(
     string RepositoryName,
     IReadOnlyList<PrReviewer> Reviewers,
     IReadOnlyList<long> LinkedWorkItemIds,
-    string? LastMergeSourceCommitId)
+    string? LastMergeSourceCommitId,
+    string ProjectName = "",
+    DateTimeOffset? CreationDate = null)
 {
-    public static PullRequest From(PullRequestDto dto) => new(
+    /// <summary>
+    /// Projects a wire DTO. <paramref name="fallbackProject"/> supplies the project
+    /// name when the repository's <c>project</c> is absent (e.g. project-scoped list
+    /// responses that omit it) — pass the context's project.
+    /// </summary>
+    public static PullRequest From(PullRequestDto dto, string? fallbackProject = null) => new(
         dto.PullRequestId,
         dto.Title,
         dto.Description,
@@ -263,7 +280,9 @@ public sealed record PullRequest(
         [.. (dto.Reviewers ?? []).Select(r => new PrReviewer(
             r.Id ?? "", r.DisplayName ?? "?", ToVote(r.Vote), r.IsRequired))],
         [.. (dto.WorkItemRefs ?? []).Select(w => long.TryParse(w.Id, out var id) ? id : 0L).Where(id => id != 0)],
-        dto.LastMergeSourceCommit?.CommitId);
+        dto.LastMergeSourceCommit?.CommitId,
+        dto.Repository?.Project?.Name ?? fallbackProject ?? "",
+        dto.CreationDate);
 
     private static string ShortBranch(string refName) =>
         refName.StartsWith("refs/heads/", StringComparison.Ordinal) ? refName["refs/heads/".Length..] : refName;

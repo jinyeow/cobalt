@@ -12,7 +12,8 @@ public static class CobaltTuiApp
     public static int Run(CobaltConfig config, string? contextOverride, ITokenProvider tokens)
     {
         var context = config.Resolve(contextOverride);
-        var vm = new ShellViewModel([.. config.Contexts.Keys.Order(StringComparer.Ordinal)], context.Name);
+        var vm = new ShellViewModel(
+            [.. config.Contexts.Keys.Order(StringComparer.Ordinal)], context.Name, context.PrScope);
 
         using var connection = AdoConnection.Create(context, tokens);
         var workItems = new WorkItemStoreAdapter(new WorkItemsApi(connection.Http, context));
@@ -22,7 +23,8 @@ public static class CobaltTuiApp
         var identity = new Lazy<Task<AdoUser>>(() => connection.Identity.GetAuthenticatedUserAsync());
         var pullRequests = new PullRequestStoreAdapter(
             new GitApi(connection.Http, context),
-            async ct => (await identity.Value.WaitAsync(ct).ConfigureAwait(false)).Id);
+            async ct => (await identity.Value.WaitAsync(ct).ConfigureAwait(false)).Id,
+            context.PrScope);
 
         using var app = Application.Create().Init();
         // Lower input latency: the default 25 iterations/sec adds up to ~40ms per

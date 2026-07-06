@@ -8,12 +8,13 @@ public enum PaletteActionKind
     Messages,
     SwitchContext,
     PickContext,
+    SetScope,
     Unknown,
 }
 
 public readonly record struct PaletteAction(PaletteActionKind Kind, string Argument = "");
 
-/// <summary>Parses `:` command-palette input (`q`, `ctx NAME`, `help`, `messages`).</summary>
+/// <summary>Parses `:` command-palette input (`q`, `ctx NAME`, `scope [org|project]`, `help`, `messages`).</summary>
 public static class PaletteCommandParser
 {
     public static PaletteAction Parse(string input)
@@ -32,6 +33,8 @@ public static class PaletteCommandParser
             ("messages", _) => new PaletteAction(PaletteActionKind.Messages),
             ("ctx" or "context", null) => new PaletteAction(PaletteActionKind.PickContext),
             ("ctx" or "context", var name) => new PaletteAction(PaletteActionKind.SwitchContext, name),
+            ("scope", null) => new PaletteAction(PaletteActionKind.SetScope, ""),
+            ("scope", var value) => new PaletteAction(PaletteActionKind.SetScope, value),
             _ => new PaletteAction(PaletteActionKind.Unknown, $"unknown command: {trimmed}"),
         };
     }

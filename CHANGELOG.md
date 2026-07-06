@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Org-wide pull-request scope.** PR lists (review queue / mine / active) now
+  default to the **whole organization** instead of a single project. An optional
+  per-context `pr_scope = "org" | "project"` config key sets the startup scope
+  (default `org`; existing configs stay valid), and `:scope org|project` flips it
+  live (bare `:scope` reports the current value). The active scope shows in the
+  status line.
+- Cross-project drill-in: threads, votes, replies, resolve/complete/abandon, diff
+  review, line comments, and `yy`/`gx` web URLs all target each PR's own project,
+  so rows spanning projects behave correctly under org scope.
+- The PR model now surfaces `ProjectName` and `CreationDate` (groundwork for a
+  project column and a PR-age column).
+
+### Notes
+- The org-wide PR *list* REST route is not formally documented (the by-id and
+  reviewer routes are org-level and documented); it is validated during UAT. See
+  ADR 0011.
+
 ## 0.1.0 — 2026-07-04
 
 First release. A vim-flavored Azure DevOps TUI for a neovim-centric workflow.

@@ -5,12 +5,12 @@ namespace Cobalt.Tui.ViewModels;
 public interface IPullRequestStore
 {
     Task<PullRequest> GetPullRequestAsync(int id, CancellationToken ct);
-    Task<IReadOnlyList<PrThread>> GetThreadsAsync(string repositoryId, int id, CancellationToken ct);
-    Task VoteAsync(string repositoryId, int id, PrVote vote, CancellationToken ct);
-    Task ReplyToThreadAsync(string repositoryId, int id, int threadId, string text, CancellationToken ct);
-    Task SetThreadStatusAsync(string repositoryId, int id, int threadId, PrThreadStatus status, CancellationToken ct);
-    Task AbandonAsync(string repositoryId, int id, CancellationToken ct);
-    Task CompleteAsync(string repositoryId, int id, string mergeStrategy, bool deleteSource, CancellationToken ct);
+    Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repositoryId, int id, CancellationToken ct);
+    Task VoteAsync(string project, string repositoryId, int id, PrVote vote, CancellationToken ct);
+    Task ReplyToThreadAsync(string project, string repositoryId, int id, int threadId, string text, CancellationToken ct);
+    Task SetThreadStatusAsync(string project, string repositoryId, int id, int threadId, PrThreadStatus status, CancellationToken ct);
+    Task AbandonAsync(string project, string repositoryId, int id, CancellationToken ct);
+    Task CompleteAsync(string project, string repositoryId, int id, string mergeStrategy, bool deleteSource, CancellationToken ct);
 }
 
 /// <summary>
@@ -40,7 +40,8 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
         try
         {
             PullRequest = await store.GetPullRequestAsync(id, ct).ConfigureAwait(false);
-            Threads = await store.GetThreadsAsync(PullRequest.RepositoryId, id, ct).ConfigureAwait(false);
+            Threads = await store.GetThreadsAsync(
+                PullRequest.ProjectName, PullRequest.RepositoryId, id, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -58,40 +59,41 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
     }
 
     public Task VoteAsync(PrVote vote, CancellationToken ct) =>
-        RunAsync(repo => store.VoteAsync(repo, id, vote, ct), ct);
+        RunAsync((project, repo) => store.VoteAsync(project, repo, id, vote, ct), ct);
 
     public Task ReplyAsync(int threadId, string text, CancellationToken ct) =>
-        RunAsync(repo => store.ReplyToThreadAsync(repo, id, threadId, text, ct), ct);
+        RunAsync((project, repo) => store.ReplyToThreadAsync(project, repo, id, threadId, text, ct), ct);
 
     public Task ResolveThreadAsync(int threadId, CancellationToken ct) =>
-        RunAsync(repo => store.SetThreadStatusAsync(repo, id, threadId, PrThreadStatus.Fixed, ct), ct);
+        RunAsync((project, repo) => store.SetThreadStatusAsync(project, repo, id, threadId, PrThreadStatus.Fixed, ct), ct);
 
     public Task ReactivateThreadAsync(int threadId, CancellationToken ct) =>
-        RunAsync(repo => store.SetThreadStatusAsync(repo, id, threadId, PrThreadStatus.Active, ct), ct);
+        RunAsync((project, repo) => store.SetThreadStatusAsync(project, repo, id, threadId, PrThreadStatus.Active, ct), ct);
 
     public Task AbandonAsync(CancellationToken ct) =>
-        RunAsync(repo => store.AbandonAsync(repo, id, ct), ct, reload: false);
+        RunAsync((project, repo) => store.AbandonAsync(project, repo, id, ct), ct, reload: false);
 
     public Task CompleteAsync(string mergeStrategy, bool deleteSource, CancellationToken ct) =>
-        RunAsync(repo => store.CompleteAsync(repo, id, mergeStrategy, deleteSource, ct), ct, reload: false);
+        RunAsync((project, repo) => store.CompleteAsync(project, repo, id, mergeStrategy, deleteSource, ct), ct, reload: false);
 
-    private async Task RunAsync(Func<string, Task> action, CancellationToken ct, bool reload = true)
+    private async Task RunAsync(Func<string, string, Task> action, CancellationToken ct, bool reload = true)
     {
         if (PullRequest is null)
         {
             return;
         }
+        var project = PullRequest.ProjectName;
         var repo = PullRequest.RepositoryId;
         IsBusy = true;
         Error = null;
         Changed?.Invoke();
         try
         {
-            await action(repo).ConfigureAwait(false);
+            await action(project, repo).ConfigureAwait(false);
             if (reload)
             {
                 PullRequest = await store.GetPullRequestAsync(id, ct).ConfigureAwait(false);
-                Threads = await store.GetThreadsAsync(repo, id, ct).ConfigureAwait(false);
+                Threads = await store.GetThreadsAsync(project, repo, id, ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)

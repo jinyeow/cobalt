@@ -37,13 +37,13 @@ public class DetailDialogKeyDeliveryTests
     {
         public Task<PullRequest> GetPullRequestAsync(int id, CancellationToken ct) =>
             throw new NotSupportedException();
-        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string repositoryId, int id, CancellationToken ct) =>
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repositoryId, int id, CancellationToken ct) =>
             throw new NotSupportedException();
-        public Task VoteAsync(string repositoryId, int id, PrVote vote, CancellationToken ct) => Task.CompletedTask;
-        public Task ReplyToThreadAsync(string repositoryId, int id, int threadId, string text, CancellationToken ct) => Task.CompletedTask;
-        public Task SetThreadStatusAsync(string repositoryId, int id, int threadId, PrThreadStatus status, CancellationToken ct) => Task.CompletedTask;
-        public Task AbandonAsync(string repositoryId, int id, CancellationToken ct) => Task.CompletedTask;
-        public Task CompleteAsync(string repositoryId, int id, string mergeStrategy, bool deleteSource, CancellationToken ct) => Task.CompletedTask;
+        public Task VoteAsync(string project, string repositoryId, int id, PrVote vote, CancellationToken ct) => Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repositoryId, int id, int threadId, string text, CancellationToken ct) => Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repositoryId, int id, int threadId, PrThreadStatus status, CancellationToken ct) => Task.CompletedTask;
+        public Task AbandonAsync(string project, string repositoryId, int id, CancellationToken ct) => Task.CompletedTask;
+        public Task CompleteAsync(string project, string repositoryId, int id, string mergeStrategy, bool deleteSource, CancellationToken ct) => Task.CompletedTask;
     }
 
     private static PrDetailDialog NewPrDialog()

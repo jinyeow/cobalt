@@ -29,7 +29,14 @@ default_context = "work"
 [contexts.work]
 organization = "https://dev.azure.com/YOUR_ORG"   # or a bare "YOUR_ORG"
 project = "YOUR_PROJECT"
+# pr_scope = "org"     # optional: "org" (default — PRs across the whole org)
+                       # or "project" (only this project). Toggle live with :scope.
 ```
+
+Pull-request lists default to the **whole organization**. Set `pr_scope =
+"project"` to start focused on one project, or flip either way at runtime with
+`:scope org` / `:scope project` (bare `:scope` shows the current value). The
+active scope appears in the status line.
 
 ## Sign in
 
@@ -47,7 +54,8 @@ cobalt --context oss  # launch against a named context
 
 `j/k` move · `gg`/`G` top/bottom · `Ctrl-d`/`Ctrl-u` half-page · `/` filter ·
 `Enter`/`o` open · `1`/`2` sections · `Tab` next tab · `:` command palette
-(`:q` quit, `:ctx NAME` switch context, `:help`, `:messages`) · `?` help ·
+(`:q` quit, `:ctx NAME` switch context, `:scope org|project` PR breadth,
+`:help`, `:messages`) · `?` help ·
 `r` refresh. In a work item: `s` state · `c` comment · `e` edit description in
 `$EDITOR` · `a` assign · `t` tags. In the PR section: `Tab` cycles the review
 queue / mine / active sub-tabs; in a PR: `v` vote · `c` reply · `x` resolve

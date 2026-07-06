@@ -44,7 +44,7 @@ public class GitApiDiffTests : IDisposable
             ]}
             """);
 
-        var it = await Api(handler).GetLatestIterationAsync("repo-1", 10, TestContext.Current.CancellationToken);
+        var it = await Api(handler).GetLatestIterationAsync("repo-1", 10, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, it!.Id);
         Assert.Equal("s2", it.SourceCommitId);
@@ -56,7 +56,7 @@ public class GitApiDiffTests : IDisposable
     {
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"value":[]}""");
 
-        var it = await Api(handler).GetLatestIterationAsync("repo-1", 10, TestContext.Current.CancellationToken);
+        var it = await Api(handler).GetLatestIterationAsync("repo-1", 10, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Null(it);
     }
@@ -75,7 +75,7 @@ public class GitApiDiffTests : IDisposable
             """);
 
         var changes = await Api(handler).GetIterationChangesAsync(
-            "repo-1", 10, iterationId: 2, TestContext.Current.CancellationToken);
+            "repo-1", 10, iterationId: 2, cancellationToken: TestContext.Current.CancellationToken);
 
         // folders are excluded
         Assert.Equal(3, changes.Count);
@@ -96,7 +96,7 @@ public class GitApiDiffTests : IDisposable
             """);
 
         var changes = await Api(handler).GetIterationChangesAsync(
-            "repo-1", 10, iterationId: 2, TestContext.Current.CancellationToken);
+            "repo-1", 10, iterationId: 2, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Single(changes);
         Assert.Equal("/new/name.cs", changes[0].Path);
@@ -115,7 +115,7 @@ public class GitApiDiffTests : IDisposable
             """);
 
         var changes = await Api(handler).GetIterationChangesAsync(
-            "repo-1", 10, iterationId: 2, TestContext.Current.CancellationToken);
+            "repo-1", 10, iterationId: 2, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Single(changes);
         Assert.Equal("/to.cs", changes[0].Path);
@@ -133,7 +133,7 @@ public class GitApiDiffTests : IDisposable
             """);
 
         var changes = await Api(handler).GetIterationChangesAsync(
-            "repo-1", 10, iterationId: 2, TestContext.Current.CancellationToken);
+            "repo-1", 10, iterationId: 2, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Single(changes);
         Assert.Null(changes[0].OriginalPath);
@@ -148,7 +148,7 @@ public class GitApiDiffTests : IDisposable
         });
 
         var content = await Api(handler).GetFileContentAsync(
-            "repo-1", "/src/a.cs", "commit-abc", TestContext.Current.CancellationToken);
+            "repo-1", "/src/a.cs", "commit-abc", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("line1\nline2\n", content);
         var uri = Uri.UnescapeDataString(handler.Requests[0].RequestUri!.AbsoluteUri);
@@ -166,7 +166,7 @@ public class GitApiDiffTests : IDisposable
             """{"message":"TF401174: path not found"}""");
 
         var content = await Api(handler).GetFileContentAsync(
-            "repo-1", "/new.cs", "base-commit", TestContext.Current.CancellationToken);
+            "repo-1", "/new.cs", "base-commit", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("", content);
     }
@@ -178,7 +178,7 @@ public class GitApiDiffTests : IDisposable
             """{"id":5,"status":"active","comments":[{"id":1,"content":"nit","author":{"displayName":"Jin"},"commentType":"text"}]}""");
 
         await Api(handler).AddLineCommentAsync(
-            "repo-1", 10, "/src/a.cs", line: 42, rightSide: true, "nit: rename", TestContext.Current.CancellationToken);
+            "repo-1", 10, "/src/a.cs", line: 42, rightSide: true, "nit: rename", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpMethod.Post, handler.Requests[0].Method);
         Assert.Contains("threads", handler.Requests[0].RequestUri!.AbsoluteUri);
@@ -196,7 +196,7 @@ public class GitApiDiffTests : IDisposable
             """{"id":5,"status":"active","comments":[{"id":1,"content":"x","author":{"displayName":"Jin"},"commentType":"text"}]}""");
 
         await Api(handler).AddLineCommentAsync(
-            "repo-1", 10, "/src/a.cs", line: 7, rightSide: false, "on deleted line", TestContext.Current.CancellationToken);
+            "repo-1", 10, "/src/a.cs", line: 7, rightSide: false, "on deleted line", cancellationToken: TestContext.Current.CancellationToken);
 
         var body = handler.RequestBodies[0]!;
         Assert.Contains("leftFileStart", body);

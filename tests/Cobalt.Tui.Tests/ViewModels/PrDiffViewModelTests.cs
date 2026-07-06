@@ -13,28 +13,34 @@ public class PrDiffViewModelTests
         public Dictionary<(string path, string commit), string> Blobs { get; } = new();
         public IReadOnlyList<PrThread> Threads { get; set; } = [];
         public (string path, int line, bool right, string text)? LastComment { get; private set; }
+        public string? LastProject { get; private set; }
 
-        public Task<PrIteration?> GetLatestIterationAsync(string repo, int prId, CancellationToken ct) =>
-            Task.FromResult(Iteration);
+        public Task<PrIteration?> GetLatestIterationAsync(string project, string repo, int prId, CancellationToken ct)
+        {
+            LastProject = project;
+            return Task.FromResult(Iteration);
+        }
 
-        public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string repo, int prId, int iterationId, CancellationToken ct) =>
+        public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repo, int prId, int iterationId, CancellationToken ct) =>
             Task.FromResult(Changes);
 
-        public Task<string> GetFileContentAsync(string repo, string path, string commit, CancellationToken ct) =>
+        public Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct) =>
             Task.FromResult(Blobs.GetValueOrDefault((path, commit), ""));
 
-        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string repo, int prId, CancellationToken ct) =>
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
             Task.FromResult(Threads);
 
-        public Task AddLineCommentAsync(string repo, int prId, string path, int line, bool right, string text, CancellationToken ct)
+        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct)
         {
+            LastProject = project;
             LastComment = (path, line, right, text);
             return Task.CompletedTask;
         }
     }
 
     private static PullRequest Pr() =>
-        new(10, "t", null, "active", false, "f", "main", "succeeded", "Jin", "repo-1", "web", [], [], "src");
+        new(10, "t", null, "active", false, "f", "main", "succeeded", "Jin", "repo-1", "web", [], [], "src",
+            "Contoso.Web");
 
     [Fact]
     public async Task Load_Lists_Changed_Files_And_Selects_First()
@@ -202,6 +208,22 @@ public class PrDiffViewModelTests
 
         Assert.Equal(1, vm.CurrentDiff!.Additions);
         Assert.Equal(1, vm.CurrentDiff!.Deletions);
+    }
+
+    [Fact]
+    public async Task Diff_Source_Calls_Carry_The_Prs_Own_Project()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("Contoso.Web", source.LastProject);
     }
 
     [Fact]

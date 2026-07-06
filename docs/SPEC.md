@@ -50,7 +50,13 @@ This spec is the outcome of the requirements grilling on 2026-07-04.
 ### Lists (three tabs)
 1. **Review queue** — PRs where I'm a reviewer and my vote is pending (default tab).
 2. **Mine** — PRs I authored: vote status per reviewer, unresolved thread count.
-3. **Active** — all active PRs in the current project, filterable by repository.
+3. **Active** — all active PRs in scope (the whole org by default, or the current
+   project when scoped down), filterable by repository.
+
+The list scope defaults to the whole organization; `pr_scope = "project"` in a
+context, or `:scope project` at runtime, narrows it to one project. Each PR's
+drill-in (threads, votes, diff, web URLs) uses that PR's own project, so rows may
+span projects. See ADR 0011.
 
 ### PR detail
 - Description, source/target branches, reviewers + votes, merge status,

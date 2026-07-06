@@ -88,6 +88,24 @@ public static class ConfigLoader
             Name = name,
             OrganizationUrl = NormalizeOrganization(name, organization),
             Project = project,
+            PrScope = ParsePrScope(name, table),
+        };
+    }
+
+    private static PrScope ParsePrScope(string contextName, TomlTable table)
+    {
+        // Absent => Org (the product default). Org scope needs only the org URL;
+        // Project scope reuses the required 'project' key, so both are always valid.
+        if (!table.TryGetValue("pr_scope", out var raw))
+        {
+            return PrScope.Org;
+        }
+        return (raw as string) switch
+        {
+            "org" => PrScope.Org,
+            "project" => PrScope.Project,
+            _ => throw new ConfigException(
+                $"[contexts.{contextName}] pr_scope must be \"org\" or \"project\", got '{raw}'"),
         };
     }
 

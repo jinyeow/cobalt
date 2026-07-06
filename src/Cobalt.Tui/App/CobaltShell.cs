@@ -93,6 +93,16 @@ public sealed class CobaltShell : Window
             _vm.OnContextSwitched(name, _vm.UserName);
             RefreshChrome();
         };
+        _vm.ScopeChangeRequested += scope =>
+        {
+            // Repoint the adapter and reload the PR list against the new breadth.
+            if (_pullRequests is not null)
+            {
+                _pullRequests.Scope = scope;
+            }
+            _prList?.Load();
+            RefreshChrome();
+        };
     }
 
     private void WireKeys()
@@ -210,7 +220,7 @@ public sealed class CobaltShell : Window
         }
         if (_prList?.SelectedPr is { } pr)
         {
-            return AdoUrls.PullRequest(_context, pr.RepositoryName, pr.PullRequestId);
+            return AdoUrls.PullRequest(_context, pr.ProjectName, pr.RepositoryName, pr.PullRequestId);
         }
         return null;
     }

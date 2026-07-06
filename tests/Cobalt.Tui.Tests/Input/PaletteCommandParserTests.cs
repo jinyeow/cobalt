@@ -51,4 +51,22 @@ public class PaletteCommandParserTests
     {
         Assert.Equal(PaletteActionKind.None, PaletteCommandParser.Parse("   ").Kind);
     }
+
+    [Fact]
+    public void Scope_With_Value_Sets_Scope()
+    {
+        var action = PaletteCommandParser.Parse("scope org");
+
+        Assert.Equal(PaletteActionKind.SetScope, action.Kind);
+        Assert.Equal("org", action.Argument);
+    }
+
+    [Fact]
+    public void Bare_Scope_Sets_Scope_With_Empty_Argument()
+    {
+        var action = PaletteCommandParser.Parse("scope");
+
+        Assert.Equal(PaletteActionKind.SetScope, action.Kind);
+        Assert.Equal("", action.Argument);
+    }
 }

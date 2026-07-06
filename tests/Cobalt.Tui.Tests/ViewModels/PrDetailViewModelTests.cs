@@ -7,7 +7,8 @@ public class PrDetailViewModelTests
 {
     private static PullRequest Pr() =>
         new(10, "Add feature", "the description", "active", false, "feature", "main", "succeeded",
-            "Jin", "repo-1", "web", [new PrReviewer("r1", "Sam", PrVote.NoVote, true)], [101], "abc123");
+            "Jin", "repo-1", "web", [new PrReviewer("r1", "Sam", PrVote.NoVote, true)], [101], "abc123",
+            "Contoso.Web");
 
     private sealed class FakeStore : IPullRequestStore
     {
@@ -17,37 +18,48 @@ public class PrDetailViewModelTests
         public (int thread, string text)? Replied { get; private set; }
         public (int thread, PrThreadStatus status)? StatusSet { get; private set; }
         public bool Abandoned { get; private set; }
+        public string? LastProject { get; private set; }
 
         public Task<PullRequest> GetPullRequestAsync(int id, CancellationToken ct) => Task.FromResult(Pr);
-        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string repo, int id, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<PrThread>>(Threads);
-
-        public Task VoteAsync(string repo, int id, PrVote vote, CancellationToken ct)
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int id, CancellationToken ct)
         {
+            LastProject = project;
+            return Task.FromResult<IReadOnlyList<PrThread>>(Threads);
+        }
+
+        public Task VoteAsync(string project, string repo, int id, PrVote vote, CancellationToken ct)
+        {
+            LastProject = project;
             VotedValue = vote;
             return Task.CompletedTask;
         }
 
-        public Task ReplyToThreadAsync(string repo, int id, int threadId, string text, CancellationToken ct)
+        public Task ReplyToThreadAsync(string project, string repo, int id, int threadId, string text, CancellationToken ct)
         {
+            LastProject = project;
             Replied = (threadId, text);
             return Task.CompletedTask;
         }
 
-        public Task SetThreadStatusAsync(string repo, int id, int threadId, PrThreadStatus status, CancellationToken ct)
+        public Task SetThreadStatusAsync(string project, string repo, int id, int threadId, PrThreadStatus status, CancellationToken ct)
         {
+            LastProject = project;
             StatusSet = (threadId, status);
             return Task.CompletedTask;
         }
 
-        public Task AbandonAsync(string repo, int id, CancellationToken ct)
+        public Task AbandonAsync(string project, string repo, int id, CancellationToken ct)
         {
+            LastProject = project;
             Abandoned = true;
             return Task.CompletedTask;
         }
 
-        public Task CompleteAsync(string repo, int id, string mergeStrategy, bool deleteSource, CancellationToken ct) =>
-            Task.CompletedTask;
+        public Task CompleteAsync(string project, string repo, int id, string mergeStrategy, bool deleteSource, CancellationToken ct)
+        {
+            LastProject = project;
+            return Task.CompletedTask;
+        }
     }
 
     [Fact]
@@ -132,6 +144,19 @@ public class PrDetailViewModelTests
         await vm.AbandonAsync(TestContext.Current.CancellationToken);
 
         Assert.True(store.Abandoned);
+    }
+
+    [Fact]
+    public async Task Actions_Thread_The_Prs_Own_Project_Through()
+    {
+        var store = new FakeStore();
+        var vm = new PrDetailViewModel(store, 10);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        await vm.VoteAsync(PrVote.Approved, TestContext.Current.CancellationToken);
+
+        // The PR belongs to "Contoso.Web" (not the ambient context project).
+        Assert.Equal("Contoso.Web", store.LastProject);
     }
 
     [Fact]

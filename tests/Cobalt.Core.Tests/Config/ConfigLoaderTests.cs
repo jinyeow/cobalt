@@ -124,4 +124,53 @@ public class ConfigLoaderTests
     {
         Assert.Throws<ConfigException>(() => ConfigLoader.Parse("this is [not toml"));
     }
+
+    [Fact]
+    public void PrScope_Defaults_To_Org_When_Unset()
+    {
+        var config = ConfigLoader.Parse(ValidToml);
+
+        Assert.Equal(PrScope.Org, config.Contexts["work"].PrScope);
+    }
+
+    [Fact]
+    public void PrScope_Project_Is_Parsed()
+    {
+        var config = ConfigLoader.Parse(
+            """
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            pr_scope = "project"
+            """);
+
+        Assert.Equal(PrScope.Project, config.Contexts["work"].PrScope);
+    }
+
+    [Fact]
+    public void PrScope_Org_Is_Parsed()
+    {
+        var config = ConfigLoader.Parse(
+            """
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            pr_scope = "org"
+            """);
+
+        Assert.Equal(PrScope.Org, config.Contexts["work"].PrScope);
+    }
+
+    [Fact]
+    public void PrScope_Invalid_Value_Is_An_Error()
+    {
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            """
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            pr_scope = "everything"
+            """));
+        Assert.Contains("pr_scope", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -1,3 +1,4 @@
+using Cobalt.Core.Config;
 using Cobalt.Tui.Input;
 
 namespace Cobalt.Tui.ViewModels;
@@ -12,7 +13,7 @@ public enum AppSection
 /// Top-level app state: active section, active context, status line, and palette
 /// dispatch. No Terminal.Gui types (ADR 0004) — the shell view binds to this.
 /// </summary>
-public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string initialContext)
+public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string initialContext, PrScope initialScope = PrScope.Org)
 {
     public MessageLog Messages { get; } = new();
 
@@ -20,6 +21,9 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
     public string ContextName { get; private set; } = initialContext;
     public string? UserName { get; private set; }
     public IReadOnlyList<string> ContextNames => contextNames;
+
+    /// <summary>The active PR-list breadth, shown in the status line and flipped by <c>:scope</c>.</summary>
+    public PrScope Scope { get; private set; } = initialScope;
 
     public event Action? SectionChanged;
     public event Action? QuitRequested;
@@ -30,8 +34,13 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
     /// <summary>Raised with a validated context name; the shell performs the actual reconnect.</summary>
     public event Action<string>? ContextSwitchRequested;
 
+    /// <summary>Raised with the new PR scope; the shell repoints the adapter and reloads the list.</summary>
+    public event Action<PrScope>? ScopeChangeRequested;
+
     public string StatusLine =>
-        $" ctx:{ContextName}" + (UserName is null ? "" : $"  {UserName}");
+        $" ctx:{ContextName}  scope:{ScopeName(Scope)}" + (UserName is null ? "" : $"  {UserName}");
+
+    private static string ScopeName(PrScope scope) => scope == PrScope.Org ? "org" : "project";
 
     /// <summary>Handles shell-level commands; returns false if the active screen should get it instead.</summary>
     public bool HandleCommand(AppCommand command)
@@ -85,11 +94,42 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
                 Messages.Error(
                     $"unknown context '{action.Argument}' (available: {string.Join(", ", contextNames)})");
                 break;
+            case PaletteActionKind.SetScope:
+                SetScope(action.Argument);
+                break;
             case PaletteActionKind.Unknown:
                 Messages.Error(action.Argument);
                 break;
             case PaletteActionKind.None:
             default:
+                break;
+        }
+    }
+
+    private void SetScope(string argument)
+    {
+        // Bare `:scope` just reports the current value.
+        if (argument.Length == 0)
+        {
+            Messages.Info($"pr scope: {ScopeName(Scope)} (switch with :scope org|project)");
+            return;
+        }
+        switch (argument.ToLowerInvariant())
+        {
+            case "org":
+            case "project":
+                var next = argument.Equals("org", StringComparison.OrdinalIgnoreCase) ? PrScope.Org : PrScope.Project;
+                if (next == Scope)
+                {
+                    Messages.Info($"pr scope already {ScopeName(Scope)}");
+                    return;
+                }
+                Scope = next;
+                Messages.Info($"pr scope: {ScopeName(Scope)}");
+                ScopeChangeRequested?.Invoke(Scope);
+                break;
+            default:
+                Messages.Error($"unknown scope '{argument}' (use: org or project)");
                 break;
         }
     }

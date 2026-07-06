@@ -22,7 +22,7 @@ public class AdoUrlsTests
     [Fact]
     public void PullRequest_Url_Includes_Repo()
     {
-        var url = AdoUrls.PullRequest(Context, "web", 10);
+        var url = AdoUrls.PullRequest(Context, "My Project", "web", 10);
 
         Assert.Equal("https://dev.azure.com/contoso/My%20Project/_git/web/pullrequest/10", url);
     }
@@ -30,8 +30,25 @@ public class AdoUrlsTests
     [Fact]
     public void Encodes_Repo_With_Spaces()
     {
-        var url = AdoUrls.PullRequest(Context, "My Repo", 10);
+        var url = AdoUrls.PullRequest(Context, "My Project", "My Repo", 10);
 
         Assert.Contains("_git/My%20Repo/pullrequest/10", url);
+    }
+
+    [Fact]
+    public void PullRequest_Url_Uses_The_Prs_Own_Project_Not_The_Context()
+    {
+        // Org-scoped: a PR living in another project must build its URL with that project.
+        var url = AdoUrls.PullRequest(Context, "Other Team", "web", 10);
+
+        Assert.Equal("https://dev.azure.com/contoso/Other%20Team/_git/web/pullrequest/10", url);
+    }
+
+    [Fact]
+    public void PullRequest_Url_Falls_Back_To_Context_Project_When_Blank()
+    {
+        var url = AdoUrls.PullRequest(Context, "", "web", 10);
+
+        Assert.Equal("https://dev.azure.com/contoso/My%20Project/_git/web/pullrequest/10", url);
     }
 }

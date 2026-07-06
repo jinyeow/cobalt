@@ -5,11 +5,11 @@ namespace Cobalt.Tui.ViewModels;
 
 public interface IPrDiffSource
 {
-    Task<PrIteration?> GetLatestIterationAsync(string repositoryId, int prId, CancellationToken ct);
-    Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string repositoryId, int prId, int iterationId, CancellationToken ct);
-    Task<string> GetFileContentAsync(string repositoryId, string path, string commit, CancellationToken ct);
-    Task<IReadOnlyList<PrThread>> GetThreadsAsync(string repositoryId, int prId, CancellationToken ct);
-    Task AddLineCommentAsync(string repositoryId, int prId, string path, int line, bool rightSide, string text, CancellationToken ct);
+    Task<PrIteration?> GetLatestIterationAsync(string project, string repositoryId, int prId, CancellationToken ct);
+    Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repositoryId, int prId, int iterationId, CancellationToken ct);
+    Task<string> GetFileContentAsync(string project, string repositoryId, string path, string commit, CancellationToken ct);
+    Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repositoryId, int prId, CancellationToken ct);
+    Task AddLineCommentAsync(string project, string repositoryId, int prId, string path, int line, bool rightSide, string text, CancellationToken ct);
 }
 
 /// <summary>
@@ -44,7 +44,7 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         Changed?.Invoke();
         try
         {
-            _iteration = await source.GetLatestIterationAsync(pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
+            _iteration = await source.GetLatestIterationAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
             if (_iteration is null)
             {
                 Error = "this pull request has no iterations to diff";
@@ -53,8 +53,8 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
             }
 
             Files = await source.GetIterationChangesAsync(
-                pr.RepositoryId, pr.PullRequestId, _iteration.Id, ct).ConfigureAwait(false);
-            Threads = await source.GetThreadsAsync(pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
+                pr.ProjectName, pr.RepositoryId, pr.PullRequestId, _iteration.Id, ct).ConfigureAwait(false);
+            Threads = await source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
 
             _selectedFileIndex = 0;
             if (Files.Count > 0)
@@ -125,9 +125,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         try
         {
             await source.AddLineCommentAsync(
-                pr.RepositoryId, pr.PullRequestId, SelectedFile.Path, lineNumber.Value, rightSide, text, ct)
+                pr.ProjectName, pr.RepositoryId, pr.PullRequestId, SelectedFile.Path, lineNumber.Value, rightSide, text, ct)
                 .ConfigureAwait(false);
-            Threads = await source.GetThreadsAsync(pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
+            Threads = await source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -163,10 +163,10 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         var basePath = file.OriginalPath ?? file.Path;
         var baseText = file.ChangeType == FileChangeKind.Add
             ? ""
-            : await source.GetFileContentAsync(pr.RepositoryId, basePath, _iteration.BaseCommitId ?? "", ct).ConfigureAwait(false);
+            : await source.GetFileContentAsync(pr.ProjectName, pr.RepositoryId, basePath, _iteration.BaseCommitId ?? "", ct).ConfigureAwait(false);
         var sourceText = file.ChangeType == FileChangeKind.Delete
             ? ""
-            : await source.GetFileContentAsync(pr.RepositoryId, file.Path, _iteration.SourceCommitId ?? "", ct).ConfigureAwait(false);
+            : await source.GetFileContentAsync(pr.ProjectName, pr.RepositoryId, file.Path, _iteration.SourceCommitId ?? "", ct).ConfigureAwait(false);
 
         CurrentDiff = DiffService.Unified(baseText, sourceText);
         _diffCache[file.Path] = CurrentDiff;

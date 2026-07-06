@@ -48,7 +48,7 @@ public class GitApiTests : IDisposable
             """);
 
         var prs = await Api(handler).ListPullRequestsAsync(
-            PrListFilter.Active, Me, TestContext.Current.CancellationToken);
+            PrListFilter.Active, Me, PrScope.Project, TestContext.Current.CancellationToken);
 
         Assert.Single(prs);
         Assert.Equal(10, prs[0].PullRequestId);
@@ -64,11 +64,65 @@ public class GitApiTests : IDisposable
     }
 
     [Fact]
+    public async Task ListActive_Org_Scope_Omits_Project_Segment()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"value":[]}""");
+
+        await Api(handler).ListPullRequestsAsync(
+            PrListFilter.Active, Me, PrScope.Org, TestContext.Current.CancellationToken);
+
+        var uri = Uri.UnescapeDataString(handler.Requests[0].RequestUri!.AbsoluteUri);
+        // Org-wide list route: no "{Project}/" before _apis/git/pullrequests.
+        Assert.Contains("contoso/_apis/git/pullrequests", uri);
+        Assert.DoesNotContain("My Project/_apis/git/pullrequests", uri);
+        Assert.Contains("searchCriteria.status=active", uri);
+    }
+
+    [Fact]
+    public async Task List_Surfaces_Repository_Project_Name_And_CreationDate()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """
+            {"value":[
+              {"pullRequestId":10,"title":"x","status":"active",
+               "sourceRefName":"refs/heads/f","targetRefName":"refs/heads/main",
+               "creationDate":"2026-01-02T03:04:05Z",
+               "repository":{"id":"repo-1","name":"web","project":{"id":"p1","name":"Contoso.Web"}}}
+            ]}
+            """);
+
+        var prs = await Api(handler).ListPullRequestsAsync(
+            PrListFilter.Active, Me, PrScope.Project, TestContext.Current.CancellationToken);
+
+        Assert.Equal("Contoso.Web", prs[0].ProjectName);
+        Assert.Equal(new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero), prs[0].CreationDate);
+    }
+
+    [Fact]
+    public async Task List_Missing_Project_Falls_Back_To_Context_Project()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """
+            {"value":[
+              {"pullRequestId":10,"title":"x","status":"active",
+               "sourceRefName":"refs/heads/f","targetRefName":"refs/heads/main",
+               "repository":{"id":"repo-1","name":"web"}}
+            ]}
+            """);
+
+        var prs = await Api(handler).ListPullRequestsAsync(
+            PrListFilter.Active, Me, PrScope.Org, TestContext.Current.CancellationToken);
+
+        // repository.project is absent → fall back to the context's project.
+        Assert.Equal("My Project", prs[0].ProjectName);
+    }
+
+    [Fact]
     public async Task ReviewQueue_Filters_By_ReviewerId()
     {
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"value":[]}""");
 
-        await Api(handler).ListPullRequestsAsync(PrListFilter.ReviewQueue, Me, TestContext.Current.CancellationToken);
+        await Api(handler).ListPullRequestsAsync(PrListFilter.ReviewQueue, Me, PrScope.Project, TestContext.Current.CancellationToken);
 
         var uri = handler.Requests[0].RequestUri!.AbsoluteUri;
         Assert.Contains($"searchCriteria.reviewerId={Me}", uri);
@@ -79,7 +133,7 @@ public class GitApiTests : IDisposable
     {
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"value":[]}""");
 
-        await Api(handler).ListPullRequestsAsync(PrListFilter.Mine, Me, TestContext.Current.CancellationToken);
+        await Api(handler).ListPullRequestsAsync(PrListFilter.Mine, Me, PrScope.Project, TestContext.Current.CancellationToken);
 
         var uri = handler.Requests[0].RequestUri!.AbsoluteUri;
         Assert.Contains($"searchCriteria.creatorId={Me}", uri);
@@ -115,7 +169,7 @@ public class GitApiTests : IDisposable
             ]}
             """);
 
-        var threads = await Api(handler).GetThreadsAsync("repo-1", 10, TestContext.Current.CancellationToken);
+        var threads = await Api(handler).GetThreadsAsync("repo-1", 10, cancellationToken: TestContext.Current.CancellationToken);
 
         // system-only threads are filtered out
         Assert.Single(threads);
@@ -124,12 +178,48 @@ public class GitApiTests : IDisposable
     }
 
     [Fact]
+    public async Task GetThreads_Uses_Explicit_Project_When_Given()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"value":[]}""");
+
+        await Api(handler).GetThreadsAsync("repo-1", 10, "Other Project", TestContext.Current.CancellationToken);
+
+        var uri = Uri.UnescapeDataString(handler.Requests[0].RequestUri!.AbsoluteUri);
+        Assert.Contains("Other Project/_apis/git/repositories/repo-1", uri);
+        Assert.DoesNotContain("My Project/_apis/git", uri);
+    }
+
+    [Fact]
+    public async Task Vote_Uses_Explicit_Project_When_Given()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """{"displayName":"Jin","id":"me","vote":10}""");
+
+        await Api(handler).VoteAsync("repo-1", 10, Me, PrVote.Approved, "Other Project", TestContext.Current.CancellationToken);
+
+        var uri = Uri.UnescapeDataString(handler.Requests[0].RequestUri!.AbsoluteUri);
+        Assert.Contains("Other Project/_apis/git/repositories/repo-1", uri);
+    }
+
+    [Fact]
+    public async Task Repo_Scoped_Call_Falls_Back_To_Context_Project()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"value":[]}""");
+
+        // No project passed → the context's project is used (preserves old call sites).
+        await Api(handler).GetThreadsAsync("repo-1", 10, cancellationToken: TestContext.Current.CancellationToken);
+
+        var uri = Uri.UnescapeDataString(handler.Requests[0].RequestUri!.AbsoluteUri);
+        Assert.Contains("My Project/_apis/git/repositories/repo-1", uri);
+    }
+
+    [Fact]
     public async Task Vote_Puts_Reviewer_With_Numeric_Value()
     {
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
             """{"displayName":"Jin","id":"me","vote":10}""");
 
-        await Api(handler).VoteAsync("repo-1", 10, Me, PrVote.Approved, TestContext.Current.CancellationToken);
+        await Api(handler).VoteAsync("repo-1", 10, Me, PrVote.Approved, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpMethod.Put, handler.Requests[0].Method);
         Assert.Contains($"reviewers/{Me}", handler.Requests[0].RequestUri!.AbsoluteUri);
@@ -142,7 +232,7 @@ public class GitApiTests : IDisposable
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
             """{"id":2,"content":"ok","author":{"displayName":"Jin"},"commentType":"text"}""");
 
-        await Api(handler).ReplyToThreadAsync("repo-1", 10, threadId: 3, "ok thanks", TestContext.Current.CancellationToken);
+        await Api(handler).ReplyToThreadAsync("repo-1", 10, threadId: 3, "ok thanks", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpMethod.Post, handler.Requests[0].Method);
         Assert.Contains("threads/3/comments", handler.Requests[0].RequestUri!.AbsoluteUri);
@@ -154,7 +244,7 @@ public class GitApiTests : IDisposable
     {
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"id":3,"status":"fixed"}""");
 
-        await Api(handler).SetThreadStatusAsync("repo-1", 10, 3, PrThreadStatus.Fixed, TestContext.Current.CancellationToken);
+        await Api(handler).SetThreadStatusAsync("repo-1", 10, 3, PrThreadStatus.Fixed, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpMethod.Patch, handler.Requests[0].Method);
         Assert.Contains("threads/3", handler.Requests[0].RequestUri!.AbsoluteUri);
@@ -167,7 +257,7 @@ public class GitApiTests : IDisposable
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
             """{"pullRequestId":10,"title":"x","status":"abandoned","sourceRefName":"refs/heads/f","targetRefName":"refs/heads/main","repository":{"id":"r","name":"web"},"reviewers":[]}""");
 
-        await Api(handler).AbandonAsync("repo-1", 10, TestContext.Current.CancellationToken);
+        await Api(handler).AbandonAsync("repo-1", 10, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpMethod.Patch, handler.Requests[0].Method);
         Assert.Contains("\"status\":\"abandoned\"", handler.RequestBodies[0]);
