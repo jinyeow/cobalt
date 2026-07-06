@@ -64,6 +64,19 @@ In diff review: `Tab` switches file list / diff pane · `[`/`]` prev/next file �
 `c` comment on the selected line. Anywhere in a list: `yy` yanks the item's web
 URL to the clipboard · `gx` opens it in your browser.
 
+## Lists
+
+Rows are width-aware: fixed columns sit left and the title/summary takes all the
+remaining terminal width (reflowing on resize), so there's no dead right gutter.
+
+- **Pull requests**: id · vote summary · **age** (`45m`/`6h`/`3d`/`5w` since the PR
+  was created) · a **project** column when the list spans more than one project
+  (org scope) · repository · title. A **comment count** badge (`💬 3`) fills in
+  **lazily in the background** after the list renders — the list stays instant even
+  when Azure DevOps is slow, and counts are fetched only for loaded rows, capped and
+  cached.
+- **Work items**: id · type · state · title (fills) · iteration · changed date.
+
 ## Known limitations
 
 - Diffs colour changed *words* (intra-line) and code tokens for C#/JS-TS/JSON/

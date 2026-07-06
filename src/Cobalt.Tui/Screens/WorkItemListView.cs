@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using Cobalt.Core.Models;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
@@ -18,6 +17,7 @@ public sealed class WorkItemListView : View
     private readonly Label _filterLabel;
     private readonly TextField _filter;
     private readonly CancellationTokenSource _cts = new();
+    private int _lastWidth = -1;
     private bool _filtering;
     private bool _disposed;
 
@@ -41,6 +41,8 @@ public sealed class WorkItemListView : View
         // Disable type-ahead search: it consumes j/k/g/G and the shell's vim keys
         // before they can bubble up to the router. Navigation goes through the shell.
         _list.KeystrokeNavigator = null;
+        // Re-render on resize so the width-aware columns reflow to the new width.
+        _list.ViewportChanged += OnViewportChanged;
         _filterLabel = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = 1, Text = "/", Visible = false };
         _filter = new TextField { X = 1, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Visible = false };
 
@@ -94,12 +96,22 @@ public sealed class WorkItemListView : View
         });
     }
 
+    private void OnViewportChanged(object? sender, Terminal.Gui.ViewBase.DrawEventArgs e)
+    {
+        if (_disposed || _list.Viewport.Width == _lastWidth)
+        {
+            return;
+        }
+        Render();
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing && !_disposed)
         {
             _disposed = true;
             _vm.Changed -= OnVmChanged;
+            _list.ViewportChanged -= OnViewportChanged;
             _cts.Cancel();
             _cts.Dispose();
         }
@@ -166,11 +178,14 @@ public sealed class WorkItemListView : View
             _header.Text = $" my work items ({_vm.Rows.Count})";
         }
 
+        var width = _list.Viewport.Width;
+        _lastWidth = width;
+
         // SetSource nulls SelectedItem in 2.4.16, so capture the reviewer's current
         // row first and restore it (clamped) — otherwise a background reload snaps
         // the highlight back to the top. The list is the source of truth.
         var target = _list.SelectedItem ?? _vm.SelectedIndex;
-        var rows = new ObservableCollection<string>(_vm.Rows.Select(Format));
+        var rows = new ObservableCollection<string>(_vm.Rows.Select(item => WorkItemRowFormatter.Format(item, width)));
         _list.SetSource(rows);
         if (_vm.Rows.Count > 0)
         {
@@ -178,24 +193,4 @@ public sealed class WorkItemListView : View
         }
         SetNeedsDraw();
     }
-
-    private static string Format(WorkItem item)
-    {
-        var id = item.Id.ToString().PadLeft(6);
-        var type = Truncate(item.WorkItemType, 8).PadRight(8);
-        var state = Truncate(item.State, 10).PadRight(10);
-        var title = Truncate(item.Title, 40).PadRight(40);
-        var iteration = Truncate(LastSegment(item.IterationPath), 14).PadRight(14);
-        var updated = item.ChangedDate?.ToString("yyyy-MM-dd") ?? "";
-        return $"{id}  {type}  {state}  {title}  {iteration}  {updated}";
-    }
-
-    private static string LastSegment(string path)
-    {
-        var slash = path.LastIndexOf('\\');
-        return slash >= 0 ? path[(slash + 1)..] : path;
-    }
-
-    private static string Truncate(string value, int max) =>
-        value.Length <= max ? value : value[..(max - 1)] + "…";
 }

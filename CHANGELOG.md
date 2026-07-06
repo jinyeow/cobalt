@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- **Width-aware list columns.** PR and work-item rows now size to the terminal:
+  fixed columns sit left and the title/summary takes all remaining width, reflowing
+  on resize instead of leaving a blank right gutter.
+- **PR age column** showing how long ago each PR was created (`45m`/`6h`/`3d`/`5w`).
+- **PR project column**, shown only when the list spans more than one project (the
+  org-scoped, cross-project case).
+- **Lazy comment counts.** After the PR list renders, a capped, cached background
+  enricher fetches the non-system comment count for the loaded rows and decorates
+  each with a `💬 N` badge as it lands — the list stays instant even when Azure
+  DevOps is slow, and a failed or cancelled fetch is silently dropped.
 - **Org-wide pull-request scope.** PR lists (review queue / mine / active) now
   default to the **whole organization** instead of a single project. An optional
   per-context `pr_scope = "org" | "project"` config key sets the startup scope

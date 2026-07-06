@@ -15,3 +15,5 @@ immutable once accepted; superseding decisions get a new number that links back.
 | [0008](0008-client-side-diff-and-line-comments.md) | Client-side unified diff and line-comment anchoring | Accepted |
 | [0009](0009-editor-suspend-resume.md) | Suspend Terminal.Gui by parking the UI thread around external processes | Accepted |
 | [0010](0010-diff-pane-colored-listview-data-source.md) | Color the diff pane through a custom `IListDataSource`, styled by a pure run model | Accepted |
+| [0011](0011-cross-project-org-pr-scope.md) | Cross-project (org-wide) PR scope, with per-PR-project drill-in | Accepted |
+| [0012](0012-lazy-background-comment-counts.md) | Lazy, background per-PR comment counts | Accepted |

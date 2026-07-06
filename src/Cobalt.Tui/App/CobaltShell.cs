@@ -340,7 +340,14 @@ public sealed class CobaltShell : Window
         else if (_vm.ActiveSection == AppSection.PullRequests && _pullRequests is not null)
         {
             var listVm = new PrListViewModel(_pullRequests);
-            _prList = new PrListView(_app, listVm);
+            var store = _pullRequests;
+            var enricher = new PrCommentCountEnricher(async (pr, ct) =>
+            {
+                var threads = await store.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct)
+                    .ConfigureAwait(false);
+                return threads.Sum(t => t.Comments.Count(c => !c.IsSystem));
+            });
+            _prList = new PrListView(_app, listVm, enricher);
             _prList.ItemActivated += OpenPrDetail;
             _activeScreen = _prList;
             _content.Add(_activeScreen);

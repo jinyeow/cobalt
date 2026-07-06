@@ -13,15 +13,21 @@ public sealed class PrListView : View
 {
     private readonly IApplication _app;
     private readonly PrListViewModel _vm;
+    private readonly PrCommentCountEnricher? _comments;
     private readonly Label _header;
     private readonly ListView _list;
     private readonly CancellationTokenSource _cts = new();
+    private readonly Func<DateTimeOffset> _now;
+    private IReadOnlyList<string> _rendered = [];
+    private int _lastWidth = -1;
     private bool _disposed;
 
-    public PrListView(IApplication app, PrListViewModel vm)
+    public PrListView(IApplication app, PrListViewModel vm, PrCommentCountEnricher? comments = null, Func<DateTimeOffset>? now = null)
     {
         _app = app;
         _vm = vm;
+        _comments = comments;
+        _now = now ?? (() => DateTimeOffset.Now);
         Width = Dim.Fill();
         Height = Dim.Fill();
         CanFocus = true;
@@ -37,9 +43,16 @@ public sealed class PrListView : View
         };
         // Disable type-ahead search so vim keys (j/k/g/G/…) bubble to the shell router.
         _list.KeystrokeNavigator = null;
+        // Re-render when the terminal (and hence the list) is resized so columns
+        // and the title reflow to the new width.
+        _list.ViewportChanged += OnViewportChanged;
         Add(_header, _list);
 
         _vm.Changed += OnVmChanged;
+        if (_comments is not null)
+        {
+            _comments.CountAvailable += OnCountAvailable;
+        }
         Render();
     }
 
@@ -105,6 +118,35 @@ public sealed class PrListView : View
         });
     }
 
+    private void OnViewportChanged(object? sender, Terminal.Gui.ViewBase.DrawEventArgs e)
+    {
+        if (_disposed || _list.Viewport.Width == _lastWidth)
+        {
+            return;
+        }
+        Render();
+    }
+
+    private void OnCountAvailable(int prId)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        _app.Invoke(() =>
+        {
+            if (!_disposed)
+            {
+                Render();
+            }
+        });
+    }
+
+    internal int ListWidth => _list.Viewport.Width;
+
+    internal string RowText(int index) =>
+        index >= 0 && index < _rendered.Count ? _rendered[index] : "";
+
     internal void Render()
     {
         var tab = _vm.ActiveTab switch
@@ -119,44 +161,31 @@ public sealed class PrListView : View
                 ? $" pull requests · {tab} · error: {e}"
                 : $" pull requests · {tab} ({_vm.Rows.Count})   [Tab] switch";
 
+        var width = _list.Viewport.Width;
+        _lastWidth = width;
+        var now = _now();
+        var cols = PrColumns.For(_vm.Rows);
+
         // SetSource nulls SelectedItem in 2.4.16, so capture the reviewer's current
         // row first and restore it (clamped) — otherwise a background reload snaps
         // the highlight back to the top. The list is the source of truth.
         var target = _list.SelectedItem ?? _vm.SelectedIndex;
-        var rows = new ObservableCollection<string>(_vm.Rows.Select(Format));
+        _rendered = [.. _vm.Rows.Select(pr => PrRowFormatter.Format(pr, width, cols, now, _comments?.TryGet(pr)))];
+        var rows = new ObservableCollection<string>(_rendered);
         _list.SetSource(rows);
         if (_vm.Rows.Count > 0)
         {
             _list.SelectedItem = Math.Clamp(target, 0, _vm.Rows.Count - 1);
         }
+
+        // Lazily fill comment counts for the loaded rows in the background; cached and
+        // capped, so it never blocks this render and re-renders each row as counts land.
+        if (_comments is not null && _vm.Rows.Count > 0)
+        {
+            _comments.Enqueue(_vm.Rows, _cts.Token);
+        }
         SetNeedsDraw();
     }
-
-    private static string Format(PullRequest pr)
-    {
-        var id = $"!{pr.PullRequestId}".PadRight(7);
-        var repo = Truncate(pr.RepositoryName, 12).PadRight(12);
-        var votes = VoteSummary(pr);
-        var draft = pr.IsDraft ? "[draft] " : "";
-        return $"{id} {repo} {votes,-6} {draft}{Truncate(pr.Title, 50)}";
-    }
-
-    private static string VoteSummary(PullRequest pr)
-    {
-        if (pr.Reviewers.Any(r => r.Vote == PrVote.Rejected))
-        {
-            return "✗ rej";
-        }
-        if (pr.Reviewers.Any(r => r.Vote == PrVote.WaitingForAuthor))
-        {
-            return "⧗ wait";
-        }
-        var approved = pr.Reviewers.Count(r => r.Vote is PrVote.Approved or PrVote.ApprovedWithSuggestions);
-        return approved > 0 ? $"✓ {approved}" : "·";
-    }
-
-    private static string Truncate(string value, int max) =>
-        value.Length <= max ? value : value[..(max - 1)] + "…";
 
     protected override void Dispose(bool disposing)
     {
@@ -164,6 +193,11 @@ public sealed class PrListView : View
         {
             _disposed = true;
             _vm.Changed -= OnVmChanged;
+            _list.ViewportChanged -= OnViewportChanged;
+            if (_comments is not null)
+            {
+                _comments.CountAvailable -= OnCountAvailable;
+            }
             _cts.Cancel();
             _cts.Dispose();
         }
