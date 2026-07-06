@@ -303,7 +303,7 @@ public sealed class CobaltShell : Window
         }
         if (_workItemList?.SelectedId is { } wid)
         {
-            return AdoUrls.WorkItem(_context, wid);
+            return AdoUrls.WorkItem(_context, wid, _workItemList.SelectedProject);
         }
         if (_prList?.SelectedPr is { } pr)
         {

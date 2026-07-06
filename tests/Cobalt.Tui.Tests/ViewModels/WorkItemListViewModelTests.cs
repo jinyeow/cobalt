@@ -60,12 +60,29 @@ public class WorkItemListViewModelTests
     }
 
     [Fact]
-    public async Task Load_Cancellation_Propagates()
+    public async Task Load_User_Cancellation_Propagates()
     {
-        var vm = new WorkItemListViewModel(new FakeSource([]) { Throw = new OperationCanceledException() });
+        // A genuine user/dialog cancel carries the caller's own token — it must propagate.
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var vm = new WorkItemListViewModel(new FakeSource([]) { Throw = new OperationCanceledException(cts.Token) });
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            () => vm.LoadAsync(TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => vm.LoadAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task Load_Timeout_Cancellation_Surfaces_As_Error()
+    {
+        // An HttpClient timeout surfaces as an OCE whose token is NOT the caller's; it must
+        // become a visible error and reset IsLoading, not a permanent "loading…" pane (LOW-1).
+        using var foreign = new CancellationTokenSource();
+        await foreign.CancelAsync();
+        var vm = new WorkItemListViewModel(new FakeSource([]) { Throw = new OperationCanceledException(foreign.Token) });
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken); // caller token is NOT cancelled
+
+        Assert.False(vm.IsLoading);
+        Assert.NotNull(vm.Error);
     }
 
     [Fact]

@@ -3,8 +3,13 @@ namespace Cobalt.Core.Config;
 /// <summary>Builds Azure DevOps web URLs for a context (for `gx` open-in-browser and `yy` yank).</summary>
 public static class AdoUrls
 {
-    public static string WorkItem(AdoContext context, long id) =>
-        $"{Org(context)}/{Enc(context.Project)}/_workitems/edit/{id}";
+    /// <summary>
+    /// The web URL for a work item. <paramref name="project"/> is the item's own project
+    /// (which, under org scope, may differ from the context's); falls back to the context
+    /// project when blank.
+    /// </summary>
+    public static string WorkItem(AdoContext context, long id, string? project = null) =>
+        $"{Org(context)}/{Enc(string.IsNullOrEmpty(project) ? context.Project : project)}/_workitems/edit/{id}";
 
     /// <summary>
     /// The web URL for a PR. <paramref name="project"/> is the PR's own project (which,

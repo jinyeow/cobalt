@@ -29,7 +29,7 @@ internal static class TextDialog
     /// Builds and wires the overlay without starting the run loop, exposing the inner
     /// <see cref="TextView"/> so a headless view-level test can drive scrolling.
     /// </summary>
-    internal static Dialog Build(IApplication app, string title, string text, out TextView view)
+    internal static Dialog Build(IApplication app, string title, string text, out TextView view, Action? onClose = null)
     {
         var router = new KeymapRouter(KeyBindingTable.Default());
         var dialog = new Dialog
@@ -38,6 +38,7 @@ internal static class TextDialog
             Width = Dim.Percent(85),
             Height = Dim.Percent(85),
         };
+        var close = onClose ?? (() => app.RequestStop(dialog));
         var textView = new TextView
         {
             X = 0,
@@ -59,6 +60,7 @@ internal static class TextDialog
             {
                 return;
             }
+            var hadPending = router.HasPending;
             var result = router.Feed(token, KeyScope.Global);
             if (result.Kind == KeyResultKind.Matched && VimScroll.Applies(result.Command))
             {
@@ -71,11 +73,17 @@ internal static class TextDialog
                 key.Handled = true; // swallow an in-progress sequence (e.g. after 'g')
                 return;
             }
+            // Esc with a pending count/sequence just clears it (Feed already did) — don't close.
+            if (token == "Esc" && hadPending)
+            {
+                key.Handled = true;
+                return;
+            }
             // q (Back) / Enter (Open) / Esc all close the overlay.
             if (token is "q" or "Esc" or "Enter")
             {
                 key.Handled = true;
-                app.RequestStop(dialog);
+                close();
             }
         }
         textView.KeyDown += OnKey;

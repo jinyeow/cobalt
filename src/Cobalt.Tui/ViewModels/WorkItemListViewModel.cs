@@ -96,13 +96,15 @@ public sealed class WorkItemListViewModel(IWorkItemSource source, bool includeCo
             var query = new WorkItemQuery(_includeCompleted, _projectFilter);
             result = await source.QueryMyWorkItemsAsync(query, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {
-            throw;
+            throw; // genuine user/dialog cancel (carries our token) stays silent
         }
-        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
+        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
         {
-            error = ex.Message;
+            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
+            // surfaced as an expected error rather than a permanent "loading…" pane (LOW-1).
+            error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
             result = [];
         }
 

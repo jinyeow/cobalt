@@ -58,4 +58,21 @@ public class TextDialogScrollTests
 
         Assert.Equal(5, view.CurrentRow);
     }
+
+    [Fact]
+    public void Esc_Clears_A_Pending_Count_Before_Closing()
+    {
+        var text = string.Join("\n", Enumerable.Range(0, 200).Select(i => $"line {i}"));
+        var closed = 0;
+        var dialog = TextDialog.Build(App, "keys", text, out _, onClose: () => closed++);
+        dialog.Layout(new Size(60, 12));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('5'));  // start a count
+        dialog.NewKeyDownEvent(Key.Esc);       // clears the count, must NOT close
+        Assert.Equal(0, closed);
+
+        dialog.NewKeyDownEvent(Key.Esc);       // nothing pending now → closes
+        Assert.Equal(1, closed);
+    }
 }
