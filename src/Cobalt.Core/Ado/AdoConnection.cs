@@ -16,11 +16,13 @@ public sealed class AdoConnection : IDisposable
         _client = client;
         Http = new AdoHttp(client);
         Identity = new IdentityApi(Http);
+        Teams = new TeamsApi(Http);
     }
 
     public AdoContext Context { get; }
     public AdoHttp Http { get; }
     public IdentityApi Identity { get; }
+    public TeamsApi Teams { get; }
 
     public static AdoConnection Create(AdoContext context, ITokenProvider tokens)
     {

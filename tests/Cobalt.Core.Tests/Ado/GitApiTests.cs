@@ -140,6 +140,36 @@ public class GitApiTests : IDisposable
     }
 
     [Fact]
+    public async Task ListForReviewer_Composes_ReviewerId_With_Project_Prefix()
+    {
+        var reviewer = Guid.Parse("99999999-8888-7777-6666-555555555555");
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"value":[]}""");
+
+        await Api(handler).ListPullRequestsForReviewerAsync(
+            reviewer, PrScope.Project, TestContext.Current.CancellationToken);
+
+        var uri = Uri.UnescapeDataString(handler.Requests[0].RequestUri!.AbsoluteUri);
+        Assert.Contains("My Project/_apis/git/pullrequests", uri);
+        Assert.Contains($"searchCriteria.reviewerId={reviewer}", uri);
+        Assert.Contains("searchCriteria.status=active", uri);
+    }
+
+    [Fact]
+    public async Task ListForReviewer_Org_Scope_Omits_Project_Segment()
+    {
+        var reviewer = Guid.Parse("99999999-8888-7777-6666-555555555555");
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"value":[]}""");
+
+        await Api(handler).ListPullRequestsForReviewerAsync(
+            reviewer, PrScope.Org, TestContext.Current.CancellationToken);
+
+        var uri = Uri.UnescapeDataString(handler.Requests[0].RequestUri!.AbsoluteUri);
+        Assert.Contains("contoso/_apis/git/pullrequests", uri);
+        Assert.DoesNotContain("My Project/_apis/git/pullrequests", uri);
+        Assert.Contains($"searchCriteria.reviewerId={reviewer}", uri);
+    }
+
+    [Fact]
     public async Task GetPullRequest_Uses_OrgLevel_ById_Endpoint()
     {
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,

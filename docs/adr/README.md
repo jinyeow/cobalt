@@ -18,3 +18,5 @@ immutable once accepted; superseding decisions get a new number that links back.
 | [0011](0011-cross-project-org-pr-scope.md) | Cross-project (org-wide) PR scope, with per-PR-project drill-in | Accepted |
 | [0012](0012-lazy-background-comment-counts.md) | Lazy, background per-PR comment counts | Accepted |
 | [0013](0013-exception-handling-policy.md) | Narrow-at-operation exception handling with a global crash boundary | Accepted |
+| [0014](0014-shared-count-aware-scroll-seam.md) | Shared count-aware scroll seam for lists and dialogs | Accepted |
+| [0015](0015-team-pr-view.md) | Team PR tab (raw union of team-reviewed and teammate-authored PRs) | Accepted |

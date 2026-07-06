@@ -42,6 +42,8 @@ public static class CobaltTuiApp
         var pullRequests = new PullRequestStoreAdapter(
             new GitApi(connection.Http, context),
             async ct => (await identity.Value.WaitAsync(ct).ConfigureAwait(false)).Id,
+            ct => BuildTeamDirectoryAsync(connection.Teams, ct),
+            context.Project,
             context.PrScope);
 
         using var app = Application.Create().Init();
@@ -54,6 +56,23 @@ public static class CobaltTuiApp
 
         app.Run(shell);
         return 0;
+    }
+
+    /// <summary>
+    /// Resolves the user's team memberships for the Team tab: one <c>$mine=true</c> call
+    /// for the teams, then one members call per team (in parallel). The result is cached
+    /// by the adapter for its lifetime, so this runs at most once.
+    /// </summary>
+    private static async Task<TeamDirectory> BuildTeamDirectoryAsync(TeamsApi teams, CancellationToken ct)
+    {
+        var myTeams = await teams.GetMyTeamsAsync(ct).ConfigureAwait(false);
+        var memberships = await Task.WhenAll(myTeams.Select(async team =>
+        {
+            var members = await teams.GetTeamMembersAsync(team.ProjectId, team.Id, ct).ConfigureAwait(false);
+            IReadOnlySet<string> ids = members.Select(m => m.Id.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return new TeamMembership(team.Id, team.ProjectName, ids);
+        })).ConfigureAwait(false);
+        return new TeamDirectory(memberships);
     }
 
     /// <summary>

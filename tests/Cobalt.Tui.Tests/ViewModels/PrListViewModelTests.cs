@@ -55,17 +55,34 @@ public class PrListViewModelTests
     }
 
     [Fact]
-    public async Task NextTab_Cycles_Through_Three_Filters()
+    public async Task NextTab_Cycles_Through_All_Filters_Including_Team()
     {
         var vm = new PrListViewModel(new FakeSource());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
+        // Tab order: ReviewQueue → Team → Mine → Active → (wrap) ReviewQueue.
+        await vm.NextTabAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(PrListFilter.Team, vm.ActiveTab);
         await vm.NextTabAsync(TestContext.Current.CancellationToken);
         Assert.Equal(PrListFilter.Mine, vm.ActiveTab);
         await vm.NextTabAsync(TestContext.Current.CancellationToken);
         Assert.Equal(PrListFilter.Active, vm.ActiveTab);
         await vm.NextTabAsync(TestContext.Current.CancellationToken);
         Assert.Equal(PrListFilter.ReviewQueue, vm.ActiveTab);
+    }
+
+    [Fact]
+    public async Task PrevTab_From_ReviewQueue_Wraps_To_Active()
+    {
+        var vm = new PrListViewModel(new FakeSource());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        await vm.PrevTabAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(PrListFilter.Active, vm.ActiveTab);
+        await vm.PrevTabAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(PrListFilter.Mine, vm.ActiveTab);
+        await vm.PrevTabAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(PrListFilter.Team, vm.ActiveTab);
     }
 
     [Fact]
@@ -150,15 +167,15 @@ public class PrListViewModelTests
         await vm.LoadAsync(TestContext.Current.CancellationToken);
         Assert.Single(vm.Rows);
 
-        var mine = source.Gate(PrListFilter.Mine);
-        var switching = vm.NextTabAsync(TestContext.Current.CancellationToken); // ReviewQueue → Mine
+        var team = source.Gate(PrListFilter.Team);
+        var switching = vm.NextTabAsync(TestContext.Current.CancellationToken); // ReviewQueue → Team
 
         // Fetch has not completed yet: the pane must already show the loading state
         // with the previous tab's rows cleared.
         Assert.True(vm.IsLoading);
         Assert.Empty(vm.Rows);
 
-        mine.SetResult([Pr(2, "my pr")]);
+        team.SetResult([Pr(2, "my pr")]);
         await switching;
 
         Assert.False(vm.IsLoading);

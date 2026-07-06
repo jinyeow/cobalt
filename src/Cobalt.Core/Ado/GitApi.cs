@@ -18,16 +18,34 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
     private string ProjectSeg(string? project) =>
         Uri.EscapeDataString(string.IsNullOrEmpty(project) ? context.Project : project);
 
-    public async Task<IReadOnlyList<PullRequest>> ListPullRequestsAsync(
+    public Task<IReadOnlyList<PullRequest>> ListPullRequestsAsync(
         PrListFilter filter, Guid me, PrScope scope, CancellationToken cancellationToken = default)
     {
-        var criteria = filter switch
+        // Team is aggregated in the adapter from reviewer + author halves, not a single
+        // searchCriteria query — the reviewer half delegates to ListPullRequestsForReviewerAsync.
+        if (filter == PrListFilter.ReviewQueue)
         {
-            PrListFilter.ReviewQueue => $"searchCriteria.status=active&searchCriteria.reviewerId={me}",
-            PrListFilter.Mine => $"searchCriteria.status=active&searchCriteria.creatorId={me}",
-            _ => "searchCriteria.status=active",
-        };
+            return ListPullRequestsForReviewerAsync(me, scope, cancellationToken);
+        }
 
+        var criteria = filter == PrListFilter.Mine
+            ? $"searchCriteria.status=active&searchCriteria.creatorId={me}"
+            : "searchCriteria.status=active";
+        return ListByCriteriaAsync(criteria, scope, cancellationToken);
+    }
+
+    /// <summary>
+    /// Active PRs where <paramref name="reviewerId"/> is a requested reviewer. A team is an
+    /// identity, so a team's Guid works here too — that's the Team tab's reviewer half.
+    /// </summary>
+    public Task<IReadOnlyList<PullRequest>> ListPullRequestsForReviewerAsync(
+        Guid reviewerId, PrScope scope, CancellationToken cancellationToken = default) =>
+        ListByCriteriaAsync(
+            $"searchCriteria.status=active&searchCriteria.reviewerId={reviewerId}", scope, cancellationToken);
+
+    private async Task<IReadOnlyList<PullRequest>> ListByCriteriaAsync(
+        string criteria, PrScope scope, CancellationToken cancellationToken)
+    {
         // Org scope hits the org-wide list route (no project segment); Project scope
         // keeps the classic per-project route. The org-level *list* endpoint is not
         // formally documented (unlike the org-level by-id and reviewer routes, which

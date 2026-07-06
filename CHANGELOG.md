@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- **Team PR tab.** A new `team` sub-tab (`Tab` order: review queue / team / mine /
+  active) shows the RAW UNION of PRs where a team you belong to is a requested
+  reviewer and PRs a teammate authored — deduped by PR id, newest first. It does not
+  exclude your own PRs or PRs already on other tabs. Team membership is resolved once
+  per session via one org-level `_apis/teams?$mine=true` call plus one members call
+  per team, then cached; the reviewer half uses `searchCriteria.reviewerId={teamGuid}`
+  (a team is an identity) and the author half reuses the active list filtered by
+  author. Honors `:scope` (project scope restricts to teams in the context project).
+  Custom/per-team views are deferred to v2. See
+  [ADR 0015](docs/adr/0015-team-pr-view.md).
 - **Structured work-item filters.** The work-item list now follows the org/project
   `:scope` like the PR list — org scope shows items assigned to you across every
   project, project scope only the context project. Two new palette commands narrow

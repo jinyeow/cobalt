@@ -14,10 +14,16 @@ namespace Cobalt.Tui.ViewModels;
 /// repo-scoped call threads the selected PR's own project through, so drill-in
 /// (threads/vote/diff/URLs) stays correct even when rows span projects.</para>
 /// </summary>
-public sealed class PullRequestStoreAdapter(GitApi api, Func<CancellationToken, Task<Guid>> resolveMe, PrScope initialScope = PrScope.Org)
+public sealed class PullRequestStoreAdapter(
+    GitApi api,
+    Func<CancellationToken, Task<Guid>> resolveMe,
+    Func<CancellationToken, Task<TeamDirectory>>? resolveTeams = null,
+    string project = "",
+    PrScope initialScope = PrScope.Org)
     : IPullRequestSource, IPullRequestStore, IPrDiffSource
 {
     private Guid? _me;
+    private TeamDirectory? _teams;
 
     /// <summary>The active PR-list breadth; flipped by the <c>:scope</c> command.</summary>
     public PrScope Scope { get; set; } = initialScope;
@@ -25,8 +31,17 @@ public sealed class PullRequestStoreAdapter(GitApi api, Func<CancellationToken, 
     private async Task<Guid> MeAsync(CancellationToken ct) =>
         _me ??= await resolveMe(ct).ConfigureAwait(false);
 
+    private async Task<TeamDirectory> TeamsAsync(CancellationToken ct) =>
+        _teams ??= await (resolveTeams
+            ?? throw new InvalidOperationException("no team directory resolver configured"))(ct).ConfigureAwait(false);
+
     public async Task<IReadOnlyList<PullRequest>> ListPullRequestsAsync(PrListFilter filter, CancellationToken ct)
     {
+        if (filter == PrListFilter.Team)
+        {
+            return await ListTeamAsync(ct).ConfigureAwait(false);
+        }
+
         var me = await MeAsync(ct).ConfigureAwait(false);
         var prs = await api.ListPullRequestsAsync(filter, me, Scope, ct).ConfigureAwait(false);
 
@@ -43,6 +58,46 @@ public sealed class PullRequestStoreAdapter(GitApi api, Func<CancellationToken, 
             ];
         }
         return prs;
+    }
+
+    /// <summary>
+    /// The Team tab is the RAW UNION of (a) PRs where a team the user belongs to is a
+    /// requested reviewer and (b) PRs authored by a teammate — deduped by
+    /// <see cref="PullRequest.PullRequestId"/> only (ADR 0015). The user's own PRs and PRs
+    /// already shown on other tabs are intentionally NOT excluded.
+    /// </summary>
+    private async Task<IReadOnlyList<PullRequest>> ListTeamAsync(CancellationToken ct)
+    {
+        var directory = await TeamsAsync(ct).ConfigureAwait(false);
+
+        // Under project scope, only teams that live in the context project take part.
+        var teams = Scope == PrScope.Project
+            ? directory.Teams.Where(t => string.Equals(t.ProjectName, project, StringComparison.OrdinalIgnoreCase))
+            : directory.Teams;
+        var inScope = teams.ToList();
+
+        var teammateIds = inScope.SelectMany(t => t.MemberIds).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // (a) team-as-reviewer: one reviewer-list call per in-scope team, in parallel.
+        var reviewerTask = Task.WhenAll(inScope.Select(t =>
+            api.ListPullRequestsForReviewerAsync(t.TeamId, Scope, ct)));
+        // (b) teammate-authored: reuse the single Active list, filtered client-side by author.
+        var activeTask = api.ListPullRequestsAsync(PrListFilter.Active, Guid.Empty, Scope, ct);
+
+        var reviewed = await reviewerTask.ConfigureAwait(false);
+        var active = await activeTask.ConfigureAwait(false);
+
+        var union = new Dictionary<int, PullRequest>();
+        foreach (var pr in reviewed.SelectMany(r => r))
+        {
+            union[pr.PullRequestId] = pr;
+        }
+        foreach (var pr in active.Where(pr => teammateIds.Contains(pr.AuthorId)))
+        {
+            union.TryAdd(pr.PullRequestId, pr);
+        }
+
+        return [.. union.Values.OrderByDescending(pr => pr.CreationDate ?? DateTimeOffset.MinValue)];
     }
 
     public Task<PullRequest> GetPullRequestAsync(int id, CancellationToken ct) =>

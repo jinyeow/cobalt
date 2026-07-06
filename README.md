@@ -71,8 +71,8 @@ Pull Requests · `Tab` next tab · `:` command palette
 `:help`, `:messages`) · `?` help ·
 `r` refresh. On a work item (the highlighted list row or its detail): `s` state ·
 `c` comment · `a` assign · `t` tags; the detail additionally has `e` edit
-description in `$EDITOR`. In the PR section: `Tab` cycles the review queue / mine /
-active sub-tabs; on a PR (the highlighted list row or its detail): `v` vote; the
+description in `$EDITOR`. In the PR section: `Tab` cycles the review queue / team /
+mine / active sub-tabs; on a PR (the highlighted list row or its detail): `v` vote; the
 detail additionally has `c` reply · `x` resolve thread · `u` reactivate · `C`
 complete · `A` abandon · `d` open diff review.
 In diff review: `Tab` switches file list / diff pane · `[`/`]` prev/next file ·
@@ -99,7 +99,9 @@ remaining terminal width (reflowing on resize), so there's no dead right gutter.
   (org scope) · repository · title. A **comment count** badge (`💬 3`) fills in
   **lazily in the background** after the list renders — the list stays instant even
   when Azure DevOps is slow, and counts are fetched only for loaded rows, capped and
-  cached.
+  cached. The **team** sub-tab shows the union of PRs where a team you belong to is a
+  requested reviewer and PRs a teammate authored (deduped, newest first; see
+  [ADR 0015](docs/adr/0015-team-pr-view.md)).
 - **Work items**: id · type · state · title (fills) · iteration · changed date.
 
 ## Editor

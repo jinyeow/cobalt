@@ -185,6 +185,7 @@ public sealed class PrListView : View
         var tab = _vm.ActiveTab switch
         {
             PrListFilter.ReviewQueue => "review queue",
+            PrListFilter.Team => "team",
             PrListFilter.Mine => "mine",
             _ => "active",
         };

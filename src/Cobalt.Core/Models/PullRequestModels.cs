@@ -26,6 +26,7 @@ public enum PrThreadStatus
 public enum PrListFilter
 {
     ReviewQueue,
+    Team,
     Mine,
     Active,
 }
@@ -258,7 +259,8 @@ public sealed record PullRequest(
     IReadOnlyList<long> LinkedWorkItemIds,
     string? LastMergeSourceCommitId,
     string ProjectName = "",
-    DateTimeOffset? CreationDate = null)
+    DateTimeOffset? CreationDate = null,
+    string AuthorId = "")
 {
     /// <summary>
     /// Projects a wire DTO. <paramref name="fallbackProject"/> supplies the project
@@ -282,7 +284,8 @@ public sealed record PullRequest(
         [.. (dto.WorkItemRefs ?? []).Select(w => long.TryParse(w.Id, out var id) ? id : 0L).Where(id => id != 0)],
         dto.LastMergeSourceCommit?.CommitId,
         dto.Repository?.Project?.Name ?? fallbackProject ?? "",
-        dto.CreationDate);
+        dto.CreationDate,
+        dto.CreatedBy?.Id ?? "");
 
     private static string ShortBranch(string refName) =>
         refName.StartsWith("refs/heads/", StringComparison.Ordinal) ? refName["refs/heads/".Length..] : refName;

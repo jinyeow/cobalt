@@ -8,11 +8,11 @@ public interface IPullRequestSource
     Task<IReadOnlyList<PullRequest>> ListPullRequestsAsync(PrListFilter filter, CancellationToken ct);
 }
 
-/// <summary>The three PR tabs (review queue / mine / active) with async load, error, repo filter.</summary>
+/// <summary>The PR tabs (review queue / team / mine / active) with async load, error, repo filter.</summary>
 public sealed class PrListViewModel(IPullRequestSource source)
 {
     private static readonly PrListFilter[] TabOrder =
-        [PrListFilter.ReviewQueue, PrListFilter.Mine, PrListFilter.Active];
+        [PrListFilter.ReviewQueue, PrListFilter.Team, PrListFilter.Mine, PrListFilter.Active];
 
     private IReadOnlyList<PullRequest> _all = [];
     private string _repositoryFilter = "";
