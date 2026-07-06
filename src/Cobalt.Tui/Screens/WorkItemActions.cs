@@ -68,7 +68,8 @@ public sealed class WorkItemActions
         var states = vm.AvailableStates.Select(s => s.Name).ToArray();
         if (states.Length == 0)
         {
-            _log("no states available");
+            // As above, the list path can land here off the UI thread — marshal the message.
+            _post(() => _log("no states available"));
             return;
         }
         if (_choose("change state", states) is { } index && index >= 0 && index < states.Length)
@@ -101,7 +102,9 @@ public sealed class WorkItemActions
         // would replace the server's tags with nothing. Bail instead of wiping them (L3).
         if (vm.Item is null)
         {
-            _log("cannot edit tags: work item failed to load");
+            // May run on a threadpool continuation via the list path (RunTagsAsync awaits
+            // LoadAsync with ConfigureAwait(false)); marshal the message to the UI thread.
+            _post(() => _log("cannot edit tags: work item failed to load"));
             return;
         }
         var value = await EditAsync(string.Join("; ", vm.Item.Tags), ".txt", ct).ConfigureAwait(false);

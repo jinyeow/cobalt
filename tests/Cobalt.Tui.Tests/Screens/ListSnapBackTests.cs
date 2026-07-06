@@ -154,5 +154,7 @@ public class ListSnapBackTests
 
         Assert.True(priorToken.IsCancellationRequested);        // prior fetch observes cancellation
         Assert.False(view.CurrentLoadToken.IsCancellationRequested); // new tab's load token is live
+
+        view.Dispose(); // cancel the lifetime token so no infinite-delay fetch is left pending
     }
 }
