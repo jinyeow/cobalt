@@ -177,14 +177,7 @@ public static class DiffService
         {
             return 0;
         }
-        var count = 1;
-        foreach (var c in text)
-        {
-            if (c == '\n')
-            {
-                count++;
-            }
-        }
+        var count = 1 + text.AsSpan().Count('\n');
         return count;
     }
 }

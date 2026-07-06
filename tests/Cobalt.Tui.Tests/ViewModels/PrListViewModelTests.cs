@@ -80,6 +80,76 @@ public class PrListViewModelTests
         Assert.Contains("boom", vm.Error);
     }
 
+    private sealed class GatedSource : IPullRequestSource
+    {
+        private readonly Dictionary<PrListFilter, Queue<TaskCompletionSource<IReadOnlyList<PullRequest>>>> _pending = new();
+
+        public TaskCompletionSource<IReadOnlyList<PullRequest>> Gate(PrListFilter filter)
+        {
+            var tcs = new TaskCompletionSource<IReadOnlyList<PullRequest>>();
+            if (!_pending.TryGetValue(filter, out var q))
+            {
+                q = new Queue<TaskCompletionSource<IReadOnlyList<PullRequest>>>();
+                _pending[filter] = q;
+            }
+            q.Enqueue(tcs);
+            return tcs;
+        }
+
+        public Task<IReadOnlyList<PullRequest>> ListPullRequestsAsync(PrListFilter filter, CancellationToken ct) =>
+            _pending.TryGetValue(filter, out var q) && q.Count > 0
+                ? q.Dequeue().Task
+                : Task.FromResult<IReadOnlyList<PullRequest>>([]);
+    }
+
+    [Fact]
+    public async Task Switching_Tab_Blanks_Rows_And_Sets_Loading_Before_Fetch_Completes()
+    {
+        var source = new GatedSource();
+        source.Gate(PrListFilter.ReviewQueue).SetResult([Pr(1, "seed")]);
+        var vm = new PrListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.Single(vm.Rows);
+
+        var mine = source.Gate(PrListFilter.Mine);
+        var switching = vm.NextTabAsync(TestContext.Current.CancellationToken); // ReviewQueue → Mine
+
+        // Fetch has not completed yet: the pane must already show the loading state
+        // with the previous tab's rows cleared.
+        Assert.True(vm.IsLoading);
+        Assert.Empty(vm.Rows);
+
+        mine.SetResult([Pr(2, "my pr")]);
+        await switching;
+
+        Assert.False(vm.IsLoading);
+        Assert.Single(vm.Rows);
+        Assert.Equal(2, vm.Rows[0].PullRequestId);
+    }
+
+    [Fact]
+    public async Task Slow_First_Load_Cannot_Clobber_A_Newer_Tab()
+    {
+        var source = new GatedSource();
+        var vm = new PrListViewModel(source);
+
+        var slow = source.Gate(PrListFilter.Mine);
+        var loadA = vm.SetTabAsync(PrListFilter.Mine, TestContext.Current.CancellationToken);
+
+        var fast = source.Gate(PrListFilter.Active);
+        var loadB = vm.SetTabAsync(PrListFilter.Active, TestContext.Current.CancellationToken);
+
+        // Newer load (B) completes first, then the older, slower load (A) lands last.
+        fast.SetResult([Pr(20, "newer")]);
+        await loadB;
+        slow.SetResult([Pr(10, "older")]);
+        await loadA;
+
+        Assert.Equal(PrListFilter.Active, vm.ActiveTab);
+        Assert.Single(vm.Rows);
+        Assert.Equal(20, vm.Rows[0].PullRequestId);
+    }
+
     [Fact]
     public async Task RepoFilter_Narrows_Active_Rows()
     {

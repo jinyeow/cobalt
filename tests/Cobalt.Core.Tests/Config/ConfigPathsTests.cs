@@ -4,6 +4,8 @@ namespace Cobalt.Core.Tests.Config;
 
 public class ConfigPathsTests
 {
+    private static readonly char Sep = Path.DirectorySeparatorChar;
+
     [Fact]
     public void Uses_XdgConfigHome_When_Set()
     {
@@ -12,9 +14,10 @@ public class ConfigPathsTests
             homeDirectory: "/home/u",
             isWindows: false);
 
-        // ConfigPaths uses Path.Combine, so the separator is the host OS's ('\' on
-        // Windows CI). Build the expected value the same way to stay OS-agnostic.
-        Assert.Equal(Path.Combine("/custom/xdg", "cobalt", "config.toml"), path);
+        // ConfigPaths uses Path.Join, so the separator is the host OS's ('\' on
+        // Windows CI). Build the expected value explicitly (not by calling
+        // Path.Join again) so the exact composed path is pinned.
+        Assert.Equal($"/custom/xdg{Sep}cobalt{Sep}config.toml", path);
     }
 
     [Fact]
@@ -22,7 +25,7 @@ public class ConfigPathsTests
     {
         var path = ConfigPaths.ConfigFile(env: _ => null, homeDirectory: "/home/u", isWindows: false);
 
-        Assert.Equal(Path.Combine("/home/u", ".config", "cobalt", "config.toml"), path);
+        Assert.Equal($"/home/u{Sep}.config{Sep}cobalt{Sep}config.toml", path);
     }
 
     [Fact]
@@ -33,6 +36,6 @@ public class ConfigPathsTests
             homeDirectory: @"C:\Users\u",
             isWindows: true);
 
-        Assert.Equal(Path.Combine(@"C:\Users\u\AppData\Roaming", "cobalt", "config.toml"), path);
+        Assert.Equal($@"C:\Users\u\AppData\Roaming{Sep}cobalt{Sep}config.toml", path);
     }
 }

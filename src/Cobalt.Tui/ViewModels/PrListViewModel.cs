@@ -16,6 +16,7 @@ public sealed class PrListViewModel(IPullRequestSource source)
     private IReadOnlyList<PullRequest> _all = [];
     private string _repositoryFilter = "";
     private int _selectedIndex;
+    private int _loadSeq;
 
     public PrListFilter ActiveTab { get; private set; } = PrListFilter.ReviewQueue;
     public bool IsLoading { get; private set; }
@@ -61,13 +62,23 @@ public sealed class PrListViewModel(IPullRequestSource source)
 
     private async Task LoadTabAsync(PrListFilter tab, CancellationToken ct)
     {
+        // Stamp this load; only the newest may commit its results (kills the race
+        // where a slow first fetch lands after a newer tab's fetch — B3/D2).
+        var seq = ++_loadSeq;
+
         ActiveTab = tab;
         IsLoading = true;
         Error = null;
+        // Blank the pane the instant Tab is pressed instead of showing the previous
+        // tab's PRs during the network round-trip (D1).
+        Rows = [];
         Changed?.Invoke();
+
+        IReadOnlyList<PullRequest> result;
+        string? error = null;
         try
         {
-            _all = await source.ListPullRequestsAsync(tab, ct).ConfigureAwait(false);
+            result = await source.ListPullRequestsAsync(tab, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -75,14 +86,21 @@ public sealed class PrListViewModel(IPullRequestSource source)
         }
         catch (Exception ex)
         {
-            Error = ex.Message;
-            _all = [];
+            error = ex.Message;
+            result = [];
         }
-        finally
+
+        // A newer load superseded this one while it was in flight; drop its results
+        // so it cannot clobber the current tab.
+        if (seq != _loadSeq)
         {
-            IsLoading = false;
-            ApplyFilter();
+            return;
         }
+
+        Error = error;
+        _all = result;
+        IsLoading = false;
+        ApplyFilter();
     }
 
     private void ApplyFilter()

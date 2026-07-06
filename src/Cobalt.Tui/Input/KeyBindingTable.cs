@@ -86,11 +86,9 @@ public sealed class KeyBindingTable
             var sequences = Visible(scope).Select(b => b.Sequence).ToList();
             foreach (var a in sequences)
             {
-                foreach (var b in sequences)
+                foreach (var b in sequences.Where(b => !ReferenceEquals(a, b) && a.Length < b.Length))
                 {
-                    if (!ReferenceEquals(a, b) &&
-                        a.Length < b.Length &&
-                        a.SequenceEqual(b.Take(a.Length), StringComparer.Ordinal))
+                    if (a.SequenceEqual(b.Take(a.Length), StringComparer.Ordinal))
                     {
                         throw new InvalidOperationException(
                             $"key binding '{string.Join(" ", a)}' is a prefix of '{string.Join(" ", b)}' " +

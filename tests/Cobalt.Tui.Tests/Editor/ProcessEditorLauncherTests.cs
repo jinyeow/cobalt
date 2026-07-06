@@ -32,7 +32,7 @@ public class ProcessEditorLauncherTests
     {
         var log = new List<string>();
         var launcher = new ProcessEditorLauncher(Env("sh -c 'exit 3'"), new RecordingSuspender(log));
-        var path = Path.Combine(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
+        var path = Path.Join(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
 
         var exit = await launcher.LaunchAsync(path, TestContext.Current.CancellationToken);
 
@@ -45,7 +45,7 @@ public class ProcessEditorLauncherTests
     {
         var log = new List<string>();
         var launcher = new ProcessEditorLauncher(Env("sh -c 'echo edited > \"$0\"'"), new RecordingSuspender(log));
-        var path = Path.Combine(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
+        var path = Path.Join(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
         try
         {
             var exit = await launcher.LaunchAsync(path, TestContext.Current.CancellationToken);
@@ -64,7 +64,7 @@ public class ProcessEditorLauncherTests
     {
         var launcher = new ProcessEditorLauncher(
             Env("cobalt-no-such-editor-xyz"), new RecordingSuspender([]));
-        var path = Path.Combine(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
+        var path = Path.Join(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
 
         await Assert.ThrowsAsync<EditorLaunchException>(
             () => launcher.LaunchAsync(path, TestContext.Current.CancellationToken));
@@ -79,7 +79,7 @@ public class ProcessEditorLauncherTests
             () => log.Add("suspend"),
             () => log.Add("resume"));
         var launcher = new ProcessEditorLauncher(Env("cobalt-no-such-editor-xyz"), suspender);
-        var path = Path.Combine(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
+        var path = Path.Join(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
 
         await Assert.ThrowsAsync<EditorLaunchException>(
             () => launcher.LaunchAsync(path, TestContext.Current.CancellationToken));
@@ -91,7 +91,7 @@ public class ProcessEditorLauncherTests
     public async Task Default_Suspender_Is_Inline()
     {
         var launcher = new ProcessEditorLauncher(Env("true"));
-        var path = Path.Combine(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
+        var path = Path.Join(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
         try
         {
             var exit = await launcher.LaunchAsync(path, TestContext.Current.CancellationToken);

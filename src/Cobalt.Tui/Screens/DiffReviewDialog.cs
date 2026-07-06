@@ -4,6 +4,7 @@ using Cobalt.Core.Text;
 using Cobalt.Core.Text.Syntax;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Editor;
+using Cobalt.Tui.Tasks;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
 using Terminal.Gui.ViewBase;
@@ -139,16 +140,7 @@ public sealed class DiffReviewDialog(
         _cts.Dispose();
     }
 
-    private async Task LoadAsync()
-    {
-        try
-        {
-            await vm.LoadAsync(Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-        }
-    }
+    private async Task LoadAsync() => await vm.LoadAsync(Token).IgnoreCancellationAsync();
 
     private async Task SelectFile(int index)
     {
@@ -157,13 +149,7 @@ public sealed class DiffReviewDialog(
             return;
         }
         _fileIndex = Math.Clamp(index, 0, vm.Files.Count - 1);
-        try
-        {
-            await vm.SelectFileAsync(_fileIndex, Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-        }
+        await vm.SelectFileAsync(_fileIndex, Token).IgnoreCancellationAsync();
     }
 
     private async Task CommentAsync()

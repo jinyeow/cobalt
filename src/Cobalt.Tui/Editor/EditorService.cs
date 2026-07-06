@@ -9,7 +9,7 @@ public sealed class EditorService(IEditorLauncher launcher)
     public async Task<string?> EditAsync(
         string initialContent, string extension, CancellationToken cancellationToken = default)
     {
-        var path = Path.Combine(
+        var path = Path.Join(
             Path.GetTempPath(), $"cobalt-{Guid.NewGuid():N}{extension}");
         try
         {

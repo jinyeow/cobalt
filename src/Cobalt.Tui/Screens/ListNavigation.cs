@@ -18,25 +18,28 @@ public static class ListNavigation
 
     public static void Apply(ListView list, AppCommand command)
     {
+        // extend: false — plain cursor movement. `extend: true` extends a marked
+        // selection (only visible with ShowMarks/MarkMultiple), which cobalt never
+        // wants; passing true was a latent bug if marking is ever enabled.
         switch (command)
         {
             case AppCommand.MoveDown:
-                list.MoveDown(true);
+                list.MoveDown(false);
                 break;
             case AppCommand.MoveUp:
-                list.MoveUp(true);
+                list.MoveUp(false);
                 break;
             case AppCommand.MoveTop:
-                list.MoveHome(true);
+                list.MoveHome(false);
                 break;
             case AppCommand.MoveBottom:
-                list.MoveEnd(true);
+                list.MoveEnd(false);
                 break;
             case AppCommand.HalfPageDown:
-                list.MovePageDown(true);
+                list.MovePageDown(false);
                 break;
             case AppCommand.HalfPageUp:
-                list.MovePageUp(true);
+                list.MovePageUp(false);
                 break;
             default:
                 break;

@@ -1,6 +1,7 @@
 using Cobalt.Tui.App;
 using Cobalt.Tui.Editor;
 using Cobalt.Core.Models;
+using Cobalt.Tui.Tasks;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
 using Terminal.Gui.ViewBase;
@@ -21,17 +22,51 @@ public sealed class PrDetailDialog(
 {
     private readonly CancellationTokenSource _cts = new();
     private bool _closed;
+    private Dialog? _dialog;
+#pragma warning disable CS0618 // read-only scrollable pane; see WorkItemDetailDialog
+    private TextView? _body;
 
     private CancellationToken Token => _cts.Token;
 
+    /// <summary>Test seam: the read-only scroll pane, exposed so a view-level test can drive scrolling.</summary>
+    internal TextView Body => _body ?? throw new InvalidOperationException("Build() first");
+#pragma warning restore CS0618
+
+    /// <summary>Test seam: replaces the default close (app.RequestStop) so a test can observe close without a run loop.</summary>
+    internal Action? CloseAction { get; set; }
+
+    /// <summary>Test seam: replaces the real diff-open path (needs a run loop) so a test can observe the 'd' key.</summary>
+    internal Action? DiffAction { get; set; }
+
+    /// <summary>Test seam: replaces the real reply path (needs the editor) so a test can observe the 'c' key.</summary>
+    internal Action? ReplyAction { get; set; }
+
     public void Show()
     {
-        using var dialog = new Dialog
+        using var dialog = Build();
+        _ = LoadAsync();
+        app.Run(dialog);
+
+        _closed = true;
+        vm.Changed -= OnChanged;
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+    /// <summary>
+    /// Constructs and wires the dialog (body pane, verb keys, change subscription)
+    /// without starting the load or run loop. Split out so view-level tests can
+    /// drive key delivery headlessly.
+    /// </summary>
+    internal Dialog Build()
+    {
+        var dialog = new Dialog
         {
             Title = $"PR !{vm.Id} — q close · d diff · v vote · c reply · x resolve · u reactivate · C complete · A abandon",
             Width = Dim.Percent(92),
             Height = Dim.Percent(92),
         };
+        _dialog = dialog;
 
 #pragma warning disable CS0618 // read-only scrollable pane; see WorkItemDetailDialog
         var body = new TextView
@@ -44,82 +79,95 @@ public sealed class PrDetailDialog(
             WordWrap = true,
         };
 #pragma warning restore CS0618
+        _body = body;
 
-        void OnChanged() => app.Invoke(() =>
-        {
-            if (!_closed)
-            {
-                body.Text = RenderBody();
-                dialog.SetNeedsDraw();
-            }
-        });
         vm.Changed += OnChanged;
 
-        dialog.KeyDown += (_, key) =>
-        {
-            var token = KeyTokenizer.ToToken(key);
-            switch (token)
-            {
-                case "q" or "Esc":
-                    key.Handled = true;
-                    _closed = true;
-                    app.RequestStop(dialog);
-                    break;
-                case "v":
-                    key.Handled = true;
-                    PickVote();
-                    break;
-                case "c":
-                    key.Handled = true;
-                    _ = ReplyAsync();
-                    break;
-                case "x":
-                    key.Handled = true;
-                    _ = ThreadStatusAsync(resolve: true);
-                    break;
-                case "u":
-                    key.Handled = true;
-                    _ = ThreadStatusAsync(resolve: false);
-                    break;
-                case "A":
-                    key.Handled = true;
-                    ConfirmAbandon();
-                    break;
-                case "C":
-                    key.Handled = true;
-                    ConfirmComplete();
-                    break;
-                case "d":
-                    key.Handled = true;
-                    OpenDiff();
-                    break;
-                default:
-                    break;
-            }
-        };
+        // A focused ReadOnly TextView swallows every printable rune before the
+        // dialog's own KeyDown runs, so subscribe the verb handler to the TextView
+        // too. Verbs it matches stop propagation; keys it ignores (arrows/PageUp/
+        // PageDown/Home/End) fall through to the TextView's native scrolling. The
+        // dialog subscription stays as a safety net for when focus is elsewhere.
+        body.KeyDown += HandleKey;
+        dialog.KeyDown += HandleKey;
 
         dialog.Add(body);
-        _ = LoadAsync();
         body.Text = RenderBody();
-        app.Run(dialog);
-
-        _closed = true;
-        vm.Changed -= OnChanged;
-        _cts.Cancel();
-        _cts.Dispose();
+        return dialog;
     }
 
-    private async Task LoadAsync()
+    private void OnChanged() => app.Invoke(() =>
     {
-        try
+        if (!_closed && _body is not null && _dialog is not null)
         {
-            await vm.LoadAsync(Token).ConfigureAwait(false);
+            _body.Text = RenderBody();
+            _dialog.SetNeedsDraw();
         }
-        catch (OperationCanceledException)
+    });
+
+    private void HandleKey(object? sender, Terminal.Gui.Input.Key key)
+    {
+        var token = KeyTokenizer.ToToken(key);
+        switch (token)
         {
-            // dialog closed mid-load
+            case "q" or "Esc":
+                key.Handled = true;
+                RequestClose();
+                break;
+            case "v":
+                key.Handled = true;
+                PickVote();
+                break;
+            case "c":
+                key.Handled = true;
+                if (ReplyAction is not null)
+                {
+                    ReplyAction();
+                }
+                else
+                {
+                    _ = ReplyAsync();
+                }
+                break;
+            case "x":
+                key.Handled = true;
+                _ = ThreadStatusAsync(resolve: true);
+                break;
+            case "u":
+                key.Handled = true;
+                _ = ThreadStatusAsync(resolve: false);
+                break;
+            case "A":
+                key.Handled = true;
+                ConfirmAbandon();
+                break;
+            case "C":
+                key.Handled = true;
+                ConfirmComplete();
+                break;
+            case "d":
+                key.Handled = true;
+                (DiffAction ?? OpenDiff)();
+                break;
+            default:
+                break;
         }
     }
+
+    private void RequestClose()
+    {
+        _closed = true;
+        if (CloseAction is not null)
+        {
+            CloseAction();
+        }
+        else if (_dialog is not null)
+        {
+            app.RequestStop(_dialog);
+        }
+    }
+
+    private async Task LoadAsync() => await vm.LoadAsync(Token).IgnoreCancellationAsync();
 
     private string RenderBody()
     {

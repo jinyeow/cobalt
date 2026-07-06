@@ -31,7 +31,7 @@ try
             var config = LoadConfig();
             _ = config.Resolve(parsed.Context); // fail fast on a bad --context
             var tokens = Cobalt.Core.Auth.AzureTokenProvider.CreateDefault(
-                Path.Combine(ConfigPaths.ConfigDirectory(), "auth-record.json"));
+                Path.Join(ConfigPaths.ConfigDirectory(), "auth-record.json"));
             return Cobalt.Tui.App.CobaltTuiApp.Run(config, parsed.Context, tokens);
         }
     }

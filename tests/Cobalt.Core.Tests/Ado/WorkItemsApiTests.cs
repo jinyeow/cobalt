@@ -5,7 +5,7 @@ using Cobalt.Core.Tests.Fakes;
 
 namespace Cobalt.Core.Tests.Ado;
 
-public class WorkItemsApiTests
+public class WorkItemsApiTests : IDisposable
 {
     private static readonly AdoContext Context = new()
     {
@@ -14,8 +14,22 @@ public class WorkItemsApiTests
         Project = "My Project", // deliberately has a space
     };
 
-    private static WorkItemsApi Api(FakeHttpHandler handler) =>
-        new(new AdoHttp(new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") }), Context);
+    private readonly List<IDisposable> _disposables = [];
+
+    private WorkItemsApi Api(FakeHttpHandler handler)
+    {
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
+        _disposables.Add(httpClient);
+        return new WorkItemsApi(new AdoHttp(httpClient), Context);
+    }
+
+    public void Dispose()
+    {
+        foreach (var disposable in _disposables)
+        {
+            disposable.Dispose();
+        }
+    }
 
     [Fact]
     public async Task QueryMyWorkItems_Runs_Wiql_Then_Batches_Ids()

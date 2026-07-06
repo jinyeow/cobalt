@@ -110,21 +110,32 @@ public sealed class CobaltShell : Window
                 return;
             }
 
-            var result = _router.Feed(token, ActiveScope);
-            if (result.Kind == KeyResultKind.Pending)
+            var decision = DecideKey(token, _router.Feed(token, ActiveScope));
+            if (decision.Handled)
             {
                 key.Handled = true;
-                return;
             }
-            if (result.Kind != KeyResultKind.Matched)
+            if (decision.Command is { } command)
             {
-                return;
+                Dispatch(command);
             }
-
-            key.Handled = true;
-            Dispatch(result.Command);
         };
     }
+
+    /// <summary>
+    /// Pure decision for a routed key: whether the shell consumes it and which
+    /// command (if any) to dispatch. Esc with no binding is consumed here — its job
+    /// is to clear a pending sequence, so it must never fall through to the
+    /// application-level Quit binding (that was the "Esc quits the app" bug).
+    /// </summary>
+    internal static KeyDecision DecideKey(string token, KeyResult result) => result.Kind switch
+    {
+        KeyResultKind.Pending => new KeyDecision(true, null),
+        KeyResultKind.Matched => new KeyDecision(true, result.Command),
+        _ => new KeyDecision(token == "Esc", null),
+    };
+
+    internal readonly record struct KeyDecision(bool Handled, AppCommand? Command);
 
     private void Dispatch(AppCommand command)
     {
@@ -385,7 +396,11 @@ public sealed class CobaltShell : Window
             Text = text,
         };
 #pragma warning restore CS0618
-        dialog.KeyDown += (_, key) =>
+
+        // The focused ReadOnly TextView swallows q/Enter before dialog.KeyDown runs,
+        // so subscribe the close handler to the TextView too; other keys (arrows,
+        // PageUp/PageDown) fall through to its native scrolling.
+        void OnKey(object? sender, Terminal.Gui.Input.Key key)
         {
             var token = KeyTokenizer.ToToken(key);
             if (token is "q" or "Esc" or "Enter")
@@ -393,7 +408,9 @@ public sealed class CobaltShell : Window
                 key.Handled = true;
                 _app.RequestStop(dialog);
             }
-        };
+        }
+        view.KeyDown += OnKey;
+        dialog.KeyDown += OnKey;
         dialog.Add(view);
         _app.Run(dialog);
     }

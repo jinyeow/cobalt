@@ -7,7 +7,7 @@ using Cobalt.Core.Tests.Fakes;
 
 namespace Cobalt.Core.Tests.Ado;
 
-public class GitApiDiffTests
+public class GitApiDiffTests : IDisposable
 {
     private static readonly AdoContext Context = new()
     {
@@ -16,8 +16,22 @@ public class GitApiDiffTests
         Project = "Proj",
     };
 
-    private static GitApi Api(FakeHttpHandler handler) =>
-        new(new AdoHttp(new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") }), Context);
+    private readonly List<IDisposable> _disposables = [];
+
+    private GitApi Api(FakeHttpHandler handler)
+    {
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
+        _disposables.Add(httpClient);
+        return new GitApi(new AdoHttp(httpClient), Context);
+    }
+
+    public void Dispose()
+    {
+        foreach (var disposable in _disposables)
+        {
+            disposable.Dispose();
+        }
+    }
 
     [Fact]
     public async Task GetLatestIteration_Returns_Highest_Id_With_Commits()

@@ -5,13 +5,27 @@ using Cobalt.Core.Tests.Fakes;
 
 namespace Cobalt.Core.Tests.Ado;
 
-public class AdoHttpWriteTests
+public class AdoHttpWriteTests : IDisposable
 {
     private const string UserJson =
         """{"authenticatedUser":{"id":"1f2e3d4c-0000-1111-2222-333344445555","providerDisplayName":"Jin"}}""";
 
-    private static AdoHttp Client(FakeHttpHandler handler) =>
-        new(new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") });
+    private readonly List<IDisposable> _disposables = [];
+
+    private AdoHttp Client(FakeHttpHandler handler)
+    {
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
+        _disposables.Add(httpClient);
+        return new AdoHttp(httpClient);
+    }
+
+    public void Dispose()
+    {
+        foreach (var disposable in _disposables)
+        {
+            disposable.Dispose();
+        }
+    }
 
     [Fact]
     public async Task Post_Serializes_Body_And_Deserializes_Response()

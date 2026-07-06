@@ -128,4 +128,40 @@ public class DiffServiceTests
         Assert.True(diff.TooLarge);
         Assert.Empty(diff.Lines);
     }
+
+    // CountLines is private, so pin its exact behavior through the maxLines
+    // boundary: with newText == "" (0 lines), Unified(text, "", maxLines: N)
+    // is TooLarge iff CountLines(text) > N. Straddling N around the expected
+    // count on both sides pins the exact line count for each case.
+
+    [Fact]
+    public void CountLines_Empty_String_Is_Zero()
+    {
+        Assert.False(DiffService.Unified("", "", maxLines: 0).TooLarge);
+        Assert.True(DiffService.Unified("", "", maxLines: -1).TooLarge);
+    }
+
+    [Fact]
+    public void CountLines_No_Trailing_Newline_Counts_One_Line()
+    {
+        Assert.False(DiffService.Unified("abc", "", maxLines: 1).TooLarge);
+        Assert.True(DiffService.Unified("abc", "", maxLines: 0).TooLarge);
+    }
+
+    [Fact]
+    public void CountLines_Trailing_Newline_Counts_A_Phantom_Extra_Line()
+    {
+        // "abc\n" has one '\n', so the count is 1 (initial) + 1 = 2 — this is the
+        // "phantom empty line" the caller (Unified) trims separately via TrimOneEol.
+        Assert.False(DiffService.Unified("abc\n", "", maxLines: 2).TooLarge);
+        Assert.True(DiffService.Unified("abc\n", "", maxLines: 1).TooLarge);
+    }
+
+    [Fact]
+    public void CountLines_Multi_Line_Counts_Newlines_Plus_One()
+    {
+        // "a\nb\nc\n" has three '\n', so the count is 1 + 3 = 4.
+        Assert.False(DiffService.Unified("a\nb\nc\n", "", maxLines: 4).TooLarge);
+        Assert.True(DiffService.Unified("a\nb\nc\n", "", maxLines: 3).TooLarge);
+    }
 }

@@ -7,7 +7,7 @@ namespace Cobalt.Cli;
 /// <summary>`cobalt auth login` / `cobalt auth status` — composition-root glue, no logic.</summary>
 internal static class AuthCommands
 {
-    private static string AuthRecordPath => Path.Combine(ConfigPaths.ConfigDirectory(), "auth-record.json");
+    private static string AuthRecordPath => Path.Join(ConfigPaths.ConfigDirectory(), "auth-record.json");
 
     internal static async Task<int> LoginAsync(CobaltConfig config)
     {

@@ -61,7 +61,13 @@ public sealed class PrListView : View
     }
 
     /// <summary>Vim movement forwarded from the shell router to the bound ListView.</summary>
-    public void Navigate(AppCommand command) => ListNavigation.Apply(_list, command);
+    public void Navigate(AppCommand command)
+    {
+        ListNavigation.Apply(_list, command);
+        // The list is the source of truth for the cursor; mirror it back so a
+        // background reload restores where the user actually is, not a stale index.
+        _vm.SelectedIndex = _list.SelectedItem ?? 0;
+    }
 
     public PullRequest? SelectedPr
     {
@@ -99,7 +105,7 @@ public sealed class PrListView : View
         });
     }
 
-    private void Render()
+    internal void Render()
     {
         var tab = _vm.ActiveTab switch
         {
@@ -113,11 +119,15 @@ public sealed class PrListView : View
                 ? $" pull requests · {tab} · error: {e}"
                 : $" pull requests · {tab} ({_vm.Rows.Count})   [Tab] switch";
 
+        // SetSource nulls SelectedItem in 2.4.16, so capture the reviewer's current
+        // row first and restore it (clamped) — otherwise a background reload snaps
+        // the highlight back to the top. The list is the source of truth.
+        var target = _list.SelectedItem ?? _vm.SelectedIndex;
         var rows = new ObservableCollection<string>(_vm.Rows.Select(Format));
         _list.SetSource(rows);
         if (_vm.Rows.Count > 0)
         {
-            _list.SelectedItem = Math.Clamp(_vm.SelectedIndex, 0, _vm.Rows.Count - 1);
+            _list.SelectedItem = Math.Clamp(target, 0, _vm.Rows.Count - 1);
         }
         SetNeedsDraw();
     }

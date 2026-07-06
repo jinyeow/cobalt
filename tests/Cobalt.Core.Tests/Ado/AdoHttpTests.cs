@@ -5,10 +5,24 @@ using Cobalt.Core.Tests.Fakes;
 
 namespace Cobalt.Core.Tests.Ado;
 
-public class AdoHttpTests
+public class AdoHttpTests : IDisposable
 {
-    private static AdoHttp Client(FakeHttpHandler handler) =>
-        new(new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") });
+    private readonly List<IDisposable> _disposables = [];
+
+    private AdoHttp Client(FakeHttpHandler handler)
+    {
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
+        _disposables.Add(httpClient);
+        return new AdoHttp(httpClient);
+    }
+
+    public void Dispose()
+    {
+        foreach (var disposable in _disposables)
+        {
+            disposable.Dispose();
+        }
+    }
 
     [Fact]
     public async Task GetJson_Deserializes_CamelCase_Payload()

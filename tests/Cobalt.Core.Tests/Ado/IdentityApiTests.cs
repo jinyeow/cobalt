@@ -4,8 +4,25 @@ using Cobalt.Core.Tests.Fakes;
 
 namespace Cobalt.Core.Tests.Ado;
 
-public class IdentityApiTests
+public class IdentityApiTests : IDisposable
 {
+    private readonly List<IDisposable> _disposables = [];
+
+    private IdentityApi Api(FakeHttpHandler handler)
+    {
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
+        _disposables.Add(httpClient);
+        return new IdentityApi(new AdoHttp(httpClient));
+    }
+
+    public void Dispose()
+    {
+        foreach (var disposable in _disposables)
+        {
+            disposable.Dispose();
+        }
+    }
+
     [Fact]
     public async Task GetAuthenticatedUser_Parses_ConnectionData()
     {
@@ -20,8 +37,7 @@ public class IdentityApiTests
               }
             }
             """);
-        var api = new IdentityApi(new AdoHttp(
-            new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") }));
+        var api = Api(handler);
 
         var user = await api.GetAuthenticatedUserAsync(TestContext.Current.CancellationToken);
 
@@ -35,8 +51,7 @@ public class IdentityApiTests
     {
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
             """{"authenticatedUser":{"id":"1f2e3d4c-0000-1111-2222-333344445555","providerDisplayName":"Jin Yeow"}}""");
-        var api = new IdentityApi(new AdoHttp(
-            new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") }));
+        var api = Api(handler);
 
         var user = await api.GetAuthenticatedUserAsync(TestContext.Current.CancellationToken);
 
@@ -47,8 +62,7 @@ public class IdentityApiTests
     public async Task Missing_AuthenticatedUser_Throws()
     {
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, "{}");
-        var api = new IdentityApi(new AdoHttp(
-            new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") }));
+        var api = Api(handler);
 
         await Assert.ThrowsAsync<AdoApiException>(
             () => api.GetAuthenticatedUserAsync(TestContext.Current.CancellationToken));

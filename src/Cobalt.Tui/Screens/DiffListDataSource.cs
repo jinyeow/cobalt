@@ -111,20 +111,14 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines) : IListD
 
     private static Attribute Map(ListView listView, RunStyle style)
     {
-        Color foreground;
-        if (style.IsGutter)
-        {
-            foreground = style.LineKind switch
+        var foreground = style.IsGutter
+            ? style.LineKind switch
             {
                 DiffLineKind.Added => new Color(ColorName16.BrightGreen),
                 DiffLineKind.Removed => new Color(ColorName16.BrightRed),
                 _ => listView.GetAttributeForRole(VisualRole.Normal).Foreground,
-            };
-        }
-        else
-        {
-            foreground = listView.GetAttributeForRole(RoleFor(style.Token)).Foreground;
-        }
+            }
+            : listView.GetAttributeForRole(RoleFor(style.Token)).Foreground;
 
         var background = BackgroundFor(listView, style.LineKind, style.Emphasis);
         return new Attribute(foreground, background);

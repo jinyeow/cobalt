@@ -7,7 +7,7 @@ using Cobalt.Tui.ViewModels;
 
 namespace Cobalt.Tui.Tests.ViewModels;
 
-public class PrReviewQueueFilterTests
+public class PrReviewQueueFilterTests : IDisposable
 {
     private static readonly Guid Me = Guid.Parse("11111111-2222-3333-4444-555555555555");
 
@@ -18,21 +18,34 @@ public class PrReviewQueueFilterTests
         Project = "Proj",
     };
 
+    private readonly List<IDisposable> _disposables = [];
+
     private sealed class JsonHandler(string json) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            await Task.Yield();
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json"),
-            });
+            };
+        }
     }
 
-    private static PullRequestStoreAdapter Adapter(string json)
+    private PullRequestStoreAdapter Adapter(string json)
     {
-        var api = new GitApi(
-            new AdoHttp(new HttpClient(new JsonHandler(json)) { BaseAddress = new Uri("https://dev.azure.com/contoso/") }),
-            Context);
+        var httpClient = new HttpClient(new JsonHandler(json)) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
+        _disposables.Add(httpClient);
+        var api = new GitApi(new AdoHttp(httpClient), Context);
         return new PullRequestStoreAdapter(api, _ => Task.FromResult(Me));
+    }
+
+    public void Dispose()
+    {
+        foreach (var disposable in _disposables)
+        {
+            disposable.Dispose();
+        }
     }
 
     [Fact]

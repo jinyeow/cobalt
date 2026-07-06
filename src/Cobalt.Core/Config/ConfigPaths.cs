@@ -10,14 +10,14 @@ public static class ConfigPaths
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
 
     public static string ConfigFile(Func<string, string?> env, string homeDirectory, bool isWindows) =>
-        Path.Combine(ConfigDirectory(env, homeDirectory, isWindows), "config.toml");
+        Path.Join(ConfigDirectory(env, homeDirectory, isWindows), "config.toml");
 
     public static string ConfigDirectory(Func<string, string?> env, string homeDirectory, bool isWindows)
     {
         var baseDir = isWindows
-            ? env("APPDATA") ?? Path.Combine(homeDirectory, "AppData", "Roaming")
-            : env("XDG_CONFIG_HOME") ?? Path.Combine(homeDirectory, ".config");
-        return Path.Combine(baseDir, "cobalt");
+            ? env("APPDATA") ?? Path.Join(homeDirectory, "AppData", "Roaming")
+            : env("XDG_CONFIG_HOME") ?? Path.Join(homeDirectory, ".config");
+        return Path.Join(baseDir, "cobalt");
     }
 
     public static string ConfigDirectory() => ConfigDirectory(

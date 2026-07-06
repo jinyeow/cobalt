@@ -25,12 +25,14 @@ public static class CobaltTuiApp
             async ct => (await identity.Value.WaitAsync(ct).ConfigureAwait(false)).Id);
 
         using var app = Application.Create().Init();
-        var shell = new CobaltShell(app, vm, workItems, pullRequests, editor: null, context: context);
+        // Lower input latency: the default 25 iterations/sec adds up to ~40ms per
+        // keystroke; 60 halves that to ~16ms for a snappier vim feel.
+        Application.MaximumIterationsPerSecond = 60;
+        using var shell = new CobaltShell(app, vm, workItems, pullRequests, editor: null, context: context);
 
         ResolveIdentityInBackground(app, vm, identity);
 
         app.Run(shell);
-        shell.Dispose();
         return 0;
     }
 

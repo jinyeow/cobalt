@@ -6,7 +6,7 @@ using Cobalt.Core.Tests.Fakes;
 
 namespace Cobalt.Core.Tests.Ado;
 
-public class GitApiTests
+public class GitApiTests : IDisposable
 {
     private static readonly AdoContext Context = new()
     {
@@ -17,8 +17,22 @@ public class GitApiTests
 
     private static readonly Guid Me = Guid.Parse("11111111-2222-3333-4444-555555555555");
 
-    private static GitApi Api(FakeHttpHandler handler) =>
-        new(new AdoHttp(new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") }), Context);
+    private readonly List<IDisposable> _disposables = [];
+
+    private GitApi Api(FakeHttpHandler handler)
+    {
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
+        _disposables.Add(httpClient);
+        return new GitApi(new AdoHttp(httpClient), Context);
+    }
+
+    public void Dispose()
+    {
+        foreach (var disposable in _disposables)
+        {
+            disposable.Dispose();
+        }
+    }
 
     [Fact]
     public async Task ListActive_Queries_Project_Scoped_Endpoint()
