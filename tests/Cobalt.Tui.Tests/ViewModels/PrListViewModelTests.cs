@@ -69,15 +69,36 @@ public class PrListViewModelTests
     }
 
     [Fact]
-    public async Task Error_Is_Surfaced_Not_Thrown()
+    public async Task Expected_Error_Is_Surfaced_Not_Thrown()
     {
-        var source = new FakeSource { Throw = new InvalidOperationException("boom") };
+        var source = new FakeSource { Throw = new HttpRequestException("boom") };
         var vm = new PrListViewModel(source);
 
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         Assert.NotNull(vm.Error);
         Assert.Contains("boom", vm.Error);
+        Assert.Empty(vm.Rows);
+    }
+
+    [Fact]
+    public async Task Cancellation_Propagates()
+    {
+        var source = new FakeSource { Throw = new OperationCanceledException() };
+        var vm = new PrListViewModel(source);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => vm.LoadAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Unexpected_Exception_Propagates()
+    {
+        var source = new FakeSource { Throw = new InvalidOperationException("bug") };
+        var vm = new PrListViewModel(source);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => vm.LoadAsync(TestContext.Current.CancellationToken));
     }
 
     private sealed class GatedSource : IPullRequestSource

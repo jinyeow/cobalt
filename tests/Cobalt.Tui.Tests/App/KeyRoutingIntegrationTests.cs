@@ -18,6 +18,19 @@ public class KeyRoutingIntegrationTests
         public ShellViewModel Vm { get; } = new(["work", "oss"], "work");
         public List<AppCommand> Unhandled { get; } = [];
 
+        // The commands CobaltShell.Dispatch (or the active screen) consumes after the
+        // view-model declines them. A matched command outside this set is the
+        // "silently swallowed" case the shell now surfaces instead of dropping.
+        private static readonly HashSet<AppCommand> ScreenHandled =
+        [
+            AppCommand.MoveDown, AppCommand.MoveUp, AppCommand.MoveLeft, AppCommand.MoveRight,
+            AppCommand.MoveTop, AppCommand.MoveBottom, AppCommand.HalfPageDown, AppCommand.HalfPageUp,
+            AppCommand.Open, AppCommand.Back, AppCommand.Refresh, AppCommand.FilterStart,
+            AppCommand.CommandPalette, AppCommand.YankId, AppCommand.OpenInBrowser,
+            AppCommand.Comment, AppCommand.ChangeState, AppCommand.Assign, AppCommand.EditTags,
+            AppCommand.Vote,
+        ];
+
         public KeyScope Scope => Vm.ActiveSection == AppSection.WorkItems
             ? KeyScope.WorkItemList
             : KeyScope.PullRequestList;
@@ -34,9 +47,17 @@ public class KeyRoutingIntegrationTests
             {
                 return;
             }
-            if (!Vm.HandleCommand(result.Command))
+            if (Vm.HandleCommand(result.Command))
             {
-                Unhandled.Add(result.Command);
+                return;
+            }
+            Unhandled.Add(result.Command);
+
+            // Mirror CobaltShell.Dispatch's default: a router-matched command that no
+            // context handles must surface a message, never vanish silently.
+            if (!ScreenHandled.Contains(result.Command))
+            {
+                Vm.Messages.Info($"'{result.Command}' not available here");
             }
         }
     }
@@ -89,5 +110,19 @@ public class KeyRoutingIntegrationTests
         h.Press(Key.Tab);
 
         Assert.Equal(AppSection.PullRequests, h.Vm.ActiveSection);
+    }
+
+    [Fact]
+    public void Matched_But_Unhandled_Command_Surfaces_A_Message()
+    {
+        var h = new Harness();
+
+        // C-l → FocusRight is bound (matched by the router) but no context handles it;
+        // it must produce a visible message rather than being silently swallowed.
+        h.Press(new Key('l').WithCtrl);
+
+        Assert.Contains(AppCommand.FocusRight, h.Unhandled);
+        Assert.NotNull(h.Vm.Messages.Current);
+        Assert.Contains("not available here", h.Vm.Messages.Current!.Text);
     }
 }

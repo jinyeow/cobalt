@@ -3,6 +3,26 @@
 ## Unreleased
 
 ### Added
+- **Act on a row without opening it.** In the work-item list, `c` comment, `s` change
+  state, `a` assign, and `t` edit tags now run against the highlighted row; in the PR
+  list, `v` votes on the highlighted PR. The flows are the same ones the detail dialogs
+  use, extracted into shared `WorkItemActions`/`PrActions` runners (single source of
+  truth). A router-matched key that nothing in the current context handles now surfaces
+  `'<key>' not available here` instead of being silently swallowed.
+- **Crash log + global crash boundary.** An unexpected exception escaping the TUI now
+  restores the terminal, writes the full stack to a crash log
+  (`$XDG_STATE_HOME/cobalt/crash.log`, `~/.local/state/cobalt/crash.log`, or
+  `%LOCALAPPDATA%\cobalt\crash.log`), prints `cobalt crashed — see <path>`, and exits
+  non-zero. Background/fire-and-forget task faults route to the same log. See
+  [ADR 0013](docs/adr/0013-exception-handling-policy.md).
+
+### Changed
+- **Narrower view-model error handling.** View-model loads/mutations now catch only
+  the expected Azure DevOps failure set (API/HTTP/JSON/auth/IO) and surface it in the
+  message bar; an unexpected exception propagates to the crash boundary instead of
+  being masked as an "error" string (CodeQL `cs/catch-of-all-exceptions`).
+
+### Added (earlier in this cycle)
 - **Width-aware list columns.** PR and work-item rows now size to the terminal:
   fixed columns sit left and the title/summary takes all remaining width, reflowing
   on resize instead of leaving a blank right gutter.

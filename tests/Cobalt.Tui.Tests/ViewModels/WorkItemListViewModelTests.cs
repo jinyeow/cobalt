@@ -41,15 +41,39 @@ public class WorkItemListViewModelTests
     }
 
     [Fact]
-    public async Task Load_Failure_Sets_Error_Not_Throw()
+    public async Task Load_Expected_Failure_Sets_Error_And_Clears_Rows()
     {
-        var vm = new WorkItemListViewModel(new FakeSource([]) { Throw = new InvalidOperationException("boom") });
+        var vm = new WorkItemListViewModel(new FakeSource([Item(1, "A", "Active")])
+        {
+            Throw = new HttpRequestException("boom"),
+        });
 
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         Assert.False(vm.IsLoading);
         Assert.NotNull(vm.Error);
         Assert.Contains("boom", vm.Error);
+        Assert.Empty(vm.Rows);
+    }
+
+    [Fact]
+    public async Task Load_Cancellation_Propagates()
+    {
+        var vm = new WorkItemListViewModel(new FakeSource([]) { Throw = new OperationCanceledException() });
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => vm.LoadAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Load_Unexpected_Exception_Propagates()
+    {
+        // An unexpected type is a bug, not an API error — it must escape to the global
+        // crash boundary rather than being swallowed into the Error surface.
+        var vm = new WorkItemListViewModel(new FakeSource([]) { Throw = new InvalidOperationException("bug") });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => vm.LoadAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]

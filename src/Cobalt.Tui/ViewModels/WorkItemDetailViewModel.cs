@@ -53,7 +53,7 @@ public sealed class WorkItemDetailViewModel(IWorkItemStore store, long id)
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
         {
             Error = ex.Message;
         }
@@ -112,7 +112,7 @@ public sealed class WorkItemDetailViewModel(IWorkItemStore store, long id)
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
         {
             Error = ex.Message;
         }

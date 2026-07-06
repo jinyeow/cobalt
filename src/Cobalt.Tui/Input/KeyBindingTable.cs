@@ -42,6 +42,7 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.WorkItemList, "c", AppCommand.Comment);
         table.Bind(KeyScope.WorkItemList, "s", AppCommand.ChangeState);
         table.Bind(KeyScope.WorkItemList, "a", AppCommand.Assign);
+        table.Bind(KeyScope.WorkItemList, "t", AppCommand.EditTags);
 
         table.Bind(KeyScope.WorkItemDetail, "c", AppCommand.Comment);
         table.Bind(KeyScope.WorkItemDetail, "e", AppCommand.EditInEditor);

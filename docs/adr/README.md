@@ -17,3 +17,4 @@ immutable once accepted; superseding decisions get a new number that links back.
 | [0010](0010-diff-pane-colored-listview-data-source.md) | Color the diff pane through a custom `IListDataSource`, styled by a pure run model | Accepted |
 | [0011](0011-cross-project-org-pr-scope.md) | Cross-project (org-wide) PR scope, with per-PR-project drill-in | Accepted |
 | [0012](0012-lazy-background-comment-counts.md) | Lazy, background per-PR comment counts | Accepted |
+| [0013](0013-exception-handling-policy.md) | Narrow-at-operation exception handling with a global crash boundary | Accepted |

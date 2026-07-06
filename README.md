@@ -9,7 +9,7 @@ requests, diff review with line comments). The agreed specification lives in
 and design decisions in [docs/adr/](docs/adr/).
 
 Built with a UI-free `Cobalt.Core` and a view-model layer that never references
-Terminal.Gui, so the interesting logic is unit-tested (189 tests). See
+Terminal.Gui, so the interesting logic is unit-tested (386 tests). See
 [docs/adr/0004](docs/adr/0004-terminal-gui-v2-with-viewmodels.md) and
 [0007](docs/adr/0007-vim-input-as-testable-data.md).
 
@@ -56,10 +56,12 @@ cobalt --context oss  # launch against a named context
 `Enter`/`o` open · `1`/`2` sections · `Tab` next tab · `:` command palette
 (`:q` quit, `:ctx NAME` switch context, `:scope org|project` PR breadth,
 `:help`, `:messages`) · `?` help ·
-`r` refresh. In a work item: `s` state · `c` comment · `e` edit description in
-`$EDITOR` · `a` assign · `t` tags. In the PR section: `Tab` cycles the review
-queue / mine / active sub-tabs; in a PR: `v` vote · `c` reply · `x` resolve
-thread · `u` reactivate · `C` complete · `A` abandon · `d` open diff review.
+`r` refresh. On a work item (the highlighted list row or its detail): `s` state ·
+`c` comment · `a` assign · `t` tags; the detail additionally has `e` edit
+description in `$EDITOR`. In the PR section: `Tab` cycles the review queue / mine /
+active sub-tabs; on a PR (the highlighted list row or its detail): `v` vote; the
+detail additionally has `c` reply · `x` resolve thread · `u` reactivate · `C`
+complete · `A` abandon · `d` open diff review.
 In diff review: `Tab` switches file list / diff pane · `[`/`]` prev/next file ·
 `c` comment on the selected line. Anywhere in a list: `yy` yanks the item's web
 URL to the clipboard · `gx` opens it in your browser.
@@ -76,6 +78,15 @@ remaining terminal width (reflowing on resize), so there's no dead right gutter.
   when Azure DevOps is slow, and counts are fetched only for loaded rows, capped and
   cached.
 - **Work items**: id · type · state · title (fills) · iteration · changed date.
+
+## Crash logs
+
+Expected Azure DevOps failures (auth, network, API) surface in the message bar. An
+*unexpected* error restores your terminal, appends the full stack to a crash log, and
+exits non-zero after printing `cobalt crashed — see <path>`. The log lives in the XDG
+state dir: `$XDG_STATE_HOME/cobalt/crash.log` (default `~/.local/state/cobalt/crash.log`),
+or `%LOCALAPPDATA%\cobalt\crash.log` on Windows. See
+[ADR 0013](docs/adr/0013-exception-handling-policy.md).
 
 ## Known limitations
 

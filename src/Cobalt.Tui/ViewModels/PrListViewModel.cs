@@ -1,3 +1,4 @@
+using Cobalt.Core.Ado;
 using Cobalt.Core.Models;
 
 namespace Cobalt.Tui.ViewModels;
@@ -84,7 +85,7 @@ public sealed class PrListViewModel(IPullRequestSource source)
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
         {
             error = ex.Message;
             result = [];

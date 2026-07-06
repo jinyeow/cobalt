@@ -236,4 +236,47 @@ public class PrDiffViewModelTests
 
         Assert.NotNull(vm.Error);
     }
+
+    private sealed class ThrowingSource(Exception ex) : IPrDiffSource
+    {
+        public Task<PrIteration?> GetLatestIterationAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromException<PrIteration?>(ex);
+        public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repo, int prId, int iterationId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<FileChange>>([]);
+        public Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct) =>
+            Task.FromResult("");
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PrThread>>([]);
+        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task Load_Expected_Failure_Surfaces_Error()
+    {
+        var vm = new PrDiffViewModel(new ThrowingSource(new HttpRequestException("down")), Pr());
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.Error);
+        Assert.Contains("down", vm.Error);
+    }
+
+    [Fact]
+    public async Task Load_Cancellation_Propagates()
+    {
+        var vm = new PrDiffViewModel(new ThrowingSource(new OperationCanceledException()), Pr());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => vm.LoadAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Load_Unexpected_Exception_Propagates()
+    {
+        var vm = new PrDiffViewModel(new ThrowingSource(new InvalidOperationException("bug")), Pr());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => vm.LoadAsync(TestContext.Current.CancellationToken));
+    }
 }

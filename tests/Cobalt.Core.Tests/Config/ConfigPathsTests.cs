@@ -38,4 +38,34 @@ public class ConfigPathsTests
 
         Assert.Equal($@"C:\Users\u\AppData\Roaming{Sep}cobalt{Sep}config.toml", path);
     }
+
+    [Fact]
+    public void CrashLog_Uses_XdgStateHome_When_Set()
+    {
+        var path = ConfigPaths.CrashLogFile(
+            env: name => name == "XDG_STATE_HOME" ? "/custom/state" : null,
+            homeDirectory: "/home/u",
+            isWindows: false);
+
+        Assert.Equal($"/custom/state{Sep}cobalt{Sep}crash.log", path);
+    }
+
+    [Fact]
+    public void CrashLog_Falls_Back_To_LocalState_Under_Home()
+    {
+        var path = ConfigPaths.CrashLogFile(env: _ => null, homeDirectory: "/home/u", isWindows: false);
+
+        Assert.Equal($"/home/u{Sep}.local{Sep}state{Sep}cobalt{Sep}crash.log", path);
+    }
+
+    [Fact]
+    public void CrashLog_Uses_LocalAppData_On_Windows()
+    {
+        var path = ConfigPaths.CrashLogFile(
+            env: name => name == "LOCALAPPDATA" ? @"C:\Users\u\AppData\Local" : null,
+            homeDirectory: @"C:\Users\u",
+            isWindows: true);
+
+        Assert.Equal($@"C:\Users\u\AppData\Local{Sep}cobalt{Sep}crash.log", path);
+    }
 }

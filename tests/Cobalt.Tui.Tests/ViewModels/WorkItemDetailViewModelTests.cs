@@ -114,9 +114,9 @@ public class WorkItemDetailViewModelTests
     }
 
     [Fact]
-    public async Task Update_Failure_Surfaces_Error_And_Does_Not_Throw()
+    public async Task Update_Expected_Failure_Surfaces_Error_And_Does_Not_Throw()
     {
-        var store = new ThrowingStore();
+        var store = new ThrowingStore(new HttpRequestException("nope"));
         var vm = new WorkItemDetailViewModel(store, 1);
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
@@ -125,17 +125,51 @@ public class WorkItemDetailViewModelTests
         Assert.NotNull(vm.Error);
     }
 
-    private sealed class ThrowingStore : IWorkItemStore
+    [Fact]
+    public async Task Load_Expected_Failure_Surfaces_Error()
+    {
+        var store = new ThrowingStore(new AdoApiException(System.Net.HttpStatusCode.BadGateway, "down"), onLoad: true);
+        var vm = new WorkItemDetailViewModel(store, 1);
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.Error);
+        Assert.Contains("down", vm.Error);
+    }
+
+    [Fact]
+    public async Task Update_Unexpected_Exception_Propagates()
+    {
+        var store = new ThrowingStore(new InvalidOperationException("bug"));
+        var vm = new WorkItemDetailViewModel(store, 1);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => vm.ChangeStateAsync("Active", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Update_Cancellation_Propagates()
+    {
+        var store = new ThrowingStore(new OperationCanceledException());
+        var vm = new WorkItemDetailViewModel(store, 1);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => vm.ChangeStateAsync("Active", TestContext.Current.CancellationToken));
+    }
+
+    private sealed class ThrowingStore(Exception ex, bool onLoad = false) : IWorkItemStore
     {
         public Task<WorkItem> GetWorkItemAsync(long id, CancellationToken ct) =>
-            Task.FromResult(Item(1, "T", "New"));
+            onLoad ? Task.FromException<WorkItem>(ex) : Task.FromResult(Item(1, "T", "New"));
         public Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<WorkItemComment>>([]);
         public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<WorkItemStateDto>>([]);
         public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, CancellationToken ct) =>
-            Task.FromException<WorkItem>(new InvalidOperationException("nope"));
+            Task.FromException<WorkItem>(ex);
         public Task<WorkItemComment> AddCommentAsync(long id, string text, CancellationToken ct) =>
-            Task.FromException<WorkItemComment>(new InvalidOperationException("nope"));
+            Task.FromException<WorkItemComment>(ex);
     }
 }

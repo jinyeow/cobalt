@@ -1,3 +1,4 @@
+using Cobalt.Core.Ado;
 using Cobalt.Core.Models;
 
 namespace Cobalt.Tui.ViewModels;
@@ -47,7 +48,7 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
         {
             Error = ex.Message;
         }
@@ -100,7 +101,7 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
         {
             Error = ex.Message;
         }

@@ -64,7 +64,10 @@ public sealed class UiThreadSuspender(
             }
             catch (Exception ex)
             {
-                // Covers a throw from suspend(), body(), or resume().
+                // Justified broad catch (CodeQL cs/catch-of-all-exceptions): this runs on
+                // the parked UI-thread callback, so *any* throw from suspend()/body()/
+                // resume() must be captured and marshalled into the task — otherwise it
+                // escapes the message loop and the awaiting editor call hangs forever.
                 tcs.TrySetException(ex);
             }
         });

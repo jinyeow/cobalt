@@ -159,6 +159,47 @@ public class PrDetailViewModelTests
         Assert.Equal("Contoso.Web", store.LastProject);
     }
 
+    private sealed class ThrowingStore(Exception ex) : IPullRequestStore
+    {
+        public Task<PullRequest> GetPullRequestAsync(int id, CancellationToken ct) => Task.FromException<PullRequest>(ex);
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int id, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PrThread>>([]);
+        public Task VoteAsync(string project, string repo, int id, PrVote vote, CancellationToken ct) => Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repo, int id, int threadId, string text, CancellationToken ct) => Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repo, int id, int threadId, PrThreadStatus status, CancellationToken ct) => Task.CompletedTask;
+        public Task AbandonAsync(string project, string repo, int id, CancellationToken ct) => Task.CompletedTask;
+        public Task CompleteAsync(string project, string repo, int id, string mergeStrategy, bool deleteSource, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task Load_Expected_Failure_Surfaces_Error()
+    {
+        var vm = new PrDetailViewModel(new ThrowingStore(new HttpRequestException("down")), 10);
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.Error);
+        Assert.Contains("down", vm.Error);
+    }
+
+    [Fact]
+    public async Task Load_Cancellation_Propagates()
+    {
+        var vm = new PrDetailViewModel(new ThrowingStore(new OperationCanceledException()), 10);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => vm.LoadAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Load_Unexpected_Exception_Propagates()
+    {
+        var vm = new PrDetailViewModel(new ThrowingStore(new InvalidOperationException("bug")), 10);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => vm.LoadAsync(TestContext.Current.CancellationToken));
+    }
+
     [Fact]
     public async Task UnresolvedThreadCount_Counts_Active_NonSystem()
     {

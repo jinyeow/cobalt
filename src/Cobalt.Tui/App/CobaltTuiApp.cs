@@ -9,7 +9,25 @@ namespace Cobalt.Tui.App;
 
 public static class CobaltTuiApp
 {
+    private static bool _handlersInstalled;
+
     public static int Run(CobaltConfig config, string? contextOverride, ITokenProvider tokens)
+    {
+        InstallGlobalHandlers();
+        try
+        {
+            return RunCore(config, contextOverride, tokens);
+        }
+        catch (Exception ex)
+        {
+            // Last-resort crash boundary (ADR 0013). RunCore's `using var app` has already
+            // disposed Terminal.Gui and restored the terminal as this exception unwound, so
+            // writing to stderr here lands on a clean terminal instead of the alternate screen.
+            return HandleCrash(ex, ConfigPaths.CrashLogFile(), DateTimeOffset.Now, Console.Error);
+        }
+    }
+
+    private static int RunCore(CobaltConfig config, string? contextOverride, ITokenProvider tokens)
     {
         var context = config.Resolve(contextOverride);
         var vm = new ShellViewModel(
@@ -36,6 +54,61 @@ public static class CobaltTuiApp
 
         app.Run(shell);
         return 0;
+    }
+
+    /// <summary>
+    /// Writes an escaping exception to the crash log, tells the user where, and returns
+    /// a non-zero exit code. Testable in isolation: timestamp and sinks are injected.
+    /// </summary>
+    internal static int HandleCrash(Exception exception, string logPath, DateTimeOffset now, TextWriter stderr)
+    {
+        string reported;
+        try
+        {
+            reported = CrashLog.Write(logPath, exception, now);
+        }
+        catch (IOException)
+        {
+            reported = logPath; // could not write the log; still point the user at the intended path
+        }
+        stderr.WriteLine($"cobalt crashed — see {reported}");
+        return 1;
+    }
+
+    /// <summary>Routes a fire-and-forget/background fault to the same crash log; logging is best-effort.</summary>
+    internal static void LogBackgroundFault(Exception exception, string logPath, DateTimeOffset now)
+    {
+        try
+        {
+            CrashLog.Write(logPath, exception, now);
+        }
+        catch (IOException)
+        {
+            // never crash the finalizer/background thread over a failed log write
+        }
+    }
+
+    private static void InstallGlobalHandlers()
+    {
+        if (_handlersInstalled)
+        {
+            return;
+        }
+        _handlersInstalled = true;
+
+        var logPath = ConfigPaths.CrashLogFile();
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            LogBackgroundFault(e.Exception, logPath, DateTimeOffset.Now);
+            e.SetObserved();
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is Exception ex)
+            {
+                LogBackgroundFault(ex, logPath, DateTimeOffset.Now);
+            }
+        };
     }
 
     /// <summary>Fills the status bar with who we are; failures land in the message bar, never block startup.</summary>

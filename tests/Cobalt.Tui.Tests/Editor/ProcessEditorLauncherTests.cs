@@ -13,10 +13,6 @@ public class ProcessEditorLauncherTests
             {
                 return Task.FromResult(body());
             }
-            catch (Exception ex)
-            {
-                return Task.FromException<int>(ex);
-            }
             finally
             {
                 log.Add("exit");

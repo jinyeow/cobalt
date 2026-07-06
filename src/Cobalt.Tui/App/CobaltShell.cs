@@ -2,6 +2,7 @@ using Cobalt.Core.Config;
 using Cobalt.Tui.Editor;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.Screens;
+using Cobalt.Tui.Tasks;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
 using Terminal.Gui.ViewBase;
@@ -203,9 +204,76 @@ public sealed class CobaltShell : Window
             case AppCommand.OpenInBrowser:
                 OpenCurrentInBrowser();
                 break;
+            case AppCommand.Comment:
+                RunWorkItemAction((a, store, id, ct) => a.RunCommentAsync(store, id, ct));
+                break;
+            case AppCommand.ChangeState:
+                RunWorkItemAction((a, store, id, ct) => a.RunChangeStateAsync(store, id, ct));
+                break;
+            case AppCommand.Assign:
+                RunWorkItemAction((a, store, id, ct) => a.RunAssignAsync(store, id, ct));
+                break;
+            case AppCommand.EditTags:
+                RunWorkItemAction((a, store, id, ct) => a.RunTagsAsync(store, id, ct));
+                break;
+            case AppCommand.Vote:
+                RunPrVote();
+                break;
             default:
+                // Router matched the key but nothing in this context handles it — surface
+                // it instead of swallowing (the original "c/t do nothing" complaint).
+                _vm.Messages.Info($"'{KeyLabel(command)}' not available here");
                 break;
         }
+    }
+
+    /// <summary>The first key sequence bound to <paramref name="command"/> in the active scope, for messages.</summary>
+    private string KeyLabel(AppCommand command)
+    {
+        foreach (var (sequence, cmd) in _bindings.Visible(ActiveScope))
+        {
+            if (cmd == command)
+            {
+                return string.Join("", sequence);
+            }
+        }
+        return command.ToString();
+    }
+
+    private void RunWorkItemAction(Func<WorkItemActions, IWorkItemStore, long, CancellationToken, Task> run)
+    {
+        if (_workItems is null)
+        {
+            return;
+        }
+        if (_workItemList?.SelectedId is not { } id)
+        {
+            _vm.Messages.Info("no work item selected");
+            return;
+        }
+        var actions = new WorkItemActions(_app, _editor, _vm.Messages.Info);
+        _ = RunThenRefreshAsync(run(actions, _workItems, id, CancellationToken.None), () => _workItemList?.OnRefresh());
+    }
+
+    private void RunPrVote()
+    {
+        if (_pullRequests is null)
+        {
+            return;
+        }
+        if (_prList?.SelectedPr is not { } pr)
+        {
+            _vm.Messages.Info("no pull request selected");
+            return;
+        }
+        var actions = new PrActions(_app, _vm.Messages.Info);
+        _ = RunThenRefreshAsync(actions.RunVoteAsync(_pullRequests, pr.PullRequestId, CancellationToken.None), () => _prList?.Load());
+    }
+
+    private async Task RunThenRefreshAsync(Task action, Action refresh)
+    {
+        await action.IgnoreCancellationAsync().ConfigureAwait(false);
+        _app.Invoke(refresh);
     }
 
     private string? CurrentUrl()

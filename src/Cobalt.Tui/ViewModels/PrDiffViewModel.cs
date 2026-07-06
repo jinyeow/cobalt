@@ -1,3 +1,4 @@
+using Cobalt.Core.Ado;
 using Cobalt.Core.Models;
 using Cobalt.Core.Text;
 
@@ -66,7 +67,7 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
         {
             Error = ex.Message;
         }
@@ -133,7 +134,7 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
         {
             Error = ex.Message;
         }

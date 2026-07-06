@@ -21,6 +21,7 @@ public sealed class PrDetailDialog(
     IPrDiffSource? diffSource = null)
 {
     private readonly CancellationTokenSource _cts = new();
+    private readonly PrActions _actions = new(app, log);
     private bool _closed;
     private Dialog? _dialog;
 #pragma warning disable CS0618 // read-only scrollable pane; see WorkItemDetailDialog
@@ -116,7 +117,7 @@ public sealed class PrDetailDialog(
                 break;
             case "v":
                 key.Handled = true;
-                PickVote();
+                _ = _actions.VoteAsync(vm, Token);
                 break;
             case "c":
                 key.Handled = true;
@@ -221,17 +222,6 @@ public sealed class PrDetailDialog(
             lines.Add($"error: {err}");
         }
         return string.Join('\n', lines);
-    }
-
-    private void PickVote()
-    {
-        string[] labels = ["approve", "approve w/ suggestions", "wait for author", "reject", "reset"];
-        PrVote[] votes = [PrVote.Approved, PrVote.ApprovedWithSuggestions, PrVote.WaitingForAuthor, PrVote.Rejected, PrVote.NoVote];
-        var choice = MessageBox.Query(app, "vote", "", labels);
-        if (choice is { } i && i >= 0 && i < votes.Length)
-        {
-            _ = RunAndLog(vm.VoteAsync(votes[i], Token), $"voted: {labels[i]}");
-        }
     }
 
     private async Task ReplyAsync()

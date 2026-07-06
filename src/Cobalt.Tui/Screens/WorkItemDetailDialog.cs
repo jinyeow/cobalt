@@ -16,8 +16,7 @@ public sealed class WorkItemDetailDialog
 {
     private readonly IApplication _app;
     private readonly WorkItemDetailViewModel _vm;
-    private readonly EditorService _editor;
-    private readonly Action<string> _log;
+    private readonly WorkItemActions _actions;
     private readonly CancellationTokenSource _cts = new();
     private bool _closed;
     private Dialog? _dialog;
@@ -44,8 +43,7 @@ public sealed class WorkItemDetailDialog
     {
         _app = app;
         _vm = vm;
-        _editor = editor;
-        _log = log;
+        _actions = new WorkItemActions(app, editor, log);
     }
 
     public void Show()
@@ -124,7 +122,7 @@ public sealed class WorkItemDetailDialog
                 break;
             case "s":
                 key.Handled = true;
-                PickState();
+                _ = _actions.ChangeStateAsync(_vm, Token);
                 break;
             case "c":
                 key.Handled = true;
@@ -134,16 +132,16 @@ public sealed class WorkItemDetailDialog
                 }
                 else
                 {
-                    _ = CommentAsync();
+                    _ = _actions.CommentAsync(_vm, Token);
                 }
                 break;
             case "e":
                 key.Handled = true;
-                _ = EditDescriptionAsync();
+                _ = _actions.EditDescriptionAsync(_vm, Token);
                 break;
             case "a":
                 key.Handled = true;
-                _ = PromptAndRun("assign to (unique name)", "", v => _vm.AssignAsync(v, Token));
+                _ = _actions.AssignAsync(_vm, Token);
                 break;
             case "t":
                 key.Handled = true;
@@ -153,8 +151,7 @@ public sealed class WorkItemDetailDialog
                 }
                 else
                 {
-                    _ = PromptAndRun("tags (semicolon separated)", string.Join("; ", _vm.Item?.Tags ?? []),
-                        v => _vm.SetTagsAsync(v.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), Token));
+                    _ = _actions.TagsAsync(_vm, Token);
                 }
                 break;
             default:
@@ -210,87 +207,5 @@ public sealed class WorkItemDetailDialog
             lines.Add($"error: {err}");
         }
         return string.Join('\n', lines);
-    }
-
-    private void PickState()
-    {
-        var states = _vm.AvailableStates.Select(s => s.Name).ToArray();
-        if (states.Length == 0)
-        {
-            _log("no states available");
-            return;
-        }
-        var choice = MessageBox.Query(_app, "change state", "", states);
-        if (choice is { } index && index >= 0 && index < states.Length)
-        {
-            _ = RunAndLog(_vm.ChangeStateAsync(states[index], Token), $"state → {states[index]}");
-        }
-    }
-
-    private async Task CommentAsync()
-    {
-        string? text;
-        try
-        {
-            text = await _editor.EditAsync("", ".md", Token).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
-        {
-            _app.Invoke(() => _log($"editor failed: {ex.Message}"));
-            return;
-        }
-        if (!string.IsNullOrWhiteSpace(text))
-        {
-            await RunAndLog(_vm.AddCommentAsync(text.Trim(), Token), "comment added").ConfigureAwait(false);
-        }
-    }
-
-    private async Task EditDescriptionAsync()
-    {
-        string? edited;
-        try
-        {
-            edited = await _editor.EditAsync(_vm.DescriptionMarkdown, ".md", Token).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
-        {
-            _app.Invoke(() => _log($"editor failed: {ex.Message}"));
-            return;
-        }
-        if (edited is not null)
-        {
-            await RunAndLog(_vm.SaveDescriptionAsync(edited, Token), "description saved").ConfigureAwait(false);
-        }
-    }
-
-    private async Task PromptAndRun(string title, string initial, Func<string, Task> action)
-    {
-        string? value;
-        try
-        {
-            value = await _editor.EditAsync(initial, ".txt", Token).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
-        {
-            _app.Invoke(() => _log($"editor failed: {ex.Message}"));
-            return;
-        }
-        if (value is not null)
-        {
-            await RunAndLog(action(value.Trim()), title).ConfigureAwait(false);
-        }
-    }
-
-    private async Task RunAndLog(Task work, string success)
-    {
-        try
-        {
-            await work.ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return; // dialog closed mid-op; nothing to report
-        }
-        _app.Invoke(() => _log(_vm.Error is { } e ? $"failed: {e}" : success));
     }
 }

@@ -19,14 +19,9 @@ public sealed class InlineTerminalSuspender : ITerminalSuspender
 {
     public Task<int> RunSuspendedAsync(Func<int> body, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(body());
-        }
-        catch (Exception ex)
-        {
-            return Task.FromException<int>(ex);
-        }
+        // No terminal to suspend and no cleanup to guarantee, so there is nothing to
+        // marshal: a cancelled token or a throwing body simply surfaces synchronously.
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(body());
     }
 }
