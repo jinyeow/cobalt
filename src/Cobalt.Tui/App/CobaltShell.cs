@@ -184,9 +184,11 @@ public sealed class CobaltShell : Window
         {
             _workItemList?.Navigate(command, count);
             _prList?.Navigate(command, count);
-            // Force the frame now: without this the move only paints on the next event,
-            // which reads as "the key needs a second press" on slower/Windows drivers.
-            _app.LayoutAndDraw(false);
+            // Force a full redraw now (true, not false): a programmatic InvokeCommand move
+            // may not flag the view dirty on every driver, so LayoutAndDraw(false) would
+            // skip it and the move would only paint on the next event — which reads as
+            // "the key needs a second press" (Windows). Forcing the frame paints it now.
+            _app.LayoutAndDraw(true);
             return;
         }
 
