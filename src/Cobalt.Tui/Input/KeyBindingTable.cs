@@ -34,8 +34,11 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.Global, "S-Tab", AppCommand.PrevTab);
         table.Bind(KeyScope.Global, "C-h", AppCommand.FocusLeft);
         table.Bind(KeyScope.Global, "C-l", AppCommand.FocusRight);
-        table.Bind(KeyScope.Global, "1", AppCommand.SectionWorkItems);
-        table.Bind(KeyScope.Global, "2", AppCommand.SectionPullRequests);
+        // Digits are reserved for count prefixes (e.g. 5j); sections move via g-chords.
+        table.Bind(KeyScope.Global, "g t", AppCommand.NextSection);
+        table.Bind(KeyScope.Global, "g T", AppCommand.PrevSection);
+        table.Bind(KeyScope.Global, "g 1", AppCommand.SectionWorkItems);
+        table.Bind(KeyScope.Global, "g 2", AppCommand.SectionPullRequests);
         table.Bind(KeyScope.Global, "y y", AppCommand.YankId);
         table.Bind(KeyScope.Global, "g x", AppCommand.OpenInBrowser);
 
@@ -56,11 +59,18 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.PullRequestDetail, "c", AppCommand.Comment);
         table.Bind(KeyScope.PullRequestDetail, "x", AppCommand.ResolveThread);
         table.Bind(KeyScope.PullRequestDetail, "u", AppCommand.ReactivateThread);
+        table.Bind(KeyScope.PullRequestDetail, "d", AppCommand.OpenDiff);
+        table.Bind(KeyScope.PullRequestDetail, "C", AppCommand.CompletePr);
+        table.Bind(KeyScope.PullRequestDetail, "A", AppCommand.AbandonPr);
 
         table.Bind(KeyScope.DiffReview, "c", AppCommand.Comment);
         table.Bind(KeyScope.DiffReview, "x", AppCommand.ResolveThread);
         table.Bind(KeyScope.DiffReview, "u", AppCommand.ReactivateThread);
         table.Bind(KeyScope.DiffReview, "v", AppCommand.Vote);
+        table.Bind(KeyScope.DiffReview, "]", AppCommand.NextFile);
+        table.Bind(KeyScope.DiffReview, "[", AppCommand.PrevFile);
+        // Scoped Tab shadows the global NextTab: in diff review Tab cycles the two panes.
+        table.Bind(KeyScope.DiffReview, "Tab", AppCommand.CyclePane);
 
         table.Validate();
         return table;

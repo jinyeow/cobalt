@@ -14,7 +14,7 @@ namespace Cobalt.Tui.Tests.Screens;
 
 /// <summary>
 /// View-level, headless: guards vim navigation routing through the real
-/// tokenizer → router → ListNavigation → ListView chain, and the selection
+/// tokenizer → router → VimScroll → ListView chain, and the selection
 /// snap-back fix in the list views' Render (a background reload must not reset
 /// the highlight to the top).
 /// </summary>
@@ -32,9 +32,9 @@ public class ListSnapBackTests
             return;
         }
         var result = router.Feed(token, scope);
-        if (result.Kind == KeyResultKind.Matched && ListNavigation.Applies(result.Command))
+        if (result.Kind == KeyResultKind.Matched && VimScroll.Applies(result.Command))
         {
-            ListNavigation.Apply(list, result.Command);
+            VimScroll.Apply(list, result.Command, result.Count);
         }
     }
 

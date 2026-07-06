@@ -122,14 +122,15 @@ public sealed class CobaltShell : Window
                 return;
             }
 
-            var decision = DecideKey(token, _router.Feed(token, ActiveScope));
+            var result = _router.Feed(token, ActiveScope);
+            var decision = DecideKey(token, result);
             if (decision.Handled)
             {
                 key.Handled = true;
             }
             if (decision.Command is { } command)
             {
-                Dispatch(command);
+                Dispatch(command, result.Count);
             }
         };
     }
@@ -149,7 +150,7 @@ public sealed class CobaltShell : Window
 
     internal readonly record struct KeyDecision(bool Handled, AppCommand? Command);
 
-    private void Dispatch(AppCommand command)
+    private void Dispatch(AppCommand command, int? count = null)
     {
         // In the PR section, Tab/S-Tab cycle the PR sub-tabs (review queue/mine/active)
         // rather than switching top-level sections; 1/2 still switch sections.
@@ -168,10 +169,10 @@ public sealed class CobaltShell : Window
 
         // Vim movement: the router matched and consumed the key, so forward it to the
         // active list (ListView only navigates on arrow keys natively).
-        if (ListNavigation.Applies(command))
+        if (VimScroll.Applies(command))
         {
-            _workItemList?.Navigate(command);
-            _prList?.Navigate(command);
+            _workItemList?.Navigate(command, count);
+            _prList?.Navigate(command, count);
             // Force the frame now: without this the move only paints on the next event,
             // which reads as "the key needs a second press" on slower/Windows drivers.
             _app.LayoutAndDraw(false);
@@ -442,8 +443,8 @@ public sealed class CobaltShell : Window
 
     private void RefreshChrome()
     {
-        var wi = _vm.ActiveSection == AppSection.WorkItems ? "[1:Work Items]" : " 1:Work Items ";
-        var pr = _vm.ActiveSection == AppSection.PullRequests ? "[2:Pull Requests]" : " 2:Pull Requests ";
+        var wi = _vm.ActiveSection == AppSection.WorkItems ? "[g1:Work Items]" : " g1:Work Items ";
+        var pr = _vm.ActiveSection == AppSection.PullRequests ? "[g2:Pull Requests]" : " g2:Pull Requests ";
         _tabs.Text = $" {wi} {pr}";
         _status.Text = _vm.StatusLine;
         var current = _vm.Messages.Current;
@@ -451,53 +452,12 @@ public sealed class CobaltShell : Window
         _app.LayoutAndDraw(false);
     }
 
-    private void ShowHelp() => ShowTextDialog("keys", HelpText.For(_bindings, ActiveScope));
+    private void ShowHelp() => TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope));
 
     private void ShowMessages()
     {
         var lines = _vm.Messages.History
             .Select(m => $"{m.At:HH:mm:ss} {(m.Level == MessageLevel.Error ? "E" : "I")} {m.Text}");
-        ShowTextDialog("messages", string.Join("\n", lines));
-    }
-
-    /// <summary>Scrollable modal text (MessageBox chokes on content taller than the screen).</summary>
-    private void ShowTextDialog(string title, string text)
-    {
-        using var dialog = new Dialog
-        {
-            Title = $"{title} — q to close",
-            Width = Dim.Percent(85),
-            Height = Dim.Percent(85),
-        };
-        // TextView is marked obsolete in favor of the external tui-cs/Editor package;
-        // a read-only scrollable pane doesn't justify that dependency.
-#pragma warning disable CS0618
-        var view = new TextView
-        {
-            X = 0,
-            Y = 0,
-            Width = Dim.Fill(),
-            Height = Dim.Fill(),
-            ReadOnly = true,
-            Text = text,
-        };
-#pragma warning restore CS0618
-
-        // The focused ReadOnly TextView swallows q/Enter before dialog.KeyDown runs,
-        // so subscribe the close handler to the TextView too; other keys (arrows,
-        // PageUp/PageDown) fall through to its native scrolling.
-        void OnKey(object? sender, Terminal.Gui.Input.Key key)
-        {
-            var token = KeyTokenizer.ToToken(key);
-            if (token is "q" or "Esc" or "Enter")
-            {
-                key.Handled = true;
-                _app.RequestStop(dialog);
-            }
-        }
-        view.KeyDown += OnKey;
-        dialog.KeyDown += OnKey;
-        dialog.Add(view);
-        _app.Run(dialog);
+        TextDialog.Show(_app, "messages", string.Join("\n", lines));
     }
 }

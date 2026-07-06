@@ -1,5 +1,6 @@
 using Cobalt.Tui.App;
 using Cobalt.Tui.Editor;
+using Cobalt.Tui.Input;
 using Cobalt.Tui.Tasks;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
@@ -18,6 +19,8 @@ public sealed class WorkItemDetailDialog
     private readonly WorkItemDetailViewModel _vm;
     private readonly WorkItemActions _actions;
     private readonly Action<string> _log;
+    private readonly KeyBindingTable _bindings = KeyBindingTable.Default();
+    private readonly KeymapRouter _router;
     private readonly CancellationTokenSource _cts = new();
     private bool _closed;
     private Dialog? _dialog;
@@ -39,6 +42,9 @@ public sealed class WorkItemDetailDialog
     /// <summary>Test seam: replaces the real tags path (needs the editor) so a test can observe the 't' key.</summary>
     internal Action? TagsAction { get; set; }
 
+    /// <summary>Test seam: replaces the real help overlay (needs a run loop) so a test can observe '?'.</summary>
+    internal Action? HelpAction { get; set; }
+
     public WorkItemDetailDialog(
         IApplication app, WorkItemDetailViewModel vm, EditorService editor, Action<string> log)
     {
@@ -46,6 +52,7 @@ public sealed class WorkItemDetailDialog
         _vm = vm;
         _log = log;
         _actions = new WorkItemActions(app, editor, log);
+        _router = new KeymapRouter(_bindings);
     }
 
     public void Show()
@@ -116,18 +123,59 @@ public sealed class WorkItemDetailDialog
     private void HandleKey(object? sender, Terminal.Gui.Input.Key key)
     {
         var token = KeyTokenizer.ToToken(key);
-        switch (token)
+        if (token is null)
         {
-            case "q" or "Esc":
+            return;
+        }
+        var result = _router.Feed(token, KeyScope.WorkItemDetail);
+        switch (result.Kind)
+        {
+            case KeyResultKind.Pending:
+                key.Handled = true; // swallow an in-progress sequence (e.g. after 'g')
+                break;
+            case KeyResultKind.Matched when Dispatch(result.Command, result.Count):
                 key.Handled = true;
+                break;
+            case KeyResultKind.Matched:
+                break; // matched but this dialog doesn't act — let native widget behavior run
+            default:
+                // Esc clears a pending sequence and closes; other unbound keys fall through.
+                if (token == "Esc")
+                {
+                    key.Handled = true;
+                    RequestClose();
+                }
+                break;
+        }
+    }
+
+    /// <summary>Runs the matched command; returns true when the dialog actually acted.</summary>
+    private bool Dispatch(AppCommand command, int? count)
+    {
+        if (_body is not null && VimScroll.Applies(command))
+        {
+            VimScroll.Apply(_body, command, count);
+            return true;
+        }
+        switch (command)
+        {
+            case AppCommand.Back:
                 RequestClose();
-                break;
-            case "s":
-                key.Handled = true;
+                return true;
+            case AppCommand.Help:
+                if (HelpAction is not null)
+                {
+                    HelpAction();
+                }
+                else
+                {
+                    TextDialog.Show(_app, "keys", HelpText.For(_bindings, KeyScope.WorkItemDetail));
+                }
+                return true;
+            case AppCommand.ChangeState:
                 _ = FireAndForget.Observe(_actions.ChangeStateAsync(_vm, Token), _app, _log);
-                break;
-            case "c":
-                key.Handled = true;
+                return true;
+            case AppCommand.Comment:
                 if (CommentAction is not null)
                 {
                     CommentAction();
@@ -136,17 +184,14 @@ public sealed class WorkItemDetailDialog
                 {
                     _ = FireAndForget.Observe(_actions.CommentAsync(_vm, Token), _app, _log);
                 }
-                break;
-            case "e":
-                key.Handled = true;
+                return true;
+            case AppCommand.EditInEditor:
                 _ = FireAndForget.Observe(_actions.EditDescriptionAsync(_vm, Token), _app, _log);
-                break;
-            case "a":
-                key.Handled = true;
+                return true;
+            case AppCommand.Assign:
                 _ = FireAndForget.Observe(_actions.AssignAsync(_vm, Token), _app, _log);
-                break;
-            case "t":
-                key.Handled = true;
+                return true;
+            case AppCommand.EditTags:
                 if (TagsAction is not null)
                 {
                     TagsAction();
@@ -155,9 +200,9 @@ public sealed class WorkItemDetailDialog
                 {
                     _ = FireAndForget.Observe(_actions.TagsAsync(_vm, Token), _app, _log);
                 }
-                break;
+                return true;
             default:
-                break;
+                return false;
         }
     }
 

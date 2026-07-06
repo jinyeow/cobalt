@@ -53,7 +53,8 @@ cobalt --context oss  # launch against a named context
 ## Keys (vim layer)
 
 `j/k` move · `gg`/`G` top/bottom · `Ctrl-d`/`Ctrl-u` half-page · `/` filter ·
-`Enter`/`o` open · `1`/`2` sections · `Tab` next tab · `:` command palette
+`Enter`/`o` open · `gt`/`gT` next/prev section · `g1`/`g2` jump to Work Items /
+Pull Requests · `Tab` next tab · `:` command palette
 (`:q` quit, `:ctx NAME` switch context, `:scope org|project` PR breadth,
 `:help`, `:messages`) · `?` help ·
 `r` refresh. On a work item (the highlighted list row or its detail): `s` state ·
@@ -65,6 +66,16 @@ complete · `A` abandon · `d` open diff review.
 In diff review: `Tab` switches file list / diff pane · `[`/`]` prev/next file ·
 `c` comment on the selected line. Anywhere in a list: `yy` yanks the item's web
 URL to the clipboard · `gx` opens it in your browser.
+
+**Count prefixes.** Motions take a numeric count, vim-style: `5j` moves down five
+rows, `10G` jumps to line 10, `3]` advances three files in diff review, and a count
+multiplies `Ctrl-d`/`Ctrl-u`. Digits are reserved for counts, which is why sections
+moved off `1`/`2` and onto the `gt`/`gT`/`g1`/`g2` chords.
+
+**In-view scrolling.** The detail dialogs (work item, PR, diff review) and the `?`/
+`:messages` overlays are scrollable with the same keys — `j/k`, `gg`/`G`,
+`Ctrl-d`/`Ctrl-u` (with counts) — and `?` shows the key reference for the current
+view. In diff review those keys scroll whichever pane (file list or diff) has focus.
 
 ## Lists
 

@@ -28,6 +28,8 @@ public static class HelpText
         [AppCommand.FocusRight] = "focus pane right",
         [AppCommand.SectionWorkItems] = "work items section",
         [AppCommand.SectionPullRequests] = "pull requests section",
+        [AppCommand.NextSection] = "next section",
+        [AppCommand.PrevSection] = "previous section",
         [AppCommand.YankId] = "yank id/url",
         [AppCommand.OpenInBrowser] = "open in browser",
         [AppCommand.Comment] = "comment",
@@ -40,6 +42,10 @@ public static class HelpText
         [AppCommand.ReactivateThread] = "reactivate thread",
         [AppCommand.CompletePr] = "complete PR",
         [AppCommand.AbandonPr] = "abandon PR",
+        [AppCommand.OpenDiff] = "open diff review",
+        [AppCommand.NextFile] = "next file",
+        [AppCommand.PrevFile] = "previous file",
+        [AppCommand.CyclePane] = "switch file list / diff pane",
     };
 
     public static string For(KeyBindingTable table, KeyScope scope)

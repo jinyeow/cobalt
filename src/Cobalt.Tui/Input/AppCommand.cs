@@ -26,6 +26,8 @@ public enum AppCommand
     FocusRight,
     SectionWorkItems,
     SectionPullRequests,
+    NextSection,
+    PrevSection,
 
     // shared verbs
     YankId,
@@ -44,4 +46,10 @@ public enum AppCommand
     ReactivateThread,
     CompletePr,
     AbandonPr,
+    OpenDiff,
+
+    // diff review
+    NextFile,
+    PrevFile,
+    CyclePane,
 }

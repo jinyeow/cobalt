@@ -4,6 +4,7 @@ using Cobalt.Core.Text;
 using Cobalt.Core.Text.Syntax;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Editor;
+using Cobalt.Tui.Input;
 using Cobalt.Tui.Tasks;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
@@ -14,13 +15,17 @@ namespace Cobalt.Tui.Screens;
 
 /// <summary>
 /// Modal diff review: a changed-file list (left) and the unified diff of the
-/// selected file (right). `c` comments on the selected line, `x` opens threads.
+/// selected file (right). `c` comments on the selected line, `[`/`]` change file,
+/// Tab cycles the panes, and j/k/gg/G/Ctrl-d/u scroll the focused pane.
 /// </summary>
 public sealed class DiffReviewDialog(
     IApplication app, PrDiffViewModel vm, EditorService editor, Action<string> log)
 {
     private readonly CancellationTokenSource _cts = new();
+    private readonly KeyBindingTable _bindings = KeyBindingTable.Default();
+    private readonly KeymapRouter _router = new(KeyBindingTable.Default());
     private bool _closed;
+    private Dialog? _dialog;
     private ListView _fileList = null!;
     private ListView _diffPane = null!;
     private Label _diffHeader = null!;
@@ -30,14 +35,47 @@ public sealed class DiffReviewDialog(
 
     private CancellationToken Token => _cts.Token;
 
+    /// <summary>Test seam: replaces the default close (app.RequestStop) so a test can observe close without a run loop.</summary>
+    internal Action? CloseAction { get; set; }
+
+    /// <summary>Test seam: replaces the real help overlay (needs a run loop) so a test can observe '?'.</summary>
+    internal Action? HelpAction { get; set; }
+
+    /// <summary>Test seam: the changed-file list pane.</summary>
+    internal ListView FileList => _fileList;
+
+    /// <summary>Test seam: the unified-diff pane.</summary>
+    internal ListView DiffPane => _diffPane;
+
+    /// <summary>Test seam: the currently selected file index.</summary>
+    internal int FileIndex => _fileIndex;
+
     public void Show()
     {
-        using var dialog = new Dialog
+        using var dialog = Build();
+        _ = LoadAsync();
+        app.Run(dialog);
+
+        _closed = true;
+        vm.Changed -= OnChanged;
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+    /// <summary>
+    /// Constructs and wires the dialog (file list, diff pane, verb keys, change
+    /// subscription) without starting the load or run loop. Split out so view-level
+    /// tests can drive key delivery headlessly.
+    /// </summary>
+    internal Dialog Build()
+    {
+        var dialog = new Dialog
         {
-            Title = $"diff review !{vm.PrId} — q close · Tab files/diff · c comment · [ ] next/prev file",
+            Title = $"diff review !{vm.PrId} — q close · Tab files/diff · c comment · [ ] next/prev file · ? keys",
             Width = Dim.Percent(96),
             Height = Dim.Percent(96),
         };
+        _dialog = dialog;
 
         _fileList = new ListView
         {
@@ -75,69 +113,109 @@ public sealed class DiffReviewDialog(
             _ = SelectFile(_fileList.SelectedItem ?? _fileIndex);
         };
 
-        void OnChanged() => app.Invoke(() =>
-        {
-            if (!_closed)
-            {
-                Render();
-            }
-        });
         vm.Changed += OnChanged;
-
-        dialog.KeyDown += (_, key) =>
-        {
-            var token = KeyTokenizer.ToToken(key);
-            switch (token)
-            {
-                case "q" or "Esc":
-                    key.Handled = true;
-                    _closed = true;
-                    app.RequestStop(dialog);
-                    break;
-                case "Tab":
-                    key.Handled = true;
-                    if (_diffPane.HasFocus)
-                    {
-                        _fileList.SetFocus();
-                    }
-                    else
-                    {
-                        _diffPane.SetFocus();
-                    }
-                    break;
-                case "]":
-                    key.Handled = true;
-                    _ = SelectFile(_fileIndex + 1);
-                    break;
-                case "[":
-                    key.Handled = true;
-                    _ = SelectFile(_fileIndex - 1);
-                    break;
-                case "c":
-                    key.Handled = true;
-                    _ = FireAndForget.Observe(CommentAsync(), app, log);
-                    break;
-                case "j":
-                    key.Handled = true;
-                    (_fileList.HasFocus ? _fileList : _diffPane).MoveDown(false);
-                    break;
-                case "k":
-                    key.Handled = true;
-                    (_fileList.HasFocus ? _fileList : _diffPane).MoveUp(false);
-                    break;
-                default:
-                    break;
-            }
-        };
+        dialog.KeyDown += HandleKey;
 
         dialog.Add(_fileList, _diffHeader, _diffPane);
-        _ = LoadAsync();
-        app.Run(dialog);
+        Render();
+        return dialog;
+    }
 
+    private void OnChanged() => app.Invoke(() =>
+    {
+        if (!_closed)
+        {
+            Render();
+        }
+    });
+
+    private void HandleKey(object? sender, Terminal.Gui.Input.Key key)
+    {
+        var token = KeyTokenizer.ToToken(key);
+        if (token is null)
+        {
+            return;
+        }
+        var result = _router.Feed(token, KeyScope.DiffReview);
+        switch (result.Kind)
+        {
+            case KeyResultKind.Pending:
+                key.Handled = true; // swallow an in-progress sequence (e.g. after 'g')
+                break;
+            case KeyResultKind.Matched when Dispatch(result.Command, result.Count):
+                key.Handled = true;
+                break;
+            case KeyResultKind.Matched:
+                break; // matched but unhandled — let native behavior run (e.g. Enter → file Accepting)
+            default:
+                if (token == "Esc")
+                {
+                    key.Handled = true;
+                    RequestClose();
+                }
+                break;
+        }
+    }
+
+    /// <summary>Runs the matched command; returns true when the dialog actually acted.</summary>
+    private bool Dispatch(AppCommand command, int? count)
+    {
+        if (VimScroll.Applies(command))
+        {
+            // Scroll whichever pane has focus (file list or diff).
+            VimScroll.Apply(_diffPane.HasFocus ? _diffPane : _fileList, command, count);
+            return true;
+        }
+        switch (command)
+        {
+            case AppCommand.Back:
+                RequestClose();
+                return true;
+            case AppCommand.Help:
+                if (HelpAction is not null)
+                {
+                    HelpAction();
+                }
+                else
+                {
+                    TextDialog.Show(app, "keys", HelpText.For(_bindings, KeyScope.DiffReview));
+                }
+                return true;
+            case AppCommand.CyclePane:
+                if (_diffPane.HasFocus)
+                {
+                    _fileList.SetFocus();
+                }
+                else
+                {
+                    _diffPane.SetFocus();
+                }
+                return true;
+            case AppCommand.NextFile:
+                _ = SelectFile(_fileIndex + (count ?? 1));
+                return true;
+            case AppCommand.PrevFile:
+                _ = SelectFile(_fileIndex - (count ?? 1));
+                return true;
+            case AppCommand.Comment:
+                _ = FireAndForget.Observe(CommentAsync(), app, log);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void RequestClose()
+    {
         _closed = true;
-        vm.Changed -= OnChanged;
-        _cts.Cancel();
-        _cts.Dispose();
+        if (CloseAction is not null)
+        {
+            CloseAction();
+        }
+        else if (_dialog is not null)
+        {
+            app.RequestStop(_dialog);
+        }
     }
 
     private async Task LoadAsync() => await vm.LoadAsync(Token).IgnoreCancellationAsync();

@@ -127,10 +127,10 @@ public sealed class WorkItemListView : View
         }
     }
 
-    /// <summary>Vim movement forwarded from the shell router to the bound ListView.</summary>
-    public void Navigate(AppCommand command)
+    /// <summary>Vim movement (with optional count) forwarded from the shell router to the bound ListView.</summary>
+    public void Navigate(AppCommand command, int? count = null)
     {
-        ListNavigation.Apply(_list, command);
+        VimScroll.Apply(_list, command, count);
         // The list is the source of truth for the cursor; mirror it back so a
         // background reload restores where the user actually is, not a stale index.
         _vm.SelectedIndex = _list.SelectedItem ?? 0;

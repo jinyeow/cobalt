@@ -3,6 +3,23 @@
 ## Unreleased
 
 ### Added
+- **Vim count prefixes.** Motions now take a numeric count everywhere: `5j` moves down
+  five rows, `10G` jumps to line 10, `3]` advances three files in diff review, and a
+  count multiplies `Ctrl-d`/`Ctrl-u`. A bare `0` stays the line-start motion, not a
+  count. Implemented as a pure `KeymapRouter` change (`KeyResult.Count`) threaded through
+  the shell and dialogs.
+- **Section navigation moved to `g`-chords.** `gt`/`gT` cycle to the next/previous
+  section (wrapping) and `g1`/`g2` jump straight to Work Items / Pull Requests. The old
+  `1`/`2` section bindings are removed so digits are free for counts; the tab bar now
+  reads `[g1:Work Items] [g2:Pull Requests]`.
+- **Scrollable, key-aware detail dialogs.** The work-item, PR, and diff-review dialogs
+  now route keys through the shared `KeymapRouter`, so `j/k`, `gg`/`G`, and
+  `Ctrl-d`/`Ctrl-u` (with counts) scroll the body — in diff review, whichever pane has
+  focus. `?` opens a per-view key reference. Diff review gains `]`/`[` (next/prev file,
+  count-aware) and `Tab` (cycle panes); PR detail gains `d` diff, `C` complete, `A`
+  abandon as first-class bindings. Unclaimed keys still fall through to native widget
+  behavior (e.g. `Enter` opens the highlighted diff file). See
+  [ADR 0014](docs/adr/0014-shared-count-aware-scroll-seam.md).
 - **Act on a row without opening it.** In the work-item list, `c` comment, `s` change
   state, `a` assign, and `t` edit tags now run against the highlighted row; in the PR
   list, `v` votes on the highlighted PR. The flows are the same ones the detail dialogs
@@ -17,6 +34,9 @@
   [ADR 0013](docs/adr/0013-exception-handling-policy.md).
 
 ### Changed
+- **`Ctrl-d`/`Ctrl-u` are a true half page everywhere.** In lists they previously did a
+  full page (the `ListView` primitive); they now move half the viewport, matching the
+  detail dialogs and vim, via the shared `VimScroll` seam.
 - **Narrower view-model error handling.** View-model loads/mutations now catch only
   the expected Azure DevOps failure set (API/HTTP/JSON/auth/IO) and surface it in the
   message bar; an unexpected exception propagates to the crash boundary instead of

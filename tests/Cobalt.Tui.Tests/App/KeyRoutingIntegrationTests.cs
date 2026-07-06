@@ -31,6 +31,9 @@ public class KeyRoutingIntegrationTests
             AppCommand.Vote,
         ];
 
+        /// <summary>The count carried by the last matched command (null when there was none).</summary>
+        public int? LastCount { get; private set; }
+
         public KeyScope Scope => Vm.ActiveSection == AppSection.WorkItems
             ? KeyScope.WorkItemList
             : KeyScope.PullRequestList;
@@ -47,6 +50,7 @@ public class KeyRoutingIntegrationTests
             {
                 return;
             }
+            LastCount = result.Count;
             if (Vm.HandleCommand(result.Command))
             {
                 return;
@@ -63,15 +67,29 @@ public class KeyRoutingIntegrationTests
     }
 
     [Fact]
-    public void Number_Keys_Switch_Sections()
+    public void G_Digit_Chords_Switch_Sections()
     {
         var h = new Harness();
 
+        h.Press(new Key('g'));
         h.Press(new Key('2'));
         Assert.Equal(AppSection.PullRequests, h.Vm.ActiveSection);
 
+        h.Press(new Key('g'));
         h.Press(new Key('1'));
         Assert.Equal(AppSection.WorkItems, h.Vm.ActiveSection);
+    }
+
+    [Fact]
+    public void Digit_Prefix_Then_Verb_Carries_Count_End_To_End()
+    {
+        var h = new Harness();
+
+        h.Press(new Key('5')); // KeyTokenizer emits "5"; router treats it as a count
+        h.Press(new Key('j'));
+
+        Assert.Contains(AppCommand.MoveDown, h.Unhandled);
+        Assert.Equal(5, h.LastCount);
     }
 
     [Fact]

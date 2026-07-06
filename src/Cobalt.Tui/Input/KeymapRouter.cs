@@ -12,11 +12,11 @@ public enum KeyResultKind
     Matched,
 }
 
-public readonly record struct KeyResult(KeyResultKind Kind, AppCommand Command)
+public readonly record struct KeyResult(KeyResultKind Kind, AppCommand Command, int? Count = null)
 {
     public static KeyResult None => new(KeyResultKind.None, default);
     public static KeyResult Pending => new(KeyResultKind.Pending, default);
-    public static KeyResult Matched(AppCommand command) => new(KeyResultKind.Matched, command);
+    public static KeyResult Matched(AppCommand command, int? count = null) => new(KeyResultKind.Matched, command, count);
 }
 
 /// <summary>
@@ -28,12 +28,30 @@ public sealed class KeymapRouter(KeyBindingTable table)
 {
     private readonly List<string> _pending = [];
 
+    // Accumulated numeric count prefix (vim "5j"). 0 means "no count".
+    private int _count;
+
     public KeyResult Feed(string keyToken, KeyScope scope)
     {
         if (keyToken == "Esc")
         {
             _pending.Clear();
+            _count = 0;
             return KeyResult.None;
+        }
+
+        // A leading run of digits (with no multi-key sequence pending) is a count
+        // prefix, not a binding: "5j" moves down five rows. A bare "0" is the
+        // vim line-start motion, not a count, so it only extends an existing count.
+        if (_pending.Count == 0 && keyToken.Length == 1 && keyToken[0] is >= '0' and <= '9')
+        {
+            var digit = keyToken[0] - '0';
+            if (digit == 0 && _count == 0)
+            {
+                return KeyResult.None;
+            }
+            _count = Math.Min((_count * 10) + digit, 9999);
+            return KeyResult.Pending;
         }
 
         _pending.Add(keyToken);
@@ -65,7 +83,9 @@ public sealed class KeymapRouter(KeyBindingTable table)
         if (exact is { } matched)
         {
             _pending.Clear();
-            return KeyResult.Matched(matched);
+            var count = _count == 0 ? (int?)null : _count;
+            _count = 0;
+            return KeyResult.Matched(matched, count);
         }
         if (extendable)
         {
@@ -73,8 +93,13 @@ public sealed class KeymapRouter(KeyBindingTable table)
         }
 
         _pending.Clear();
+        _count = 0;
         return KeyResult.None;
     }
 
-    public void Reset() => _pending.Clear();
+    public void Reset()
+    {
+        _pending.Clear();
+        _count = 0;
+    }
 }

@@ -55,6 +55,9 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
                 return true;
             case AppCommand.NextTab:
             case AppCommand.PrevTab:
+            case AppCommand.NextSection:
+            case AppCommand.PrevSection:
+                // Two sections today, so next/prev both toggle; wrapping is implicit.
                 SetSection(ActiveSection == AppSection.WorkItems
                     ? AppSection.PullRequests
                     : AppSection.WorkItems);

@@ -1,6 +1,7 @@
 using Cobalt.Tui.App;
 using Cobalt.Tui.Editor;
 using Cobalt.Core.Models;
+using Cobalt.Tui.Input;
 using Cobalt.Tui.Tasks;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
@@ -22,6 +23,8 @@ public sealed class PrDetailDialog(
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly PrActions _actions = new(app, log);
+    private readonly KeyBindingTable _bindings = KeyBindingTable.Default();
+    private readonly KeymapRouter _router = new(KeyBindingTable.Default());
     private bool _closed;
     private Dialog? _dialog;
 #pragma warning disable CS0618 // read-only scrollable pane; see WorkItemDetailDialog
@@ -41,6 +44,15 @@ public sealed class PrDetailDialog(
 
     /// <summary>Test seam: replaces the real reply path (needs the editor) so a test can observe the 'c' key.</summary>
     internal Action? ReplyAction { get; set; }
+
+    /// <summary>Test seam: replaces the real complete flow (needs MessageBox/run loop) so a test can observe 'C'.</summary>
+    internal Action? CompleteAction { get; set; }
+
+    /// <summary>Test seam: replaces the real abandon flow (needs MessageBox/run loop) so a test can observe 'A'.</summary>
+    internal Action? AbandonAction { get; set; }
+
+    /// <summary>Test seam: replaces the real help overlay (needs a run loop) so a test can observe '?'.</summary>
+    internal Action? HelpAction { get; set; }
 
     public void Show()
     {
@@ -109,18 +121,58 @@ public sealed class PrDetailDialog(
     private void HandleKey(object? sender, Terminal.Gui.Input.Key key)
     {
         var token = KeyTokenizer.ToToken(key);
-        switch (token)
+        if (token is null)
         {
-            case "q" or "Esc":
+            return;
+        }
+        var result = _router.Feed(token, KeyScope.PullRequestDetail);
+        switch (result.Kind)
+        {
+            case KeyResultKind.Pending:
+                key.Handled = true; // swallow an in-progress sequence (e.g. after 'g')
+                break;
+            case KeyResultKind.Matched when Dispatch(result.Command, result.Count):
                 key.Handled = true;
+                break;
+            case KeyResultKind.Matched:
+                break; // matched but this dialog doesn't act — let native widget behavior run
+            default:
+                if (token == "Esc")
+                {
+                    key.Handled = true;
+                    RequestClose();
+                }
+                break;
+        }
+    }
+
+    /// <summary>Runs the matched command; returns true when the dialog actually acted.</summary>
+    private bool Dispatch(AppCommand command, int? count)
+    {
+        if (_body is not null && VimScroll.Applies(command))
+        {
+            VimScroll.Apply(_body, command, count);
+            return true;
+        }
+        switch (command)
+        {
+            case AppCommand.Back:
                 RequestClose();
-                break;
-            case "v":
-                key.Handled = true;
+                return true;
+            case AppCommand.Help:
+                if (HelpAction is not null)
+                {
+                    HelpAction();
+                }
+                else
+                {
+                    TextDialog.Show(app, "keys", HelpText.For(_bindings, KeyScope.PullRequestDetail));
+                }
+                return true;
+            case AppCommand.Vote:
                 _ = FireAndForget.Observe(_actions.VoteAsync(vm, Token), app, log);
-                break;
-            case "c":
-                key.Handled = true;
+                return true;
+            case AppCommand.Comment:
                 if (ReplyAction is not null)
                 {
                     ReplyAction();
@@ -129,29 +181,24 @@ public sealed class PrDetailDialog(
                 {
                     _ = FireAndForget.Observe(ReplyAsync(), app, log);
                 }
-                break;
-            case "x":
-                key.Handled = true;
+                return true;
+            case AppCommand.ResolveThread:
                 _ = FireAndForget.Observe(ThreadStatusAsync(resolve: true), app, log);
-                break;
-            case "u":
-                key.Handled = true;
+                return true;
+            case AppCommand.ReactivateThread:
                 _ = FireAndForget.Observe(ThreadStatusAsync(resolve: false), app, log);
-                break;
-            case "A":
-                key.Handled = true;
-                ConfirmAbandon();
-                break;
-            case "C":
-                key.Handled = true;
-                ConfirmComplete();
-                break;
-            case "d":
-                key.Handled = true;
+                return true;
+            case AppCommand.AbandonPr:
+                (AbandonAction ?? ConfirmAbandon)();
+                return true;
+            case AppCommand.CompletePr:
+                (CompleteAction ?? ConfirmComplete)();
+                return true;
+            case AppCommand.OpenDiff:
                 (DiffAction ?? OpenDiff)();
-                break;
+                return true;
             default:
-                break;
+                return false;
         }
     }
 

@@ -123,6 +123,98 @@ public class DetailDialogKeyDeliveryTests
             $"expected scroll to advance from {before}, got {detail.Body.Viewport.Y}");
     }
 
+    // Vim scrolling asserts on TextView.CurrentRow — Viewport.Y clamps at Height-1 on
+    // TextView and is not a reliable scroll offset (TG 2.4.16, ADR).
+
+    private static PrDetailDialog LaidOutPrDialog(out Terminal.Gui.Views.Dialog dialog)
+    {
+        var detail = NewPrDialog();
+        dialog = detail.Build();
+        dialog.Layout(new Size(60, 12));
+        detail.Body.Text = string.Join("\n", Enumerable.Range(0, 200).Select(i => $"line {i}"));
+        dialog.SetFocus();
+        return detail;
+    }
+
+    [Fact]
+    public void PrDialog_J_Moves_Body_Down_One_Row()
+    {
+        var detail = LaidOutPrDialog(out var dialog);
+
+        dialog.NewKeyDownEvent(new Key('j'));
+
+        Assert.Equal(1, detail.Body.CurrentRow);
+    }
+
+    [Fact]
+    public void PrDialog_Count_Then_J_Moves_By_Count()
+    {
+        var detail = LaidOutPrDialog(out var dialog);
+
+        dialog.NewKeyDownEvent(new Key('5'));
+        dialog.NewKeyDownEvent(new Key('j'));
+
+        Assert.Equal(5, detail.Body.CurrentRow);
+    }
+
+    [Fact]
+    public void PrDialog_G_Jumps_To_Last_Row_And_gg_Back_To_Top()
+    {
+        var detail = LaidOutPrDialog(out var dialog);
+
+        dialog.NewKeyDownEvent(new Key('G'));
+        Assert.Equal(199, detail.Body.CurrentRow);
+
+        dialog.NewKeyDownEvent(new Key('g'));
+        dialog.NewKeyDownEvent(new Key('g'));
+        Assert.Equal(0, detail.Body.CurrentRow);
+    }
+
+    [Fact]
+    public void PrDialog_CtrlD_Moves_About_Half_A_Page()
+    {
+        var detail = LaidOutPrDialog(out var dialog);
+        var half = Math.Max(1, detail.Body.Viewport.Height / 2);
+
+        dialog.NewKeyDownEvent(new Key('d').WithCtrl);
+
+        Assert.Equal(half, detail.Body.CurrentRow);
+    }
+
+    [Fact]
+    public void PrDialog_Question_Mark_Opens_The_Help_Seam()
+    {
+        var detail = NewPrDialog();
+        var opened = false;
+        detail.HelpAction = () => opened = true;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('?'));
+
+        Assert.True(opened);
+    }
+
+    [Fact]
+    public void PrDialog_C_Complete_And_A_Abandon_Reach_Their_Seams()
+    {
+        var detail = NewPrDialog();
+        var completed = false;
+        var abandoned = false;
+        detail.CompleteAction = () => completed = true;
+        detail.AbandonAction = () => abandoned = true;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('C'));
+        dialog.NewKeyDownEvent(new Key('A'));
+
+        Assert.True(completed);
+        Assert.True(abandoned);
+    }
+
     // ---- Work-item detail ----
 
     private sealed class FakeWorkItemStore : IWorkItemStore
@@ -210,5 +302,64 @@ public class DetailDialogKeyDeliveryTests
 
         Assert.True(detail.Body.Viewport.Y > before,
             $"expected scroll to advance from {before}, got {detail.Body.Viewport.Y}");
+    }
+
+    private static WorkItemDetailDialog LaidOutWorkItemDialog(out Terminal.Gui.Views.Dialog dialog)
+    {
+        var detail = NewWorkItemDialog();
+        dialog = detail.Build();
+        dialog.Layout(new Size(60, 12));
+        detail.Body.Text = string.Join("\n", Enumerable.Range(0, 200).Select(i => $"line {i}"));
+        dialog.SetFocus();
+        return detail;
+    }
+
+    [Fact]
+    public void WorkItemDialog_J_Moves_Body_Down_One_Row()
+    {
+        var detail = LaidOutWorkItemDialog(out var dialog);
+
+        dialog.NewKeyDownEvent(new Key('j'));
+
+        Assert.Equal(1, detail.Body.CurrentRow);
+    }
+
+    [Fact]
+    public void WorkItemDialog_Count_Then_J_Moves_By_Count()
+    {
+        var detail = LaidOutWorkItemDialog(out var dialog);
+
+        dialog.NewKeyDownEvent(new Key('5'));
+        dialog.NewKeyDownEvent(new Key('j'));
+
+        Assert.Equal(5, detail.Body.CurrentRow);
+    }
+
+    [Fact]
+    public void WorkItemDialog_G_And_gg_Jump_To_Ends()
+    {
+        var detail = LaidOutWorkItemDialog(out var dialog);
+
+        dialog.NewKeyDownEvent(new Key('G'));
+        Assert.Equal(199, detail.Body.CurrentRow);
+
+        dialog.NewKeyDownEvent(new Key('g'));
+        dialog.NewKeyDownEvent(new Key('g'));
+        Assert.Equal(0, detail.Body.CurrentRow);
+    }
+
+    [Fact]
+    public void WorkItemDialog_Question_Mark_Opens_The_Help_Seam()
+    {
+        var detail = NewWorkItemDialog();
+        var opened = false;
+        detail.HelpAction = () => opened = true;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('?'));
+
+        Assert.True(opened);
     }
 }
