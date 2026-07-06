@@ -41,6 +41,23 @@ public class PrCommentCountEnricherTests
     }
 
     [Fact]
+    public async Task Failed_Key_Is_Not_Refetched()
+    {
+        var calls = 0;
+        var enricher = new PrCommentCountEnricher((pr, _) =>
+        {
+            Interlocked.Increment(ref calls);
+            return Task.FromException<int>(new HttpRequestException("boom"));
+        });
+
+        await enricher.EnrichAsync([Pr(1)], TestContext.Current.CancellationToken);
+        await enricher.EnrichAsync([Pr(1)], TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, calls); // failed once, never retried this session
+        Assert.Null(enricher.TryGet(Pr(1)));
+    }
+
+    [Fact]
     public async Task Raises_CountAvailable_When_A_Count_Lands()
     {
         var raised = new List<int>();

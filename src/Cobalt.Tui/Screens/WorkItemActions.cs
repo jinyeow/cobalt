@@ -97,7 +97,14 @@ public sealed class WorkItemActions
 
     public async Task TagsAsync(WorkItemDetailViewModel vm, CancellationToken ct)
     {
-        var value = await EditAsync(string.Join("; ", vm.Item?.Tags ?? []), ".txt", ct).ConfigureAwait(false);
+        // If the load failed, Item is null and the editor would prefill empty; saving that
+        // would replace the server's tags with nothing. Bail instead of wiping them (L3).
+        if (vm.Item is null)
+        {
+            _log("cannot edit tags: work item failed to load");
+            return;
+        }
+        var value = await EditAsync(string.Join("; ", vm.Item.Tags), ".txt", ct).ConfigureAwait(false);
         if (value is not null)
         {
             var tags = value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

@@ -134,6 +134,38 @@ public class WorkItemActionsTests
         Assert.Contains("jin@example.com", store.LastPatch.ToJson());
     }
 
+    private sealed class FailingLoadStore : IWorkItemStore
+    {
+        public JsonPatchBuilder? LastPatch { get; private set; }
+        public Task<WorkItem> GetWorkItemAsync(long id, CancellationToken ct) =>
+            Task.FromException<WorkItem>(new HttpRequestException("down"));
+        public Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<WorkItemComment>>([]);
+        public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<WorkItemStateDto>>([]);
+        public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, CancellationToken ct)
+        {
+            LastPatch = patch;
+            return Task.FromResult(WorkItemActionsTests.Item());
+        }
+        public Task<WorkItemComment> AddCommentAsync(long id, string text, CancellationToken ct) =>
+            Task.FromResult(new WorkItemComment(1, "me", DateTimeOffset.UnixEpoch, text));
+    }
+
+    [Fact]
+    public async Task RunTags_On_Failed_Load_Does_Not_Wipe_Tags_And_Reports()
+    {
+        var store = new FailingLoadStore();
+        string? logged = null;
+        // The editor would return non-empty text; the guard must stop before any save.
+        var actions = Actions(EditorReturning("should-not-be-saved"), m => logged = m);
+
+        await actions.RunTagsAsync(store, 1, TestContext.Current.CancellationToken);
+
+        Assert.Null(store.LastPatch); // never replaced the server-side tags
+        Assert.NotNull(logged);
+    }
+
     [Fact]
     public async Task RunTags_Sends_Tags_Patch()
     {

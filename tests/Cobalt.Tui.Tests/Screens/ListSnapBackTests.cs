@@ -117,4 +117,42 @@ public class ListSnapBackTests
 
         Assert.Equal(items[^1].PullRequestId, view.SelectedPr?.PullRequestId);
     }
+
+    // ---- (3) enrichment cancellation on tab switch (M2 / ADR 0012) ----
+
+    [Fact]
+    public async Task PrList_TabSwitch_Cancels_Prior_Tab_Enrichment()
+    {
+        var started = new TaskCompletionSource();
+        var tokens = new List<CancellationToken>();
+        var enricher = new PrCommentCountEnricher(async (pr, ct) =>
+        {
+            lock (tokens)
+            {
+                tokens.Add(ct);
+            }
+            started.TrySetResult();
+            await Task.Delay(System.Threading.Timeout.Infinite, ct);
+            return 0;
+        });
+
+        var items = Enumerable.Range(1, 3).Select(Pr).ToList();
+        var vm = new PrListViewModel(new FakePrSource(items));
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var view = new PrListView(App, vm, enricher); // ctor render enqueues enrichment
+        await started.Task; // a fetch has captured the current load token
+
+        CancellationToken priorToken;
+        lock (tokens)
+        {
+            priorToken = tokens[0];
+        }
+        Assert.False(priorToken.IsCancellationRequested);
+
+        view.NextTab(); // cycles the per-load token, cancelling the prior tab's enrichment
+
+        Assert.True(priorToken.IsCancellationRequested);        // prior fetch observes cancellation
+        Assert.False(view.CurrentLoadToken.IsCancellationRequested); // new tab's load token is live
+    }
 }

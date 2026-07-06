@@ -22,6 +22,33 @@
   message bar; an unexpected exception propagates to the crash boundary instead of
   being masked as an "error" string (CodeQL `cs/catch-of-all-exceptions`).
 
+### Fixed
+- **PR "complete" now reports when the merge is still computing.** Completing a PR
+  whose source commit hasn't been resolved yet surfaces a clear message
+  ("merge still computing — try again in a moment") instead of silently doing nothing
+  and later logging a phantom crash.
+- **Dialog verb actions can't fail silently.** Vote/reply/resolve/complete/abandon,
+  work-item state/comment/assign/tags/description, and diff line-comments run through a
+  shared `FireAndForget.Observe` guard: an unexpected fault is now both recorded to the
+  crash log and shown in the message bar immediately, while user cancellation stays
+  silent (previously such faults vanished into a discarded task).
+- **HTTP timeouts are distinguished from user cancellation.** A request timeout (a
+  cancellation not carrying the caller's token) now surfaces as a visible error instead
+  of leaving a pane showing "no data"; genuine user/dialog cancellations stay silent.
+- **Comment-count enrichment cancels on tab/scope switch.** Switching PR tabs or scope
+  now abandons the previous tab's in-flight badge fetches (a fresh per-load token) so
+  they no longer hog the fetch semaphore and delay the new tab's badges; a fetch that
+  fails is no longer retried on every re-render.
+- **Robust crash logging.** A crash-log write that fails (permission denied, malformed
+  `$XDG_STATE_HOME`, full disk) can no longer itself crash the app; the boundary falls
+  back to printing the stack to stderr, and the unobserved-task handler observes the
+  fault before attempting to log it.
+- **Tags aren't wiped after a failed load.** Editing tags on a work item that failed to
+  load now bails with a message instead of opening an empty editor and replacing the
+  server-side tags with nothing.
+- PR list selection resets to the top on a tab/scope change (it kept the previous tab's
+  row index); same-tab background reloads still restore the reviewer's position.
+
 ### Added (earlier in this cycle)
 - **Width-aware list columns.** PR and work-item rows now size to the terminal:
   fixed columns sit left and the title/summary takes all remaining width, reflowing

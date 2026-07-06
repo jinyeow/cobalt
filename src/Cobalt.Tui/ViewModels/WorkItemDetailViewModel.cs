@@ -49,13 +49,15 @@ public sealed class WorkItemDetailViewModel(IWorkItemStore store, long id)
             Comments = await store.GetCommentsAsync(id, ct).ConfigureAwait(false);
             AvailableStates = await store.GetStatesAsync(Item.WorkItemType, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {
-            throw;
+            throw; // genuine user/dialog cancel (carries our token) stays silent
         }
-        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
+        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
         {
-            Error = ex.Message;
+            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
+            // surfaced as an expected error rather than a silent no-data pane (L2).
+            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
         }
         finally
         {
@@ -85,7 +87,7 @@ public sealed class WorkItemDetailViewModel(IWorkItemStore store, long id)
         {
             await store.AddCommentAsync(id, text, ct).ConfigureAwait(false);
             Comments = await store.GetCommentsAsync(id, ct).ConfigureAwait(false);
-        }).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 
     private async Task MutateAsync(JsonPatchBuilder patch, CancellationToken ct)
@@ -96,10 +98,10 @@ public sealed class WorkItemDetailViewModel(IWorkItemStore store, long id)
             var analysis = HtmlMarkdown.Analyze(Item.DescriptionHtml);
             DescriptionMarkdown = analysis.Markdown;
             DescriptionLossy = analysis.Lossy;
-        }).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 
-    private async Task RunAsync(Func<Task> action)
+    private async Task RunAsync(Func<Task> action, CancellationToken ct)
     {
         IsBusy = true;
         Error = null;
@@ -108,13 +110,15 @@ public sealed class WorkItemDetailViewModel(IWorkItemStore store, long id)
         {
             await action().ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {
-            throw;
+            throw; // genuine user/dialog cancel (carries our token) stays silent
         }
-        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
+        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
         {
-            Error = ex.Message;
+            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
+            // surfaced as an expected error rather than a silent no-data pane (L2).
+            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
         }
         finally
         {

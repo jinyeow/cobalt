@@ -149,14 +149,30 @@ public class WorkItemDetailViewModelTests
     }
 
     [Fact]
-    public async Task Update_Cancellation_Propagates()
+    public async Task Update_User_Cancellation_Propagates()
     {
-        var store = new ThrowingStore(new OperationCanceledException());
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var store = new ThrowingStore(new OperationCanceledException(cts.Token));
         var vm = new WorkItemDetailViewModel(store, 1);
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         await Assert.ThrowsAsync<OperationCanceledException>(
-            () => vm.ChangeStateAsync("Active", TestContext.Current.CancellationToken));
+            () => vm.ChangeStateAsync("Active", cts.Token));
+    }
+
+    [Fact]
+    public async Task Update_Timeout_Cancellation_Surfaces_As_Error()
+    {
+        using var foreign = new CancellationTokenSource();
+        await foreign.CancelAsync();
+        var store = new ThrowingStore(new OperationCanceledException(foreign.Token));
+        var vm = new WorkItemDetailViewModel(store, 1);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        await vm.ChangeStateAsync("Active", TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.Error);
     }
 
     private sealed class ThrowingStore(Exception ex, bool onLoad = false) : IWorkItemStore

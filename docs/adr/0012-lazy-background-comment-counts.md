@@ -32,18 +32,22 @@ the list immediately with no counts, then fill badges in asynchronously.
   `(PullRequestId, LastMergeSourceCommit)` — the merge commit keys the cache to the
   PR's current tip so a re-pushed PR re-counts, falling back to the id when the DTO
   has no commit. In-flight keys are tracked so the same PR is never fetched twice.
-  The batch chains to the view's `CancellationTokenSource`, so a tab switch, scope
-  switch, or view disposal cancels pending work.
+  Each list load (tab switch, `:scope` change, refresh) runs under its own per-load
+  `CancellationTokenSource`, chained to the view's lifetime token: the view cancels and
+  replaces it on every tab/scope switch, so a new load abandons the previous tab's
+  pending fetches instead of leaving up to 200 stale calls hogging the semaphore; view
+  disposal cancels the lifetime token (and with it any live load).
 
-- **Failures are invisible.** A failed or cancelled fetch is swallowed (the
-  `IgnoreCancellationAsync` helper at the batch boundary, plus a per-fetch catch that
-  drops the claim so a later pass can retry). Enrichment is best-effort decoration,
-  never a hard dependency.
+- **Failures are invisible but not retried forever.** A cancelled fetch is swallowed
+  (the `IgnoreCancellationAsync` helper at the batch boundary) and drops its claim so a
+  later load can retry; a *failed* fetch is swallowed too but marks the key failed for
+  the session, so a flaky route is not re-fetched on every re-render. Enrichment is
+  best-effort decoration, never a hard dependency.
 
 - **Counts re-render their row.** The enricher raises `CountAvailable(prId)` as each
   count lands; the view marshals a `Render()` onto the UI thread via `IApplication.Invoke`.
-  Re-rendering re-enqueues the loaded rows, but cached/in-flight keys are skipped, so
-  there is no fetch loop.
+  Re-rendering re-enqueues the loaded rows, but cached/in-flight/failed keys are skipped,
+  so there is no fetch loop.
 
 ## Consequences
 

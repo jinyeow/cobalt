@@ -18,6 +18,7 @@ public sealed class PrCommentCountEnricher(
     private readonly SemaphoreSlim _gate = new(maxConcurrency, maxConcurrency);
     private readonly Dictionary<string, int> _counts = [];
     private readonly HashSet<string> _inflight = [];
+    private readonly HashSet<string> _failed = [];
     private readonly object _lock = new();
 
     /// <summary>Raised (with the PR id) whenever a fresh count is cached.</summary>
@@ -48,7 +49,9 @@ public sealed class PrCommentCountEnricher(
             foreach (var pr in rows)
             {
                 var key = Key(pr);
-                if (_counts.ContainsKey(key) || !_inflight.Add(key))
+                // Skip keys already counted, already fetching, or that failed earlier this
+                // session — the last guard stops a flaky route from re-firing on every render (L4).
+                if (_counts.ContainsKey(key) || _failed.Contains(key) || !_inflight.Add(key))
                 {
                     continue;
                 }
@@ -86,11 +89,17 @@ public sealed class PrCommentCountEnricher(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // A failed fetch is non-fatal: drop the claim so a later pass can retry.
+            // A failed fetch is non-fatal, but mark the key failed so it is not re-fetched on
+            // every subsequent render — a flaky route would otherwise re-fire forever (L4).
+            lock (_lock)
+            {
+                _failed.Add(key);
+            }
         }
         catch (OperationCanceledException)
         {
-            // Cancelled (tab/scope switch, disposal): swallow and drop the claim.
+            // Cancelled (tab/scope switch, disposal): swallow and drop the claim so a later
+            // load can retry — cancellation is not a fetch failure.
         }
 
         lock (_lock)

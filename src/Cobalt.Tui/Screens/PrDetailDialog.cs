@@ -117,7 +117,7 @@ public sealed class PrDetailDialog(
                 break;
             case "v":
                 key.Handled = true;
-                _ = _actions.VoteAsync(vm, Token);
+                _ = FireAndForget.Observe(_actions.VoteAsync(vm, Token), app, log);
                 break;
             case "c":
                 key.Handled = true;
@@ -127,16 +127,16 @@ public sealed class PrDetailDialog(
                 }
                 else
                 {
-                    _ = ReplyAsync();
+                    _ = FireAndForget.Observe(ReplyAsync(), app, log);
                 }
                 break;
             case "x":
                 key.Handled = true;
-                _ = ThreadStatusAsync(resolve: true);
+                _ = FireAndForget.Observe(ThreadStatusAsync(resolve: true), app, log);
                 break;
             case "u":
                 key.Handled = true;
-                _ = ThreadStatusAsync(resolve: false);
+                _ = FireAndForget.Observe(ThreadStatusAsync(resolve: false), app, log);
                 break;
             case "A":
                 key.Handled = true;
@@ -280,7 +280,7 @@ public sealed class PrDetailDialog(
         var confirm = MessageBox.Query(app, "abandon PR", "Abandon this pull request?", "cancel", "abandon");
         if (confirm == 1)
         {
-            _ = RunAndLog(vm.AbandonAsync(Token), "PR abandoned");
+            _ = FireAndForget.Observe(RunAndLog(vm.AbandonAsync(Token), "PR abandoned"), app, log);
         }
     }
 
@@ -293,7 +293,7 @@ public sealed class PrDetailDialog(
             var confirm = MessageBox.Query(app, "complete PR", $"Complete with {strategies[i]}?", "cancel", "complete");
             if (confirm == 1)
             {
-                _ = RunAndLog(vm.CompleteAsync(strategies[i], deleteSource: false, Token), "PR completed");
+                _ = FireAndForget.Observe(RunAndLog(vm.CompleteAsync(strategies[i], deleteSource: false, Token), "PR completed"), app, log);
             }
         }
     }

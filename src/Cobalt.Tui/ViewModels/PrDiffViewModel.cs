@@ -63,13 +63,15 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
                 await ComputeCurrentDiffAsync(ct).ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {
-            throw;
+            throw; // genuine user/dialog cancel (carries our token) stays silent
         }
-        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
+        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
         {
-            Error = ex.Message;
+            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
+            // surfaced as an expected error rather than a silent no-data pane (L2).
+            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
         }
         finally
         {
@@ -130,13 +132,15 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
                 .ConfigureAwait(false);
             Threads = await source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {
-            throw;
+            throw; // genuine user/dialog cancel (carries our token) stays silent
         }
-        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
+        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
         {
-            Error = ex.Message;
+            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
+            // surfaced as an expected error rather than a silent no-data pane (L2).
+            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
         }
         finally
         {

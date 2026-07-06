@@ -18,6 +18,7 @@ public class PrDetailViewModelTests
         public (int thread, string text)? Replied { get; private set; }
         public (int thread, PrThreadStatus status)? StatusSet { get; private set; }
         public bool Abandoned { get; private set; }
+        public bool Completed { get; private set; }
         public string? LastProject { get; private set; }
 
         public Task<PullRequest> GetPullRequestAsync(int id, CancellationToken ct) => Task.FromResult(Pr);
@@ -58,8 +59,30 @@ public class PrDetailViewModelTests
         public Task CompleteAsync(string project, string repo, int id, string mergeStrategy, bool deleteSource, CancellationToken ct)
         {
             LastProject = project;
+            Completed = true;
             return Task.CompletedTask;
         }
+    }
+
+    private static PullRequest PrWithoutSourceCommit() =>
+        new(10, "Add feature", "the description", "active", false, "feature", "main", "succeeded",
+            "Jin", "repo-1", "web", [new PrReviewer("r1", "Sam", PrVote.NoVote, true)], [101],
+            LastMergeSourceCommitId: null, "Contoso.Web");
+
+    [Fact]
+    public async Task Complete_Without_Source_Commit_Surfaces_Error_And_Does_Not_Call_Store()
+    {
+        var store = new FakeStore { Pr = PrWithoutSourceCommit() };
+        var vm = new PrDetailViewModel(store, 10);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // Merge is still computing (no source commit); completing must surface a clear,
+        // user-visible error rather than silently no-op or let an exception escape.
+        await vm.CompleteAsync("squash", deleteSource: false, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.Error);
+        Assert.Contains("merge", vm.Error);
+        Assert.False(store.Completed);
     }
 
     [Fact]
@@ -183,12 +206,25 @@ public class PrDetailViewModelTests
     }
 
     [Fact]
-    public async Task Load_Cancellation_Propagates()
+    public async Task Load_User_Cancellation_Propagates()
     {
-        var vm = new PrDetailViewModel(new ThrowingStore(new OperationCanceledException()), 10);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var vm = new PrDetailViewModel(new ThrowingStore(new OperationCanceledException(cts.Token)), 10);
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            () => vm.LoadAsync(TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => vm.LoadAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task Load_Timeout_Cancellation_Surfaces_As_Error()
+    {
+        using var foreign = new CancellationTokenSource();
+        await foreign.CancelAsync();
+        var vm = new PrDetailViewModel(new ThrowingStore(new OperationCanceledException(foreign.Token)), 10);
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.Error);
     }
 
     [Fact]

@@ -44,7 +44,30 @@ alternate-screen/raw state that Terminal.Gui puts it in.
 - **Background faults route to the same log.** `TaskScheduler.UnobservedTaskException`
   and `AppDomain.CurrentDomain.UnhandledException` are wired at startup to append to
   the same file, covering the fire-and-forget tasks (identity resolution, list-action
-  runners) whose unexpected exceptions no longer disappear into a broad catch.
+  runners) whose unexpected exceptions no longer disappear into a broad catch. The
+  unobserved-task handler calls `e.SetObserved()` *before* attempting the log write, so
+  a throw from logging on the finalizer thread can never terminate the process; the
+  unhandled-exception handler also prints `cobalt crashed — see <path>` to stderr.
+
+- **Discarded dialog actions are observed.** A dialog verb (`v`/`c`/`x`/`C`/`A` on a PR,
+  `s`/`c`/`e`/`a`/`t` on a work item, `c` in the diff view) is a fire-and-forget task.
+  Each now runs through `FireAndForget.Observe`: a non-cancellation fault is recorded to
+  the crash log **and** posted to the message bar immediately (marshalled to the UI
+  thread), so a genuine bug surfaces loudly rather than lingering as an eventual
+  `UnobservedTaskException`; an `OperationCanceledException` (dialog closed mid-op) stays
+  silent, matching `IgnoreCancellationAsync`.
+
+- **Crash-log writes are fully defensive.** `HandleCrash`/`LogBackgroundFault` catch
+  *any* exception from the log write (not just `IOException`) — permission denied
+  (`UnauthorizedAccessException`), a malformed `$XDG_STATE_HOME`
+  (`ArgumentException`/`NotSupportedException`), or a full disk — and never rethrow;
+  `HandleCrash` falls back to dumping the stack to stderr so the crash is never lost.
+
+- **Timeouts are not silent cancellations.** An `HttpClient` timeout surfaces as an
+  `OperationCanceledException` whose token is the client's internal timeout token, not
+  the caller's. `AdoExceptions.IsTimeout` distinguishes the two: a cancel carrying the
+  caller's own token is a genuine user/dialog cancel (rethrown, silent); any other is a
+  timeout, surfaced in the message bar as an expected error instead of a blank pane.
 
 - **Formatting is a pure, injectable unit.** `CrashLog.Write(path, exception,
   timestamp)`/`CrashLog.Format(exception, timestamp)` take the timestamp as a

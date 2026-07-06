@@ -82,13 +82,31 @@ public class PrListViewModelTests
     }
 
     [Fact]
-    public async Task Cancellation_Propagates()
+    public async Task User_Cancellation_Propagates()
     {
-        var source = new FakeSource { Throw = new OperationCanceledException() };
+        // A genuine user/dialog cancel throws an OCE carrying the caller's own token.
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var source = new FakeSource { Throw = new OperationCanceledException(cts.Token) };
         var vm = new PrListViewModel(source);
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            () => vm.LoadAsync(TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => vm.LoadAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task Timeout_Cancellation_Surfaces_As_Error()
+    {
+        // An HttpClient timeout surfaces as an OCE whose token is NOT the caller's; it must
+        // become a visible error, not a silent no-data pane (L2).
+        using var foreign = new CancellationTokenSource();
+        await foreign.CancelAsync();
+        var source = new FakeSource { Throw = new OperationCanceledException(foreign.Token) };
+        var vm = new PrListViewModel(source);
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken); // caller token is NOT cancelled
+
+        Assert.NotNull(vm.Error);
+        Assert.Empty(vm.Rows);
     }
 
     [Fact]

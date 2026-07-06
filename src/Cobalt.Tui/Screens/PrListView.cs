@@ -16,10 +16,16 @@ public sealed class PrListView : View
     private readonly PrCommentCountEnricher? _comments;
     private readonly Label _header;
     private readonly ListView _list;
+    // View-lifetime token: cancelled once, on disposal.
     private readonly CancellationTokenSource _cts = new();
+    // Per-load token (chained to the view token): cancelled and replaced on every
+    // tab switch / scope change so a new load abandons the previous tab's in-flight
+    // enrichment instead of leaving up to 200 stale fetches hogging the semaphore.
+    private CancellationTokenSource _loadCts;
     private readonly Func<DateTimeOffset> _now;
     private IReadOnlyList<string> _rendered = [];
     private int _lastWidth = -1;
+    private PrListFilter? _renderedTab;
     private bool _disposed;
 
     public PrListView(IApplication app, PrListViewModel vm, PrCommentCountEnricher? comments = null, Func<DateTimeOffset>? now = null)
@@ -27,6 +33,7 @@ public sealed class PrListView : View
         _app = app;
         _vm = vm;
         _comments = comments;
+        _loadCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         _now = now ?? (() => DateTimeOffset.Now);
         Width = Dim.Fill();
         Height = Dim.Fill();
@@ -58,11 +65,34 @@ public sealed class PrListView : View
 
     public event Action<int>? ItemActivated;
 
-    public void Load() => _ = Observe(_vm.LoadAsync(_cts.Token));
+    public void Load() => _ = Observe(_vm.LoadAsync(CycleLoadToken()));
 
-    public void NextTab() => _ = Observe(_vm.NextTabAsync(_cts.Token));
+    public void NextTab() => _ = Observe(_vm.NextTabAsync(CycleLoadToken()));
 
-    public void PrevTab() => _ = Observe(_vm.PrevTabAsync(_cts.Token));
+    public void PrevTab() => _ = Observe(_vm.PrevTabAsync(CycleLoadToken()));
+
+    /// <summary>
+    /// Reloads the current tab and resets the selection to the top (row 0). Used on a
+    /// <c>:scope</c> change, where the row set changes entirely (org ↔ project) so the
+    /// old row index is meaningless — unlike a same-tab background refresh, which keeps it.
+    /// </summary>
+    public void ReloadFromTop()
+    {
+        _renderedTab = null; // make the next render treat this as a fresh set → reset to row 0
+        Load();
+    }
+
+    /// <summary>Cancels the previous load's enrichment and starts a fresh per-load token chained to the view token.</summary>
+    private CancellationToken CycleLoadToken()
+    {
+        _loadCts.Cancel();
+        _loadCts.Dispose();
+        _loadCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        return _loadCts.Token;
+    }
+
+    /// <summary>Test seam: the current load generation's token (live until the next tab/scope switch).</summary>
+    internal CancellationToken CurrentLoadToken => _loadCts.Token;
 
     public void OnOpen()
     {
@@ -166,10 +196,20 @@ public sealed class PrListView : View
         var now = _now();
         var cols = PrColumns.For(_vm.Rows);
 
+        // On a tab/scope change the row set is different, so the previous tab's row index
+        // must not carry over — reset the selection to the top. A same-tab background reload
+        // keeps the reviewer's position (snap-back below).
+        var tabChanged = _renderedTab != _vm.ActiveTab;
+        _renderedTab = _vm.ActiveTab;
+        if (tabChanged)
+        {
+            _vm.SelectedIndex = 0;
+        }
+
         // SetSource nulls SelectedItem in 2.4.16, so capture the reviewer's current
         // row first and restore it (clamped) — otherwise a background reload snaps
         // the highlight back to the top. The list is the source of truth.
-        var target = _list.SelectedItem ?? _vm.SelectedIndex;
+        var target = tabChanged ? 0 : (_list.SelectedItem ?? _vm.SelectedIndex);
         _rendered = [.. _vm.Rows.Select(pr => PrRowFormatter.Format(pr, width, cols, now, _comments?.TryGet(pr)))];
         var rows = new ObservableCollection<string>(_rendered);
         _list.SetSource(rows);
@@ -182,7 +222,7 @@ public sealed class PrListView : View
         // capped, so it never blocks this render and re-renders each row as counts land.
         if (_comments is not null && _vm.Rows.Count > 0)
         {
-            _comments.Enqueue(_vm.Rows, _cts.Token);
+            _comments.Enqueue(_vm.Rows, _loadCts.Token);
         }
         SetNeedsDraw();
     }
@@ -198,7 +238,8 @@ public sealed class PrListView : View
             {
                 _comments.CountAvailable -= OnCountAvailable;
             }
-            _cts.Cancel();
+            _cts.Cancel(); // also cancels the linked _loadCts
+            _loadCts.Dispose();
             _cts.Dispose();
         }
         base.Dispose(disposing);

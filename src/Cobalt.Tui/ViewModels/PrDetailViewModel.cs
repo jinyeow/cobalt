@@ -44,13 +44,15 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
             Threads = await store.GetThreadsAsync(
                 PullRequest.ProjectName, PullRequest.RepositoryId, id, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {
-            throw;
+            throw; // genuine user/dialog cancel (carries our token) stays silent
         }
-        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
+        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
         {
-            Error = ex.Message;
+            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
+            // surfaced as an expected error rather than a silent no-data pane (L2).
+            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
         }
         finally
         {
@@ -74,8 +76,19 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
     public Task AbandonAsync(CancellationToken ct) =>
         RunAsync((project, repo) => store.AbandonAsync(project, repo, id, ct), ct, reload: false);
 
-    public Task CompleteAsync(string mergeStrategy, bool deleteSource, CancellationToken ct) =>
-        RunAsync((project, repo) => store.CompleteAsync(project, repo, id, mergeStrategy, deleteSource, ct), ct, reload: false);
+    public Task CompleteAsync(string mergeStrategy, bool deleteSource, CancellationToken ct)
+    {
+        // Complete needs the source branch's tip commit as a concurrency guard; while the
+        // merge is still computing the PR has none. Detect that up front and surface a clear
+        // error (H1) instead of letting the store throw into a discarded fire-and-forget task.
+        if (PullRequest is { LastMergeSourceCommitId: null or "" })
+        {
+            Error = "cannot complete: merge still computing — try again in a moment";
+            Changed?.Invoke();
+            return Task.CompletedTask;
+        }
+        return RunAsync((project, repo) => store.CompleteAsync(project, repo, id, mergeStrategy, deleteSource, ct), ct, reload: false);
+    }
 
     private async Task RunAsync(Func<string, string, Task> action, CancellationToken ct, bool reload = true)
     {
@@ -97,13 +110,15 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
                 Threads = await store.GetThreadsAsync(project, repo, id, ct).ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {
-            throw;
+            throw; // genuine user/dialog cancel (carries our token) stays silent
         }
-        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
+        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
         {
-            Error = ex.Message;
+            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
+            // surfaced as an expected error rather than a silent no-data pane (L2).
+            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
         }
         finally
         {

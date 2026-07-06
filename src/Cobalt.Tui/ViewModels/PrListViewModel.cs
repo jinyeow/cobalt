@@ -81,13 +81,15 @@ public sealed class PrListViewModel(IPullRequestSource source)
         {
             result = await source.ListPullRequestsAsync(tab, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {
-            throw;
+            throw; // genuine user/dialog cancel (carries our token) stays silent
         }
-        catch (Exception ex) when (AdoExceptions.IsExpected(ex))
+        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
         {
-            error = ex.Message;
+            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
+            // surfaced as an expected error rather than a silent no-data pane (L2).
+            error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
             result = [];
         }
 

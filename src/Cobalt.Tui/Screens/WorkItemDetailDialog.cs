@@ -17,6 +17,7 @@ public sealed class WorkItemDetailDialog
     private readonly IApplication _app;
     private readonly WorkItemDetailViewModel _vm;
     private readonly WorkItemActions _actions;
+    private readonly Action<string> _log;
     private readonly CancellationTokenSource _cts = new();
     private bool _closed;
     private Dialog? _dialog;
@@ -43,6 +44,7 @@ public sealed class WorkItemDetailDialog
     {
         _app = app;
         _vm = vm;
+        _log = log;
         _actions = new WorkItemActions(app, editor, log);
     }
 
@@ -122,7 +124,7 @@ public sealed class WorkItemDetailDialog
                 break;
             case "s":
                 key.Handled = true;
-                _ = _actions.ChangeStateAsync(_vm, Token);
+                _ = FireAndForget.Observe(_actions.ChangeStateAsync(_vm, Token), _app, _log);
                 break;
             case "c":
                 key.Handled = true;
@@ -132,16 +134,16 @@ public sealed class WorkItemDetailDialog
                 }
                 else
                 {
-                    _ = _actions.CommentAsync(_vm, Token);
+                    _ = FireAndForget.Observe(_actions.CommentAsync(_vm, Token), _app, _log);
                 }
                 break;
             case "e":
                 key.Handled = true;
-                _ = _actions.EditDescriptionAsync(_vm, Token);
+                _ = FireAndForget.Observe(_actions.EditDescriptionAsync(_vm, Token), _app, _log);
                 break;
             case "a":
                 key.Handled = true;
-                _ = _actions.AssignAsync(_vm, Token);
+                _ = FireAndForget.Observe(_actions.AssignAsync(_vm, Token), _app, _log);
                 break;
             case "t":
                 key.Handled = true;
@@ -151,7 +153,7 @@ public sealed class WorkItemDetailDialog
                 }
                 else
                 {
-                    _ = _actions.TagsAsync(_vm, Token);
+                    _ = FireAndForget.Observe(_actions.TagsAsync(_vm, Token), _app, _log);
                 }
                 break;
             default:

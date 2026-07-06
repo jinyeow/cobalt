@@ -13,8 +13,9 @@ public static class TaskCancellationExtensions
         {
             await task.ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is OperationCanceledException or TaskCanceledException)
+        catch (OperationCanceledException)
         {
+            // TaskCanceledException derives from OperationCanceledException, so this covers both.
             return;
         }
     }

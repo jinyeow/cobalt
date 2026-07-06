@@ -67,9 +67,15 @@ public static class CobaltTuiApp
         {
             reported = CrashLog.Write(logPath, exception, now);
         }
-        catch (IOException)
+        catch (Exception)
         {
-            reported = logPath; // could not write the log; still point the user at the intended path
+            // Last-resort boundary: a failed crash-log write (permission denied →
+            // UnauthorizedAccessException, malformed $XDG_STATE_HOME → Argument/NotSupported,
+            // full disk → IOException) must never itself crash cobalt or hide the crash.
+            // Point the user at the intended path and dump the stack to stderr as a fallback.
+            stderr.WriteLine($"cobalt crashed — see {logPath}");
+            stderr.WriteLine(exception);
+            return 1;
         }
         stderr.WriteLine($"cobalt crashed — see {reported}");
         return 1;
@@ -82,9 +88,10 @@ public static class CobaltTuiApp
         {
             CrashLog.Write(logPath, exception, now);
         }
-        catch (IOException)
+        catch (Exception)
         {
-            // never crash the finalizer/background thread over a failed log write
+            // Last-resort boundary: never crash the finalizer/background thread over a failed
+            // log write, whatever it throws (permission, malformed path, full disk, …).
         }
     }
 
@@ -99,14 +106,18 @@ public static class CobaltTuiApp
         var logPath = ConfigPaths.CrashLogFile();
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
-            LogBackgroundFault(e.Exception, logPath, DateTimeOffset.Now);
+            // Observe first: a throw from the log write below must never terminate the
+            // finalizer thread (which an unobserved exception on it would).
             e.SetObserved();
+            LogBackgroundFault(e.Exception, logPath, DateTimeOffset.Now);
         };
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
             if (e.ExceptionObject is Exception ex)
             {
                 LogBackgroundFault(ex, logPath, DateTimeOffset.Now);
+                // The process is terminating; still tell the user where the log is.
+                Console.Error.WriteLine($"cobalt crashed — see {logPath}");
             }
         };
     }

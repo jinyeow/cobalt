@@ -4,6 +4,14 @@ namespace Cobalt.Tui.Screens;
 /// Column primitives shared by the width-aware list formatters: fixed-width cells
 /// (truncate with <c>…</c>, pad to fill) and a final row clamp that guarantees a
 /// row is exactly <c>width</c> cells so the selection highlight spans it.
+///
+/// <para>Limitation: widths are measured in UTF-16 code units (<c>string.Length</c>),
+/// not terminal display columns. A wide CJK glyph is one code unit but two cells, and
+/// an emoji is a surrogate pair (two code units) for a variable cell count, so a title
+/// rich in such runes can still visually mis-align or spill past the target width. A
+/// correct fix would measure rune columns (e.g. wcwidth) throughout Fit/pad/Clamp; that
+/// is a larger change deferred intentionally — the common ASCII/Latin case is exact, and
+/// Clamp never splits a surrogate pair.</para>
 /// </summary>
 internal static class RowText
 {

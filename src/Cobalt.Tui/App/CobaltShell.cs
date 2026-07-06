@@ -101,7 +101,8 @@ public sealed class CobaltShell : Window
             {
                 _pullRequests.Scope = scope;
             }
-            _prList?.Load();
+            // A scope flip changes the row set entirely (org ↔ project); reload from the top.
+            _prList?.ReloadFromTop();
             RefreshChrome();
         };
     }

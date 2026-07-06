@@ -115,7 +115,7 @@ public sealed class DiffReviewDialog(
                     break;
                 case "c":
                     key.Handled = true;
-                    _ = CommentAsync();
+                    _ = FireAndForget.Observe(CommentAsync(), app, log);
                     break;
                 case "j":
                     key.Handled = true;

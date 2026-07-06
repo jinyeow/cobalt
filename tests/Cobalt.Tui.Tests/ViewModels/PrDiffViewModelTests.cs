@@ -263,12 +263,25 @@ public class PrDiffViewModelTests
     }
 
     [Fact]
-    public async Task Load_Cancellation_Propagates()
+    public async Task Load_User_Cancellation_Propagates()
     {
-        var vm = new PrDiffViewModel(new ThrowingSource(new OperationCanceledException()), Pr());
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var vm = new PrDiffViewModel(new ThrowingSource(new OperationCanceledException(cts.Token)), Pr());
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            () => vm.LoadAsync(TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => vm.LoadAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task Load_Timeout_Cancellation_Surfaces_As_Error()
+    {
+        using var foreign = new CancellationTokenSource();
+        await foreign.CancelAsync();
+        var vm = new PrDiffViewModel(new ThrowingSource(new OperationCanceledException(foreign.Token)), Pr());
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.Error);
     }
 
     [Fact]

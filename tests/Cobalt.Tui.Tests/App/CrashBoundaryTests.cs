@@ -34,6 +34,27 @@ public class CrashBoundaryTests
     }
 
     [Fact]
+    public void HandleCrash_With_Unwritable_Path_Does_Not_Throw_And_Falls_Back_To_Stderr()
+    {
+        var stderr = new StringWriter();
+
+        // An empty path makes File.AppendAllText throw ArgumentException (not IOException),
+        // exactly the class of failure the old `catch (IOException)` let escape.
+        var code = CobaltTuiApp.HandleCrash(new InvalidOperationException("boom"), "", When, stderr);
+
+        Assert.NotEqual(0, code);
+        Assert.Contains("cobalt crashed", stderr.ToString());
+        Assert.Contains("boom", stderr.ToString()); // fell back to dumping the stack
+    }
+
+    [Fact]
+    public void LogBackgroundFault_With_Unwritable_Path_Does_Not_Throw()
+    {
+        // Must not throw even though the write fails with a non-IOException.
+        CobaltTuiApp.LogBackgroundFault(new InvalidOperationException("boom"), "", When);
+    }
+
+    [Fact]
     public void LogBackgroundFault_Routes_To_The_Same_Writer()
     {
         var dir = Path.Join(Path.GetTempPath(), $"cobalt-crash-{Guid.NewGuid():N}");
