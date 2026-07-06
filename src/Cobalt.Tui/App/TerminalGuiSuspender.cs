@@ -20,5 +20,18 @@ public static class TerminalGuiSuspender
     public static ITerminalSuspender For(IApplication app) => new UiThreadSuspender(
         app.Invoke,
         () => app.Driver?.Suspend(),
-        () => app.LayoutAndDraw(true));
+        Resume(app));
+
+    // The child editor released and repainted the tty, so on the way back we must
+    // (1) wipe every cell before redrawing, or stray escape codes linger in the
+    // corner (a plain repaint only rewrites the cells TG thinks changed), and
+    // (2) re-establish keyboard focus — Suspend/resume drops it, which otherwise
+    // leaves the active dialog receiving no keys after `:wq`. Terminal-only
+    // behavior; verified by UAT, not unit tests.
+    private static Action Resume(IApplication app) => () =>
+    {
+        app.Driver?.ClearContents();
+        app.LayoutAndDraw(true);
+        app.TopRunnableView?.SetFocus();
+    };
 }
