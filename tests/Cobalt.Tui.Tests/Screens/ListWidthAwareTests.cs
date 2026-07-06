@@ -2,7 +2,6 @@ using Cobalt.Core.Models;
 using Cobalt.Tui.Screens;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
-using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
 namespace Cobalt.Tui.Tests.Screens;

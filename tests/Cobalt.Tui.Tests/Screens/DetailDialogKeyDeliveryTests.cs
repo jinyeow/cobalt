@@ -6,7 +6,6 @@ using Cobalt.Tui.Screens;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
-using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
 #pragma warning disable CS0618 // asserting on the read-only TextView pane the dialogs build
