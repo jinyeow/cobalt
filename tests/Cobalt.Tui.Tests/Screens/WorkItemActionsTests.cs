@@ -36,17 +36,17 @@ public class WorkItemActionsTests
         public JsonPatchBuilder? LastPatch { get; private set; }
         public string? LastComment { get; private set; }
 
-        public Task<WorkItem> GetWorkItemAsync(long id, CancellationToken ct) => Task.FromResult(Item);
-        public Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, CancellationToken ct) =>
+        public Task<WorkItem> GetWorkItemAsync(long id, string? project, CancellationToken ct) => Task.FromResult(Item);
+        public Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, string? project, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<WorkItemComment>>([]);
-        public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, CancellationToken ct) =>
+        public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, string? project, CancellationToken ct) =>
             Task.FromResult(States);
-        public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, CancellationToken ct)
+        public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, string? project, CancellationToken ct)
         {
             LastPatch = patch;
             return Task.FromResult(Item);
         }
-        public Task<WorkItemComment> AddCommentAsync(long id, string text, CancellationToken ct)
+        public Task<WorkItemComment> AddCommentAsync(long id, string text, string? project, CancellationToken ct)
         {
             LastComment = text;
             return Task.FromResult(new WorkItemComment(9, "me", DateTimeOffset.UnixEpoch, text));
@@ -80,7 +80,7 @@ public class WorkItemActionsTests
         var store = new FakeStore();
         var actions = Actions(EditorReturning("looks good"), _ => { });
 
-        await actions.RunCommentAsync(store, 1, TestContext.Current.CancellationToken);
+        await actions.RunCommentAsync(store, 1, null, TestContext.Current.CancellationToken);
 
         Assert.Equal("looks good", store.LastComment);
     }
@@ -91,7 +91,7 @@ public class WorkItemActionsTests
         var store = new FakeStore();
         var actions = Actions(EditorReturning(null), _ => { });
 
-        await actions.RunCommentAsync(store, 1, TestContext.Current.CancellationToken);
+        await actions.RunCommentAsync(store, 1, null, TestContext.Current.CancellationToken);
 
         Assert.Null(store.LastComment);
     }
@@ -103,7 +103,7 @@ public class WorkItemActionsTests
         // index 1 → "Active"
         var actions = Actions(EditorReturning(null), _ => { }, choice: 1);
 
-        await actions.RunChangeStateAsync(store, 1, TestContext.Current.CancellationToken);
+        await actions.RunChangeStateAsync(store, 1, null, TestContext.Current.CancellationToken);
 
         Assert.NotNull(store.LastPatch);
         Assert.Contains("/fields/System.State", store.LastPatch!.ToJson());
@@ -116,7 +116,7 @@ public class WorkItemActionsTests
         var store = new FakeStore();
         var actions = Actions(EditorReturning(null), _ => { }, choice: null);
 
-        await actions.RunChangeStateAsync(store, 1, TestContext.Current.CancellationToken);
+        await actions.RunChangeStateAsync(store, 1, null, TestContext.Current.CancellationToken);
 
         Assert.Null(store.LastPatch);
     }
@@ -127,7 +127,7 @@ public class WorkItemActionsTests
         var store = new FakeStore();
         var actions = Actions(EditorReturning("jin@example.com"), _ => { });
 
-        await actions.RunAssignAsync(store, 1, TestContext.Current.CancellationToken);
+        await actions.RunAssignAsync(store, 1, null, TestContext.Current.CancellationToken);
 
         Assert.NotNull(store.LastPatch);
         Assert.Contains("/fields/System.AssignedTo", store.LastPatch!.ToJson());
@@ -137,18 +137,18 @@ public class WorkItemActionsTests
     private sealed class FailingLoadStore : IWorkItemStore
     {
         public JsonPatchBuilder? LastPatch { get; private set; }
-        public Task<WorkItem> GetWorkItemAsync(long id, CancellationToken ct) =>
+        public Task<WorkItem> GetWorkItemAsync(long id, string? project, CancellationToken ct) =>
             Task.FromException<WorkItem>(new HttpRequestException("down"));
-        public Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, CancellationToken ct) =>
+        public Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, string? project, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<WorkItemComment>>([]);
-        public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, CancellationToken ct) =>
+        public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, string? project, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<WorkItemStateDto>>([]);
-        public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, CancellationToken ct)
+        public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, string? project, CancellationToken ct)
         {
             LastPatch = patch;
             return Task.FromResult(WorkItemActionsTests.Item());
         }
-        public Task<WorkItemComment> AddCommentAsync(long id, string text, CancellationToken ct) =>
+        public Task<WorkItemComment> AddCommentAsync(long id, string text, string? project, CancellationToken ct) =>
             Task.FromResult(new WorkItemComment(1, "me", DateTimeOffset.UnixEpoch, text));
     }
 
@@ -160,7 +160,7 @@ public class WorkItemActionsTests
         // The editor would return non-empty text; the guard must stop before any save.
         var actions = Actions(EditorReturning("should-not-be-saved"), m => logged = m);
 
-        await actions.RunTagsAsync(store, 1, TestContext.Current.CancellationToken);
+        await actions.RunTagsAsync(store, 1, null, TestContext.Current.CancellationToken);
 
         Assert.Null(store.LastPatch); // never replaced the server-side tags
         Assert.NotNull(logged);
@@ -172,7 +172,7 @@ public class WorkItemActionsTests
         var store = new FakeStore();
         var actions = Actions(EditorReturning("bug; ui"), _ => { });
 
-        await actions.RunTagsAsync(store, 1, TestContext.Current.CancellationToken);
+        await actions.RunTagsAsync(store, 1, null, TestContext.Current.CancellationToken);
 
         Assert.NotNull(store.LastPatch);
         Assert.Contains("/fields/System.Tags", store.LastPatch!.ToJson());

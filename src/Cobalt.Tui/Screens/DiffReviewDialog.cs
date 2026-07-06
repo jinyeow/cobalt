@@ -22,7 +22,6 @@ public sealed class DiffReviewDialog(
     IApplication app, PrDiffViewModel vm, EditorService editor, Action<string> log)
 {
     private readonly CancellationTokenSource _cts = new();
-    private readonly KeyBindingTable _bindings = KeyBindingTable.Default();
     private readonly KeymapRouter _router = new(KeyBindingTable.Default());
     private bool _closed;
     private Dialog? _dialog;
@@ -136,6 +135,9 @@ public sealed class DiffReviewDialog(
         {
             return;
         }
+        // Esc's job is to clear a pending count/sequence first; only when nothing is
+        // pending does it close the dialog (mirrors the shell's Esc handling, L5).
+        var hadPending = _router.HasPending;
         var result = _router.Feed(token, KeyScope.DiffReview);
         switch (result.Kind)
         {
@@ -151,7 +153,10 @@ public sealed class DiffReviewDialog(
                 if (token == "Esc")
                 {
                     key.Handled = true;
-                    RequestClose();
+                    if (!hadPending)
+                    {
+                        RequestClose();
+                    }
                 }
                 break;
         }
@@ -178,7 +183,7 @@ public sealed class DiffReviewDialog(
                 }
                 else
                 {
-                    TextDialog.Show(app, "keys", HelpText.For(_bindings, KeyScope.DiffReview));
+                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.DiffReview));
                 }
                 return true;
             case AppCommand.CyclePane:

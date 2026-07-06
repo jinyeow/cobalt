@@ -66,7 +66,7 @@ cobalt --context oss  # launch against a named context
 `j/k` move · `gg`/`G` top/bottom · `Ctrl-d`/`Ctrl-u` half-page · `/` filter ·
 `Enter`/`o` open · `gt`/`gT` next/prev section · `g1`/`g2` jump to Work Items /
 Pull Requests · `Tab` next tab · `:` command palette
-(`:q` quit, `:ctx NAME` switch context, `:scope org|project` list breadth,
+(`:q` quit, `:context NAME` switch context, `:scope org|project` list breadth,
 `:done show|hide` completed work items, `:project NAME` narrow to one project,
 `:help`, `:messages`) · `?` help ·
 `r` refresh. On a work item (the highlighted list row or its detail): `s` state ·
@@ -102,7 +102,10 @@ remaining terminal width (reflowing on resize), so there's no dead right gutter.
   cached. The **team** sub-tab shows the union of PRs where a team you belong to is a
   requested reviewer and PRs a teammate authored (deduped, newest first; see
   [ADR 0015](docs/adr/0015-team-pr-view.md)).
-- **Work items**: id · type · state · title (fills) · iteration · changed date.
+- **Work items**: id · type · state · a **project** column when the list spans more
+  than one project (org scope) · title (fills) · iteration · changed date. Acting on a
+  row (`s`/`c`/`a`/`t`/open) targets that item's own project, so cross-project drill-in
+  stays correct under org scope.
 
 ## Editor
 
@@ -149,7 +152,7 @@ or `%LOCALAPPDATA%\cobalt\crash.log` on Windows. See
   client-side (see [ADR 0008](docs/adr/0008-client-side-diff-and-line-comments.md)).
 - `$EDITOR` needs a real interactive terminal (it suspends Terminal.Gui and hands
   over the tty — see [ADR 0009](docs/adr/0009-editor-suspend-resume.md)).
-- `:ctx` switching updates the status bar but does not yet reconnect the data
+- `:context` switching updates the status bar but does not yet reconnect the data
   screens to the new org/project (restart with `--context` for now).
 - Keybindings are fixed; a remapping config is post-v1.
 

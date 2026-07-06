@@ -61,8 +61,8 @@ public sealed class WorkItemListView : View
         Render();
     }
 
-    /// <summary>Fired when the user opens an item (Enter/o) — the shell shows detail.</summary>
-    public event Action<long>? ItemActivated;
+    /// <summary>Fired when the user opens an item (Enter/o) — the shell shows detail. Carries the item's project (org scope may cross projects).</summary>
+    public event Action<long, string?>? ItemActivated;
 
     /// <summary>Loads (or reloads) the list; safe to call repeatedly. Cancels on disposal.</summary>
     public void Load() => _ = LoadAndObserveAsync();
@@ -129,7 +129,7 @@ public sealed class WorkItemListView : View
         _vm.SelectedIndex = _list.SelectedItem ?? 0;
         if (_vm.Selected is { } item)
         {
-            ItemActivated?.Invoke(item.Id);
+            ItemActivated?.Invoke(item.Id, NullIfEmpty(item.TeamProject));
         }
     }
 
@@ -150,6 +150,18 @@ public sealed class WorkItemListView : View
             return _vm.Selected?.Id;
         }
     }
+
+    /// <summary>The highlighted item's project (org scope may span projects); null when unknown/empty.</summary>
+    public string? SelectedProject
+    {
+        get
+        {
+            _vm.SelectedIndex = _list.SelectedItem ?? 0;
+            return NullIfEmpty(_vm.Selected?.TeamProject);
+        }
+    }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     public void StartFiltering()
     {
@@ -200,7 +212,8 @@ public sealed class WorkItemListView : View
         // row first and restore it (clamped) — otherwise a background reload snaps
         // the highlight back to the top. The list is the source of truth.
         var target = _list.SelectedItem ?? _vm.SelectedIndex;
-        var rows = new ObservableCollection<string>(_vm.Rows.Select(item => WorkItemRowFormatter.Format(item, width)));
+        var cols = WorkItemColumns.For(_vm.Rows);
+        var rows = new ObservableCollection<string>(_vm.Rows.Select(item => WorkItemRowFormatter.Format(item, width, cols)));
         _list.SetSource(rows);
         if (_vm.Rows.Count > 0)
         {

@@ -125,8 +125,10 @@ public sealed class PrListViewModel(IPullRequestSource source)
             .. _all.Where(pr =>
                 (_repositoryFilter.Length == 0 ||
                  pr.RepositoryName.Contains(_repositoryFilter, StringComparison.OrdinalIgnoreCase)) &&
+                // Exact project match (not substring): `:project Web` must not keep "WebApps",
+                // mirroring the WI side's WIQL equality (M4). Repo filter stays substring.
                 (_projectFilter.Length == 0 ||
-                 pr.ProjectName.Contains(_projectFilter, StringComparison.OrdinalIgnoreCase))),
+                 string.Equals(pr.ProjectName, _projectFilter, StringComparison.OrdinalIgnoreCase))),
         ];
         _selectedIndex = Math.Clamp(_selectedIndex, 0, Math.Max(0, Rows.Count - 1));
         Changed?.Invoke();

@@ -127,6 +127,9 @@ public sealed class WorkItemDetailDialog
         {
             return;
         }
+        // Esc clears a pending count/sequence first; it only closes when nothing is
+        // pending (mirrors the shell's Esc handling, L5).
+        var hadPending = _router.HasPending;
         var result = _router.Feed(token, KeyScope.WorkItemDetail);
         switch (result.Kind)
         {
@@ -139,11 +142,13 @@ public sealed class WorkItemDetailDialog
             case KeyResultKind.Matched:
                 break; // matched but this dialog doesn't act — let native widget behavior run
             default:
-                // Esc clears a pending sequence and closes; other unbound keys fall through.
                 if (token == "Esc")
                 {
                     key.Handled = true;
-                    RequestClose();
+                    if (!hadPending)
+                    {
+                        RequestClose();
+                    }
                 }
                 break;
         }
@@ -169,7 +174,7 @@ public sealed class WorkItemDetailDialog
                 }
                 else
                 {
-                    TextDialog.Show(_app, "keys", HelpText.For(_bindings, KeyScope.WorkItemDetail));
+                    TextDialog.Show(_app, "keys", HelpText.ForDialog(_bindings, KeyScope.WorkItemDetail));
                 }
                 return true;
             case AppCommand.ChangeState:

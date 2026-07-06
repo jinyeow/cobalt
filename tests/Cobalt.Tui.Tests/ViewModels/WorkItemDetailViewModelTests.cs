@@ -7,13 +7,14 @@ namespace Cobalt.Tui.Tests.ViewModels;
 
 public class WorkItemDetailViewModelTests
 {
-    private static WorkItem Item(long id, string title, string state, string desc = "", string type = "Bug") =>
+    private static WorkItem Item(long id, string title, string state, string desc = "", string type = "Bug", string project = "") =>
         new(id, new Dictionary<string, JsonElement>
         {
             ["System.Title"] = El($"\"{title}\""),
             ["System.State"] = El($"\"{state}\""),
             ["System.WorkItemType"] = El($"\"{type}\""),
             ["System.Description"] = El($"\"{desc}\""),
+            ["System.TeamProject"] = El($"\"{project}\""),
         });
 
     private static JsonElement El(string json) => JsonDocument.Parse(json).RootElement.Clone();
@@ -27,19 +28,38 @@ public class WorkItemDetailViewModelTests
         public JsonPatchBuilder? LastPatch { get; private set; }
         public string? LastComment { get; private set; }
 
-        public Task<WorkItem> GetWorkItemAsync(long id, CancellationToken ct) => Task.FromResult(Item);
-        public Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, CancellationToken ct) => Task.FromResult(Comments);
-        public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, CancellationToken ct) => Task.FromResult(States);
+        // Records the project threaded into each call (H1).
+        public List<string?> Projects { get; } = [];
 
-        public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, CancellationToken ct)
+        public Task<WorkItem> GetWorkItemAsync(long id, string? project, CancellationToken ct)
         {
-            LastPatch = patch;
+            Projects.Add(project);
             return Task.FromResult(Item);
         }
 
-        public Task<WorkItemComment> AddCommentAsync(long id, string text, CancellationToken ct)
+        public Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, string? project, CancellationToken ct)
+        {
+            Projects.Add(project);
+            return Task.FromResult(Comments);
+        }
+
+        public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, string? project, CancellationToken ct)
+        {
+            Projects.Add(project);
+            return Task.FromResult(States);
+        }
+
+        public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, string? project, CancellationToken ct)
+        {
+            LastPatch = patch;
+            Projects.Add(project);
+            return Task.FromResult(Item);
+        }
+
+        public Task<WorkItemComment> AddCommentAsync(long id, string text, string? project, CancellationToken ct)
         {
             LastComment = text;
+            Projects.Add(project);
             return Task.FromResult(new WorkItemComment(9, "me", DateTimeOffset.UnixEpoch, text));
         }
     }
@@ -177,15 +197,30 @@ public class WorkItemDetailViewModelTests
 
     private sealed class ThrowingStore(Exception ex, bool onLoad = false) : IWorkItemStore
     {
-        public Task<WorkItem> GetWorkItemAsync(long id, CancellationToken ct) =>
+        public Task<WorkItem> GetWorkItemAsync(long id, string? project, CancellationToken ct) =>
             onLoad ? Task.FromException<WorkItem>(ex) : Task.FromResult(Item(1, "T", "New"));
-        public Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, CancellationToken ct) =>
+        public Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, string? project, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<WorkItemComment>>([]);
-        public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, CancellationToken ct) =>
+        public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, string? project, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<WorkItemStateDto>>([]);
-        public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, CancellationToken ct) =>
+        public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, string? project, CancellationToken ct) =>
             Task.FromException<WorkItem>(ex);
-        public Task<WorkItemComment> AddCommentAsync(long id, string text, CancellationToken ct) =>
+        public Task<WorkItemComment> AddCommentAsync(long id, string text, string? project, CancellationToken ct) =>
             Task.FromException<WorkItemComment>(ex);
+    }
+
+    [Fact]
+    public async Task Threads_The_Items_Own_Project_Through_Detail_And_Mutation_Calls()
+    {
+        // Context is "A"; the selected item belongs to project "B". Every call must carry "B".
+        var store = new FakeStore { Item = Item(1, "Fix", "New", project: "B") };
+        var vm = new WorkItemDetailViewModel(store, 1, project: "B");
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        await vm.ChangeStateAsync("Active", TestContext.Current.CancellationToken);
+        await vm.AddCommentAsync("hi", TestContext.Current.CancellationToken);
+
+        Assert.NotEmpty(store.Projects);
+        Assert.All(store.Projects, p => Assert.Equal("B", p));
     }
 }

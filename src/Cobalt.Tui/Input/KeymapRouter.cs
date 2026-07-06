@@ -31,6 +31,12 @@ public sealed class KeymapRouter(KeyBindingTable table)
     // Accumulated numeric count prefix (vim "5j"). 0 means "no count".
     private int _count;
 
+    /// <summary>The binding table this router resolves against (shared, so a dialog needn't build a second one).</summary>
+    public KeyBindingTable Table => table;
+
+    /// <summary>True when a count digit or a multi-key sequence is mid-entry — so Esc should clear it, not act.</summary>
+    public bool HasPending => _pending.Count > 0 || _count > 0;
+
     public KeyResult Feed(string keyToken, KeyScope scope)
     {
         if (keyToken == "Esc")
@@ -41,8 +47,9 @@ public sealed class KeymapRouter(KeyBindingTable table)
         }
 
         // A leading run of digits (with no multi-key sequence pending) is a count
-        // prefix, not a binding: "5j" moves down five rows. A bare "0" is the
-        // vim line-start motion, not a count, so it only extends an existing count.
+        // prefix, not a binding: "5j" moves down five rows. A bare "0" (no count yet)
+        // is ignored — there is no line-start motion — so it can't be read as a count;
+        // "0" only extends an already-started count (e.g. "10j").
         if (_pending.Count == 0 && keyToken.Length == 1 && keyToken[0] is >= '0' and <= '9')
         {
             var digit = keyToken[0] - '0';

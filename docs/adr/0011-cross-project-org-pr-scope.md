@@ -82,10 +82,33 @@ The same `:scope` now drives the **work-item** list, not just PRs:
   `Closed/Done/Completed/Resolved/Removed` (`Resolved` was previously missing from
   the WIQL). Because the client can only narrow rows it already fetched,
   hide-completed must stay WIQL-side. `:project NAME` narrows the work-item list
-  server-side (`[System.TeamProject]`) and the PR list client-side (on
-  `PullRequest.ProjectName`, mirroring the existing `RepositoryFilter`). Both flow
+  server-side (`[System.TeamProject]`) and the PR list client-side. Both flow
   through `ShellViewModel` events (`DoneFilterChanged`, `ProjectFilterChanged`) like
-  `:scope`.
+  `:scope`. The PR-side `:project` uses **exact, case-insensitive equality** on
+  `PullRequest.ProjectName` (not substring) to match the WI side's WIQL equality — so
+  `:project Web` does not also keep a `WebApps` PR. (The `RepositoryFilter` stays a
+  substring match.)
+
+## Update — cross-project work-item drill-in and a project column (round-2 H1)
+
+The list honored `:scope org`, but the *drill-in* did not: `WorkItemsApi`'s
+`GetWorkItemAsync` / `UpdateFields` / `GetStates` / comments hard-prefixed the context
+project, so pressing `s`/edit/comment on an item from *another* project queried the
+wrong project (wrong state list, or a 404). Fixed by mirroring the round-1 PR pattern:
+
+- **`WorkItemsApi`'s drill-in/mutation methods gained an optional `project` parameter**
+  (defaulting to `context.Project`, so existing callers compile) and route through a
+  `ProjectSeg(project)` helper. **States especially must use the item's own project** —
+  they are per-project process metadata.
+- **`IWorkItemStore` / `WorkItemStoreAdapter` and `WorkItemDetailViewModel` /
+  `WorkItemActions` thread the selected item's `TeamProject`.** The detail view-model
+  takes the row's project as a hint and, once the item is loaded, refines it to the
+  item's own `System.TeamProject` for the remaining per-project calls. `WorkItem`'s
+  `TeamProject` (mapped from `System.TeamProject`, already requested in `ListFields`) went
+  from zero consumers to the source of truth for the route.
+- **The list shows a project column when the rows span more than one project**
+  (`WorkItemColumns`, mirroring `PrColumns`), so cross-project org-scope items are
+  distinguishable.
 - **Risk: the org-wide *WIQL/workitemsbatch* route without a project segment is
   validated only by URL/body shape here** (the hand-rolled client can unit-test the
   request, not a live org). It is implemented to the documented shape and flagged for

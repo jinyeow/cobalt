@@ -188,7 +188,7 @@ public class WorkItemsApiTests : IDisposable
               "Microsoft.VSTS.Common.Priority":2}}
             """);
 
-        var item = await Api(handler).GetWorkItemAsync(42, TestContext.Current.CancellationToken);
+        var item = await Api(handler).GetWorkItemAsync(42, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("Fix login", item.Title);
         Assert.Equal("<p>steps</p>", item.DescriptionHtml);
@@ -203,7 +203,7 @@ public class WorkItemsApiTests : IDisposable
             """{"id":42,"fields":{"System.Title":"Renamed","System.State":"Active","System.WorkItemType":"Bug"}}""");
 
         var patch = new JsonPatchBuilder().SetField("System.Title", "Renamed");
-        var updated = await Api(handler).UpdateFieldsAsync(42, patch, TestContext.Current.CancellationToken);
+        var updated = await Api(handler).UpdateFieldsAsync(42, patch, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpMethod.Patch, handler.Requests[0].Method);
         Assert.Equal("application/json-patch+json", handler.ContentTypes[0]);
@@ -218,7 +218,7 @@ public class WorkItemsApiTests : IDisposable
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
             """{"value":[{"name":"New","category":"Proposed","color":"b2b2b2"},{"name":"Active","category":"InProgress","color":"007acc"}]}""");
 
-        var states = await Api(handler).GetStatesAsync("Bug", TestContext.Current.CancellationToken);
+        var states = await Api(handler).GetStatesAsync("Bug", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(["New", "Active"], states.Select(s => s.Name));
         Assert.Contains("workitemtypes/Bug/states", Uri.UnescapeDataString(handler.Requests[0].RequestUri!.ToString()));
@@ -235,7 +235,7 @@ public class WorkItemsApiTests : IDisposable
             ]}
             """);
 
-        var comments = await Api(handler).GetCommentsAsync(42, TestContext.Current.CancellationToken);
+        var comments = await Api(handler).GetCommentsAsync(42, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, comments.Count);
         Assert.Equal("Jin", comments[0].Author);
@@ -248,10 +248,89 @@ public class WorkItemsApiTests : IDisposable
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
             """{"id":3,"text":"hi","createdBy":{"displayName":"Jin"},"createdDate":"2026-01-03T10:00:00Z"}""");
 
-        await Api(handler).AddCommentAsync(42, "hi there", TestContext.Current.CancellationToken);
+        await Api(handler).AddCommentAsync(42, "hi there", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpMethod.Post, handler.Requests[0].Method);
         Assert.Contains("comments", handler.Requests[0].RequestUri!.ToString());
         Assert.Contains("hi there", handler.RequestBodies[0]);
+    }
+
+    // ---- H1: cross-project drill-in threads the item's own project through the route ----
+
+    [Fact]
+    public async Task GetWorkItem_Uses_The_Items_Own_Project_Route()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """{"id":42,"fields":{"System.Title":"t","System.State":"Active","System.WorkItemType":"Bug"}}""");
+
+        await Api(handler).GetWorkItemAsync(42, "Fabrikam", TestContext.Current.CancellationToken);
+
+        var uri = handler.Requests[0].RequestUri!.AbsoluteUri;
+        Assert.Contains("Fabrikam/_apis/wit/workitems/42", uri);
+        Assert.DoesNotContain("My%20Project", uri); // never the context project
+    }
+
+    [Fact]
+    public async Task UpdateFields_Uses_The_Items_Own_Project_Route()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """{"id":42,"fields":{"System.Title":"t","System.State":"Active","System.WorkItemType":"Bug"}}""");
+
+        var patch = new JsonPatchBuilder().SetField("System.State", "Active");
+        await Api(handler).UpdateFieldsAsync(42, patch, "Fabrikam", TestContext.Current.CancellationToken);
+
+        var uri = handler.Requests[0].RequestUri!.AbsoluteUri;
+        Assert.Contains("Fabrikam/_apis/wit/workitems/42", uri);
+        Assert.DoesNotContain("My%20Project", uri);
+    }
+
+    [Fact]
+    public async Task GetStates_Uses_The_Items_Own_Project_Route()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """{"value":[{"name":"New","category":"Proposed","color":"b2b2b2"}]}""");
+
+        await Api(handler).GetStatesAsync("Bug", "Fabrikam", TestContext.Current.CancellationToken);
+
+        // States are per-project process metadata: the item's project, not the context's.
+        var uri = handler.Requests[0].RequestUri!.AbsoluteUri;
+        Assert.Contains("Fabrikam/_apis/wit/workitemtypes/Bug/states", uri);
+        Assert.DoesNotContain("My%20Project", uri);
+    }
+
+    [Fact]
+    public async Task GetComments_Uses_The_Items_Own_Project_Route()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"comments":[]}""");
+
+        await Api(handler).GetCommentsAsync(42, "Fabrikam", TestContext.Current.CancellationToken);
+
+        var uri = handler.Requests[0].RequestUri!.AbsoluteUri;
+        Assert.Contains("Fabrikam/_apis/wit/workItems/42/comments", uri);
+        Assert.DoesNotContain("My%20Project", uri);
+    }
+
+    [Fact]
+    public async Task AddComment_Uses_The_Items_Own_Project_Route()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """{"id":3,"text":"hi","createdBy":{"displayName":"Jin"},"createdDate":"2026-01-03T10:00:00Z"}""");
+
+        await Api(handler).AddCommentAsync(42, "hi", "Fabrikam", TestContext.Current.CancellationToken);
+
+        var uri = handler.Requests[0].RequestUri!.AbsoluteUri;
+        Assert.Contains("Fabrikam/_apis/wit/workItems/42/comments", uri);
+        Assert.DoesNotContain("My%20Project", uri);
+    }
+
+    [Fact]
+    public async Task Drill_In_Defaults_To_The_Context_Project_When_No_Project_Given()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """{"id":42,"fields":{"System.Title":"t","System.State":"Active","System.WorkItemType":"Bug"}}""");
+
+        await Api(handler).GetWorkItemAsync(42, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains("My%20Project/_apis/wit/workitems/42", handler.Requests[0].RequestUri!.AbsoluteUri);
     }
 }

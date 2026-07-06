@@ -219,11 +219,11 @@ public class DetailDialogKeyDeliveryTests
 
     private sealed class FakeWorkItemStore : IWorkItemStore
     {
-        public Task<WorkItem> GetWorkItemAsync(long id, CancellationToken ct) => throw new NotSupportedException();
-        public Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, CancellationToken ct) => throw new NotSupportedException();
-        public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, CancellationToken ct) => throw new NotSupportedException();
-        public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, CancellationToken ct) => throw new NotSupportedException();
-        public Task<WorkItemComment> AddCommentAsync(long id, string text, CancellationToken ct) => throw new NotSupportedException();
+        public Task<WorkItem> GetWorkItemAsync(long id, string? project, CancellationToken ct) => throw new NotSupportedException();
+        public Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, string? project, CancellationToken ct) => throw new NotSupportedException();
+        public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, string? project, CancellationToken ct) => throw new NotSupportedException();
+        public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, string? project, CancellationToken ct) => throw new NotSupportedException();
+        public Task<WorkItemComment> AddCommentAsync(long id, string text, string? project, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private static WorkItemDetailDialog NewWorkItemDialog()
@@ -346,6 +346,26 @@ public class DetailDialogKeyDeliveryTests
         dialog.NewKeyDownEvent(new Key('g'));
         dialog.NewKeyDownEvent(new Key('g'));
         Assert.Equal(0, detail.Body.CurrentRow);
+    }
+
+    [Fact]
+    public void WorkItemDialog_Esc_With_Pending_Count_Clears_It_Without_Closing()
+    {
+        var detail = NewWorkItemDialog();
+        var closed = false;
+        detail.CloseAction = () => closed = true;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('5')); // start a count
+        dialog.NewKeyDownEvent(Key.Esc);      // should clear the count, not close
+
+        Assert.False(closed);
+
+        dialog.NewKeyDownEvent(Key.Esc);      // nothing pending now → closes
+
+        Assert.True(closed);
     }
 
     [Fact]

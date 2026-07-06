@@ -87,7 +87,7 @@ public sealed class CobaltShell : Window
         _vm.HelpRequested += ShowHelp;
         _vm.MessagesRequested += ShowMessages;
         _vm.PickContextRequested += () =>
-            _vm.Messages.Info($"contexts: {string.Join(", ", _vm.ContextNames)} — switch with :ctx NAME");
+            _vm.Messages.Info($"contexts: {string.Join(", ", _vm.ContextNames)} — switch with :context NAME");
         _vm.ContextSwitchRequested += name =>
         {
             // Real reconnection lands with the data screens (M3); update chrome now.
@@ -163,8 +163,9 @@ public sealed class CobaltShell : Window
 
     private void Dispatch(AppCommand command, int? count = null)
     {
-        // In the PR section, Tab/S-Tab cycle the PR sub-tabs (review queue/mine/active)
-        // rather than switching top-level sections; 1/2 still switch sections.
+        // In the PR section, Tab/S-Tab cycle the PR sub-tabs (review queue/team/mine/active)
+        // rather than switching top-level sections; section switches go through the
+        // g-chords (gt/gT/g1/g2), handled by _vm.HandleCommand below.
         if (_prList is not null && command is AppCommand.NextTab or AppCommand.PrevTab)
         {
             if (command == AppCommand.NextTab)
@@ -220,16 +221,16 @@ public sealed class CobaltShell : Window
                 OpenCurrentInBrowser();
                 break;
             case AppCommand.Comment:
-                RunWorkItemAction((a, store, id, ct) => a.RunCommentAsync(store, id, ct));
+                RunWorkItemAction((a, store, id, project, ct) => a.RunCommentAsync(store, id, project, ct));
                 break;
             case AppCommand.ChangeState:
-                RunWorkItemAction((a, store, id, ct) => a.RunChangeStateAsync(store, id, ct));
+                RunWorkItemAction((a, store, id, project, ct) => a.RunChangeStateAsync(store, id, project, ct));
                 break;
             case AppCommand.Assign:
-                RunWorkItemAction((a, store, id, ct) => a.RunAssignAsync(store, id, ct));
+                RunWorkItemAction((a, store, id, project, ct) => a.RunAssignAsync(store, id, project, ct));
                 break;
             case AppCommand.EditTags:
-                RunWorkItemAction((a, store, id, ct) => a.RunTagsAsync(store, id, ct));
+                RunWorkItemAction((a, store, id, project, ct) => a.RunTagsAsync(store, id, project, ct));
                 break;
             case AppCommand.Vote:
                 RunPrVote();
@@ -255,7 +256,7 @@ public sealed class CobaltShell : Window
         return command.ToString();
     }
 
-    private void RunWorkItemAction(Func<WorkItemActions, IWorkItemStore, long, CancellationToken, Task> run)
+    private void RunWorkItemAction(Func<WorkItemActions, IWorkItemStore, long, string?, CancellationToken, Task> run)
     {
         if (_workItems is null)
         {
@@ -266,8 +267,11 @@ public sealed class CobaltShell : Window
             _vm.Messages.Info("no work item selected");
             return;
         }
+        // The highlighted row's project (org scope may span projects); the detail/mutation
+        // path targets it, not the context project (H1).
+        var project = _workItemList.SelectedProject;
         var actions = new WorkItemActions(_app, _editor, _vm.Messages.Info);
-        _ = RunThenRefreshAsync(run(actions, _workItems, id, CancellationToken.None), () => _workItemList?.OnRefresh());
+        _ = RunThenRefreshAsync(run(actions, _workItems, id, project, CancellationToken.None), () => _workItemList?.OnRefresh());
     }
 
     private void RunPrVote()
@@ -353,13 +357,13 @@ public sealed class CobaltShell : Window
         _prList?.Load(); // reflect any votes/edits back into the list
     }
 
-    private void OpenWorkItemDetail(long id)
+    private void OpenWorkItemDetail(long id, string? project)
     {
         if (_workItems is null)
         {
             return;
         }
-        var detailVm = new WorkItemDetailViewModel(_workItems, id);
+        var detailVm = new WorkItemDetailViewModel(_workItems, id, project);
         new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info).Show();
         _workItemList?.OnRefresh(); // reflect any edits back into the list
     }

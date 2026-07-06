@@ -1,5 +1,6 @@
 using Cobalt.Core.Ado;
 using Cobalt.Core.Models;
+using Cobalt.Tui.Tasks;
 
 namespace Cobalt.Tui.ViewModels;
 
@@ -18,6 +19,7 @@ public sealed class WorkItemListViewModel(IWorkItemSource source, bool includeCo
     private bool _includeCompleted = includeCompleted;
     private string? _projectFilter = string.IsNullOrEmpty(projectFilter) ? null : projectFilter;
     private CancellationToken _reloadToken = CancellationToken.None;
+    private int _loadSeq;
 
     public bool IsLoading { get; private set; }
     public string? Error { get; private set; }
@@ -80,13 +82,19 @@ public sealed class WorkItemListViewModel(IWorkItemSource source, bool includeCo
     {
         // Remember the token so a filter setter can reload on its own later.
         _reloadToken = ct;
+        // Stamp this load; only the newest may commit its results, so `:done show` (slow)
+        // then `:done hide` (fast) can't leave the slow result overwriting the fast one (M1).
+        var seq = ++_loadSeq;
         IsLoading = true;
         Error = null;
         Changed?.Invoke();
+
+        IReadOnlyList<WorkItem> result;
+        string? error = null;
         try
         {
             var query = new WorkItemQuery(_includeCompleted, _projectFilter);
-            _all = await source.QueryMyWorkItemsAsync(query, ct).ConfigureAwait(false);
+            result = await source.QueryMyWorkItemsAsync(query, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -94,19 +102,28 @@ public sealed class WorkItemListViewModel(IWorkItemSource source, bool includeCo
         }
         catch (Exception ex) when (AdoExceptions.IsExpected(ex))
         {
-            Error = ex.Message;
-            _all = [];
+            error = ex.Message;
+            result = [];
         }
-        finally
+
+        // A newer load superseded this one while it was in flight; drop its results
+        // so it cannot clobber the current filter state.
+        if (seq != _loadSeq)
         {
-            IsLoading = false;
-            ApplyFilter();
+            return;
         }
+
+        Error = error;
+        _all = result;
+        IsLoading = false;
+        ApplyFilter();
     }
 
     // A server-side filter change re-queries in the background; LoadAsync swallows its
-    // own expected errors and raises Changed, so the view repaints when it lands.
-    private void Reload() => _ = LoadAsync(_reloadToken);
+    // own expected errors and raises Changed, so the view repaints when it lands. Only
+    // cancellation is ignored here; an unexpected fault surfaces via the global handler
+    // rather than vanishing into the discarded task (ADR 0013, L6).
+    private void Reload() => _ = LoadAsync(_reloadToken).IgnoreCancellationAsync();
 
     private void ApplyFilter()
     {

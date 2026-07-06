@@ -23,7 +23,6 @@ public sealed class PrDetailDialog(
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly PrActions _actions = new(app, log);
-    private readonly KeyBindingTable _bindings = KeyBindingTable.Default();
     private readonly KeymapRouter _router = new(KeyBindingTable.Default());
     private bool _closed;
     private Dialog? _dialog;
@@ -125,6 +124,9 @@ public sealed class PrDetailDialog(
         {
             return;
         }
+        // Esc clears a pending count/sequence first; it only closes when nothing is
+        // pending (mirrors the shell's Esc handling, L5).
+        var hadPending = _router.HasPending;
         var result = _router.Feed(token, KeyScope.PullRequestDetail);
         switch (result.Kind)
         {
@@ -140,7 +142,10 @@ public sealed class PrDetailDialog(
                 if (token == "Esc")
                 {
                     key.Handled = true;
-                    RequestClose();
+                    if (!hadPending)
+                    {
+                        RequestClose();
+                    }
                 }
                 break;
         }
@@ -166,7 +171,7 @@ public sealed class PrDetailDialog(
                 }
                 else
                 {
-                    TextDialog.Show(app, "keys", HelpText.For(_bindings, KeyScope.PullRequestDetail));
+                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.PullRequestDetail));
                 }
                 return true;
             case AppCommand.Vote:

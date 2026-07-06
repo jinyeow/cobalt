@@ -41,22 +41,22 @@ public sealed class WorkItemActions
 
     // ---- list entry points: build + load a view-model for the id, then run the flow ----
 
-    public async Task RunCommentAsync(IWorkItemStore store, long id, CancellationToken ct) =>
-        await CommentAsync(new WorkItemDetailViewModel(store, id), ct).ConfigureAwait(false);
+    public async Task RunCommentAsync(IWorkItemStore store, long id, string? project, CancellationToken ct) =>
+        await CommentAsync(new WorkItemDetailViewModel(store, id, project), ct).ConfigureAwait(false);
 
-    public async Task RunChangeStateAsync(IWorkItemStore store, long id, CancellationToken ct)
+    public async Task RunChangeStateAsync(IWorkItemStore store, long id, string? project, CancellationToken ct)
     {
-        var vm = new WorkItemDetailViewModel(store, id);
+        var vm = new WorkItemDetailViewModel(store, id, project);
         await vm.LoadAsync(ct).ConfigureAwait(false);
         await ChangeStateAsync(vm, ct).ConfigureAwait(false);
     }
 
-    public async Task RunAssignAsync(IWorkItemStore store, long id, CancellationToken ct) =>
-        await AssignAsync(new WorkItemDetailViewModel(store, id), ct).ConfigureAwait(false);
+    public async Task RunAssignAsync(IWorkItemStore store, long id, string? project, CancellationToken ct) =>
+        await AssignAsync(new WorkItemDetailViewModel(store, id, project), ct).ConfigureAwait(false);
 
-    public async Task RunTagsAsync(IWorkItemStore store, long id, CancellationToken ct)
+    public async Task RunTagsAsync(IWorkItemStore store, long id, string? project, CancellationToken ct)
     {
-        var vm = new WorkItemDetailViewModel(store, id);
+        var vm = new WorkItemDetailViewModel(store, id, project);
         await vm.LoadAsync(ct).ConfigureAwait(false);
         await TagsAsync(vm, ct).ConfigureAwait(false);
     }

@@ -27,9 +27,9 @@
   [ADR 0011](docs/adr/0011-cross-project-org-pr-scope.md)).
 - **Vim count prefixes.** Motions now take a numeric count everywhere: `5j` moves down
   five rows, `10G` jumps to line 10, `3]` advances three files in diff review, and a
-  count multiplies `Ctrl-d`/`Ctrl-u`. A bare `0` stays the line-start motion, not a
-  count. Implemented as a pure `KeymapRouter` change (`KeyResult.Count`) threaded through
-  the shell and dialogs.
+  count multiplies `Ctrl-d`/`Ctrl-u`. A bare `0` (no count started) is ignored, so it is
+  never mistaken for a count; it only extends an existing one (`10j`). Implemented as a
+  pure `KeymapRouter` change (`KeyResult.Count`) threaded through the shell and dialogs.
 - **Section navigation moved to `g`-chords.** `gt`/`gT` cycle to the next/previous
   section (wrapping) and `g1`/`g2` jump straight to Work Items / Pull Requests. The old
   `1`/`2` section bindings are removed so digits are free for counts; the tab bar now
@@ -65,6 +65,31 @@
   being masked as an "error" string (CodeQL `cs/catch-of-all-exceptions`).
 
 ### Fixed
+- **Cross-project work-item drill-in under org scope.** With `:scope org` the list spans
+  every project, but pressing `s`/edit/comment/open on an item from another project used
+  to query the context project (wrong state list, or a 404). The detail/mutation path now
+  threads the item's own `System.TeamProject` through the `GET`/`PATCH`/states/comments
+  routes (states are per-project process metadata, so they must). The work-item list also
+  shows a **project column** when its rows span more than one project, so cross-project
+  items are distinguishable. See
+  [ADR 0011](docs/adr/0011-cross-project-org-pr-scope.md).
+- **`:project` on the PR list is now an exact match.** It previously used a substring
+  match, so `:project Web` also kept a `WebApps` PR; it now matches the project name
+  exactly (case-insensitive), aligning with the work-item side's WIQL equality. The
+  repository filter stays a substring match.
+- **Work-item list load-race.** A slow work-item load (e.g. `:done show`) followed by a
+  fast one (`:done hide`) could let the slow result land last and overwrite the fast one;
+  a monotonic load-sequence guard now lets only the newest load commit its rows.
+- **The `?`/`:messages` overlays actually vim-scroll.** They route movement through the
+  shared `KeymapRouter`/`VimScroll` seam, so `j/k`, `gg`/`G`, and `Ctrl-d`/`Ctrl-u` (with
+  counts) scroll the pane; previously the read-only `TextView` swallowed those keys.
+- **Dialog `?` help lists only keys the dialog handles.** A modal's key reference no
+  longer advertises dead global keys (`r`, `/`, `yy`, `gt/gT`, `Tab`) or verbs from other
+  scopes. Relatedly, the diff-review scope no longer binds `x`/`u`/`v` (resolve/reactivate/
+  vote) — those belong to PR detail and the diff dialog implemented none of them.
+- **`Esc` clears a pending count before closing a dialog.** With a count part-entered
+  (`5`…), `Esc` now cancels the count instead of closing the dialog; it closes only when
+  nothing is pending, mirroring the shell.
 - **PR "complete" now reports when the merge is still computing.** Completing a PR
   whose source commit hasn't been resolved yet surfaces a clear message
   ("merge still computing — try again in a moment") instead of silently doing nothing

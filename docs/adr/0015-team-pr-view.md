@@ -81,6 +81,11 @@ Two facts about the Azure DevOps REST surface shaped the design:
 - **Risk — the teammate-authored half is bounded by `$top=200`** on the single Active
   list. On very large orgs a teammate's PR past the first 200 active PRs would be
   missed. Paging (`$skip`) is the localized follow-up, shared with ADR 0011.
+- **Risk — the teams list is likewise bounded by `$top=200`.** `GetMyTeamsAsync` requests
+  `_apis/teams?$mine=true&$top=200`; a user who belongs to more than 200 teams across the
+  org would have the tail truncated (and those teams' PRs/members omitted from the Team
+  tab). Bounded in practice (users are on few teams) and paged by the same `$skip`
+  follow-up as the two PR-list routes above.
 - **Risk — large teams.** Team-as-reviewer fans out one call per team; a user on many
   teams issues more parallel calls. Bounded in practice (teams per user are few) and
   cheap (each is the existing list route).

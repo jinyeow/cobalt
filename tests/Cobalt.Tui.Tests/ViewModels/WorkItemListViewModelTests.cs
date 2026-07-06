@@ -196,6 +196,45 @@ public class WorkItemListViewModelTests
         Assert.Equal(before, source.Calls);
     }
 
+    private sealed class GatedSource : IWorkItemSource
+    {
+        private readonly Queue<TaskCompletionSource<IReadOnlyList<WorkItem>>> _gates = new();
+
+        public TaskCompletionSource<IReadOnlyList<WorkItem>> NextGate()
+        {
+            var tcs = new TaskCompletionSource<IReadOnlyList<WorkItem>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _gates.Enqueue(tcs);
+            return tcs;
+        }
+
+        public Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(WorkItemQuery query, CancellationToken ct) =>
+            _gates.Dequeue().Task;
+    }
+
+    [Fact]
+    public async Task Slow_First_Load_Cannot_Clobber_A_Newer_Faster_Load()
+    {
+        // Load A (slow) starts, then load B (fast) supersedes it. B completes first and
+        // commits; when A finally lands it must be dropped, leaving B's rows (M1).
+        var source = new GatedSource();
+        var vm = new WorkItemListViewModel(source);
+
+        var gateA = source.NextGate();
+        var loadA = vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var gateB = source.NextGate();
+        var loadB = vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        gateB.SetResult([Item(2, "B", "New")]);
+        await loadB;
+        Assert.Equal("B", vm.Rows.Single().Title);
+
+        gateA.SetResult([Item(1, "A", "Active")]);
+        await loadA;
+
+        Assert.Equal("B", vm.Rows.Single().Title); // the slow load did not overwrite the fast one
+    }
+
     [Fact]
     public async Task Substring_Filter_Composes_On_Top_Of_Server_Query()
     {

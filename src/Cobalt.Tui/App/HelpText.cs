@@ -20,7 +20,7 @@ public static class HelpText
         [AppCommand.Back] = "quit (also :q)",
         [AppCommand.Refresh] = "refresh",
         [AppCommand.Help] = "this help",
-        [AppCommand.CommandPalette] = "command palette (:q, :ctx NAME, :scope, :done, :project NAME)",
+        [AppCommand.CommandPalette] = "command palette (:q, :context NAME, :scope, :done, :project NAME)",
         [AppCommand.FilterStart] = "filter list",
         [AppCommand.NextTab] = "next tab",
         [AppCommand.PrevTab] = "previous tab",
@@ -48,12 +48,43 @@ public static class HelpText
         [AppCommand.CyclePane] = "switch file list / diff pane",
     };
 
-    public static string For(KeyBindingTable table, KeyScope scope)
+    // The only global keys a modal dialog actually honors: the shared scroll seam plus
+    // help and close. Everything else global (r, /, :, yy, gx, gt/gT, Tab, …) is dead in a
+    // modal, so a dialog's `?` must not advertise it (M3).
+    private static readonly HashSet<AppCommand> DialogGlobals =
+    [
+        AppCommand.MoveDown, AppCommand.MoveUp, AppCommand.MoveTop, AppCommand.MoveBottom,
+        AppCommand.HalfPageDown, AppCommand.HalfPageUp, AppCommand.Help, AppCommand.Back,
+    ];
+
+    /// <summary>Full help for the main shell: every binding visible from the scope.</summary>
+    public static string For(KeyBindingTable table, KeyScope scope) =>
+        Emit(table, scope, _ => true);
+
+    /// <summary>
+    /// Help for a modal dialog: only the verbs it dispatches — its scope's own bindings plus
+    /// the shared scroll/help/close keys — so it never lists keys that do nothing (M3).
+    /// </summary>
+    public static string ForDialog(KeyBindingTable table, KeyScope scope)
+    {
+        var allowed = new HashSet<AppCommand>(DialogGlobals);
+        foreach (var (_, command) in table.ScopedOnly(scope))
+        {
+            allowed.Add(command);
+        }
+        return Emit(table, scope, allowed.Contains);
+    }
+
+    private static string Emit(KeyBindingTable table, KeyScope scope, Func<AppCommand, bool> include)
     {
         var sb = new StringBuilder();
         var seen = new HashSet<AppCommand>();
         foreach (var (sequence, command) in table.Visible(scope))
         {
+            if (!include(command))
+            {
+                continue;
+            }
             if (!seen.Add(command))
             {
                 continue; // alias (e.g. Enter and o) — show the first binding only

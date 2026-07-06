@@ -64,9 +64,9 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.PullRequestDetail, "A", AppCommand.AbandonPr);
 
         table.Bind(KeyScope.DiffReview, "c", AppCommand.Comment);
-        table.Bind(KeyScope.DiffReview, "x", AppCommand.ResolveThread);
-        table.Bind(KeyScope.DiffReview, "u", AppCommand.ReactivateThread);
-        table.Bind(KeyScope.DiffReview, "v", AppCommand.Vote);
+        // Note: x/u/v (resolve/reactivate/vote) belong to PR detail, NOT diff review —
+        // DiffReviewDialog.Dispatch implements none of them, so they are intentionally
+        // unbound here (they would otherwise be advertised-but-dead keys, M3).
         table.Bind(KeyScope.DiffReview, "]", AppCommand.NextFile);
         table.Bind(KeyScope.DiffReview, "[", AppCommand.PrevFile);
         // Scoped Tab shadows the global NextTab: in diff review Tab cycles the two panes.
@@ -109,6 +109,10 @@ public sealed class KeyBindingTable
             }
         }
     }
+
+    /// <summary>The scope's own (non-global) bindings only — the verbs a modal in that scope actually dispatches.</summary>
+    public IEnumerable<(string[] Sequence, AppCommand Command)> ScopedOnly(KeyScope scope) =>
+        scope != KeyScope.Global && _bindings.TryGetValue(scope, out var scoped) ? scoped : [];
 
     /// <summary>All bindings visible from a scope: scoped first, then global fallback.</summary>
     public IEnumerable<(string[] Sequence, AppCommand Command)> Visible(KeyScope scope)

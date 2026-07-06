@@ -254,4 +254,21 @@ public class PrListViewModelTests
         Assert.Single(vm.Rows);
         Assert.Equal(2, vm.Rows[0].PullRequestId);
     }
+
+    [Fact]
+    public async Task ProjectFilter_Is_Exact_Not_Substring()
+    {
+        // `:project Web` must exclude a "WebApps" PR (exact, case-insensitive), matching the
+        // work-item side's WIQL equality (M4).
+        var source = new FakeSource();
+        source.ByFilter[PrListFilter.ReviewQueue] =
+            [Pr(1, "a", "web", "Web"), Pr(2, "b", "api", "WebApps")];
+        var vm = new PrListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.ProjectFilter = "Web";
+
+        Assert.Single(vm.Rows);
+        Assert.Equal(1, vm.Rows[0].PullRequestId);
+    }
 }

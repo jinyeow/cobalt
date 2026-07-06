@@ -25,8 +25,9 @@ Two Terminal.Gui 2.4.16 facts shaped the design, confirmed by headless probes:
 ## Decision
 
 - **`KeymapRouter` owns counts.** A leading digit run (with no multi-key sequence
-  pending) accumulates into `KeyResult.Count`; a bare `0` stays the line-start
-  motion. The router remains pure — no Terminal.Gui types — so counts are unit-tested
+  pending) accumulates into `KeyResult.Count`; a bare `0` with no count started is
+  ignored (there is no line-start motion), so it can only extend an existing count
+  (`10j`). The router remains pure — no Terminal.Gui types — so counts are unit-tested
   in isolation and threaded through the shell and every dialog.
 - **`VimScroll` replaces `ListNavigation`.** `VimScroll.Apply(View, AppCommand,
   int? count)` maps the movement commands onto any focusable scrollable view via
