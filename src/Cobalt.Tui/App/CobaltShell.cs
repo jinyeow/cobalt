@@ -172,6 +172,9 @@ public sealed class CobaltShell : Window
         {
             _workItemList?.Navigate(command);
             _prList?.Navigate(command);
+            // Force the frame now: without this the move only paints on the next event,
+            // which reads as "the key needs a second press" on slower/Windows drivers.
+            _app.LayoutAndDraw(false);
             return;
         }
 
