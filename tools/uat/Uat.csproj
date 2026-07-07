@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Cobalt.Uat</RootNamespace>
+    <!-- Dev/UAT harness only: never packed, deliberately excluded from Cobalt.slnx so it
+         cannot affect CI build/pack. Exercises the real ADO routes against a live org. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cobalt.Core/Cobalt.Core.csproj" />
+  </ItemGroup>
+</Project>
