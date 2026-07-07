@@ -2,7 +2,19 @@
 
 ## Unreleased
 
+### Fixed
+- **Detail/overlay windows now scroll a line at a time with visible feedback.** The
+  read-only text panes (PR detail, work-item detail, and the `?`/`:messages`/key-reference
+  overlays) moved an invisible caret that only scrolled the viewport once it reached the
+  bottom edge, so `j`/`k`/`Ctrl-d` looked inert until then. They now scroll like a pager —
+  every key advances the view immediately — and show a scroll-bar position indicator. `G`
+  scrolls the last page into view (last line at the bottom).
+
 ### Added
+- **View existing comments on a diff line.** In diff review, `o`/`Enter` on the diff pane
+  opens the comment thread(s) anchored to the selected line (the ones flagged by the `●`
+  marker) in a scrollable overlay — previously the marker showed a thread existed but its
+  comments could not be read from the diff.
 - **Responsive diff-review layout.** The two panes now degrade gracefully as the terminal
   shrinks: below a width threshold the changed-file list hides so the diff pane spans the
   whole row, and side-by-side automatically falls back to unified when the diff pane is too

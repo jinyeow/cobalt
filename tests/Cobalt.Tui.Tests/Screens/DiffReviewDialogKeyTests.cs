@@ -1,5 +1,6 @@
 using System.Drawing;
 using Cobalt.Core.Models;
+using Cobalt.Core.Text;
 using Cobalt.Tui.Editor;
 using Cobalt.Tui.Screens;
 using Cobalt.Tui.ViewModels;
@@ -343,5 +344,54 @@ public class DiffReviewDialogKeyTests
         dialog.Layout(new Size(120, 24));
 
         Assert.True(detail.FileListVisible);
+    }
+
+    // ---- view existing comments on a diff line ----
+
+    [Fact]
+    public async Task O_On_A_Threaded_Line_Shows_The_Existing_Comments()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads =
+            [
+                new PrThread(7, PrThreadStatus.Active,
+                    [new PrComment(1, "Sam", "looks good to me", false)], "/a.cs", RightLine: 2, LeftLine: null),
+            ],
+        };
+        source.Blobs[("/a.cs", "base")] = "keep\nold\n";
+        source.Blobs[("/a.cs", "src")] = "keep\nnew\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        string? shown = null;
+        detail.ViewThreadAction = t => shown = t;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+        detail.DiffPane.SetFocus();
+
+        // Select the added line (new line 2), which the thread anchors to, then "open" it.
+        var addedIndex = vm.CurrentDiff!.Lines.ToList().FindIndex(l => l.Kind == DiffLineKind.Added);
+        detail.DiffPane.SelectedItem = addedIndex;
+        dialog.NewKeyDownEvent(new Key('o'));
+
+        Assert.NotNull(shown);
+        Assert.Contains("looks good to me", shown);
+        Assert.Contains("#7", shown);
+    }
+
+    [Fact]
+    public async Task O_On_An_Unthreaded_Line_Shows_Nothing()
+    {
+        var (detail, dialog) = await BuiltModifiedDialog(); // no threads
+        detail.DiffPane.SetFocus();
+        var shown = false;
+        detail.ViewThreadAction = _ => shown = true;
+
+        dialog.NewKeyDownEvent(new Key('o'));
+
+        Assert.False(shown);
     }
 }

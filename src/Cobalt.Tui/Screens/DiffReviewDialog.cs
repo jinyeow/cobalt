@@ -46,6 +46,9 @@ public sealed class DiffReviewDialog(
     /// <summary>Test seam: replaces the real help overlay (needs a run loop) so a test can observe '?'.</summary>
     internal Action? HelpAction { get; set; }
 
+    /// <summary>Test seam: replaces the real comment overlay (needs a run loop) so a test can observe the shown text.</summary>
+    internal Action<string>? ViewThreadAction { get; set; }
+
     /// <summary>Test seam: the changed-file list pane.</summary>
     internal ListView FileList => _fileList;
 
@@ -92,7 +95,7 @@ public sealed class DiffReviewDialog(
     {
         var dialog = new Dialog
         {
-            Title = $"diff review !{vm.PrId} — q close · Tab files/diff · [ ] file · z fold · s split · c comment · ? keys",
+            Title = $"diff review !{vm.PrId} — q close · Tab files/diff · [ ] file · z fold · s split · c comment · o view · ? keys",
             Width = Dim.Percent(96),
             Height = Dim.Percent(96),
         };
@@ -256,6 +259,15 @@ public sealed class DiffReviewDialog(
                     _diffPane.SetFocus();
                 }
                 return true;
+            case AppCommand.Open:
+                // On the diff pane, open the selected line's existing comment thread(s);
+                // on the file list, fall through so Accepting opens the file / toggles a folder.
+                if (!_diffPane.HasFocus)
+                {
+                    return false;
+                }
+                ViewThreadAtCursor();
+                return true;
             case AppCommand.NextFile:
                 _ = StepFile(count ?? 1);
                 return true;
@@ -324,6 +336,53 @@ public sealed class DiffReviewDialog(
         }
         await vm.AddCommentAtLineAsync(lineIndex, text.Trim(), Token).ConfigureAwait(false);
         app.Invoke(() => log(vm.Error is { } e ? $"comment failed: {e}" : "line comment added"));
+    }
+
+    /// <summary>o/Enter on the diff pane: show the existing comment thread(s) anchored to the selected line.</summary>
+    private void ViewThreadAtCursor()
+    {
+        if (vm.CurrentDiff is not { Lines.Count: > 0 } diff)
+        {
+            return;
+        }
+        var index = SelectedDiffLine();
+        if (index < 0 || index >= diff.Lines.Count)
+        {
+            return;
+        }
+        var threads = vm.ThreadsForDiffLine(diff.Lines[index]);
+        if (threads.Count == 0)
+        {
+            log("no comments on this line");
+            return;
+        }
+
+        var text = FormatThreads(threads);
+        if (ViewThreadAction is not null)
+        {
+            ViewThreadAction(text);
+        }
+        else
+        {
+            TextDialog.Show(app, "comments", text);
+        }
+    }
+
+    private static string FormatThreads(IReadOnlyList<PrThread> threads)
+    {
+        var lines = new List<string>();
+        foreach (var thread in threads)
+        {
+            if (lines.Count > 0)
+            {
+                lines.Add("");
+            }
+            lines.Add($"#{thread.Id} [{thread.Status}]");
+            lines.AddRange(thread.Comments
+                .Where(c => !c.IsSystem)
+                .Select(c => $"  {c.Author}: {c.Content}"));
+        }
+        return string.Join('\n', lines);
     }
 
     /// <summary>s: flip the diff pane between unified and side-by-side, keeping the cursor on the same line.</summary>
