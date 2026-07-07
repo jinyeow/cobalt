@@ -15,7 +15,6 @@ namespace Cobalt.Tui.Screens;
 /// Modal PR detail: reviewers/votes, merge status, comment threads, and the
 /// actions (vote, reply, resolve/reactivate, complete, abandon).
 /// </summary>
-#pragma warning disable CS9113 // 'context' unused for now; wired by a later diff-view track
 public sealed class PrDetailDialog(
     IApplication app,
     PrDetailViewModel vm,
@@ -23,7 +22,6 @@ public sealed class PrDetailDialog(
     Action<string> log,
     IPrDiffSource? diffSource = null,
     AdoContext? context = null)
-#pragma warning restore CS9113
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly PrActions _actions = new(app, log);
@@ -60,6 +58,9 @@ public sealed class PrDetailDialog(
     /// <summary>Test seam: replaces the real help overlay (needs a run loop) so a test can observe '?'.</summary>
     internal Action? HelpAction { get; set; }
 
+    /// <summary>Test seam: replaces the real browser-open path (needs a process launch) so a test can observe 'g b'.</summary>
+    internal Action<string>? OpenUrlAction { get; set; }
+
     public void Show()
     {
         using var dialog = Build();
@@ -81,7 +82,7 @@ public sealed class PrDetailDialog(
     {
         var dialog = new Dialog
         {
-            Title = $"PR !{vm.Id} — q close · d diff · v vote · c reply · gc comment · x resolve · u reactivate · C complete · A abandon",
+            Title = $"PR !{vm.Id} — q close · d diff · v vote · c reply · gc comment · gb branch · x resolve · u reactivate · C complete · A abandon",
             Width = Dim.Percent(92),
             Height = Dim.Percent(92),
         };
@@ -219,6 +220,9 @@ public sealed class PrDetailDialog(
                 return true;
             case AppCommand.OpenDiff:
                 (DiffAction ?? OpenDiff)();
+                return true;
+            case AppCommand.OpenBranch:
+                OpenBranch();
                 return true;
             default:
                 return false;
@@ -402,7 +406,30 @@ public sealed class PrDetailDialog(
             return;
         }
         var diffVm = new PrDiffViewModel(diffSource, vm.PullRequest);
-        new DiffReviewDialog(app, diffVm, editor, log).Show();
+        new DiffReviewDialog(app, diffVm, editor, log, context).Show();
+    }
+
+    private void OpenBranch()
+    {
+        if (context is null || vm.PullRequest is null)
+        {
+            log("open branch needs an Azure DevOps context and a loaded PR");
+            return;
+        }
+        var pr = vm.PullRequest;
+        var url = AdoUrls.Branch(context, pr.ProjectName, pr.RepositoryName, pr.SourceBranch);
+        if (OpenUrlAction is not null)
+        {
+            OpenUrlAction(url);
+        }
+        else if (BrowserLauncher.TryOpen(url, out var error))
+        {
+            log($"opened {url}");
+        }
+        else
+        {
+            log($"could not open browser: {error}");
+        }
     }
 
     private async Task RunAndLog(Task work, string success)

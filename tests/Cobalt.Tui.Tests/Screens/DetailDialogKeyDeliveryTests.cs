@@ -1,5 +1,6 @@
 using System.Drawing;
 using Cobalt.Core.Ado;
+using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 using Cobalt.Tui.Editor;
 using Cobalt.Tui.Screens;
@@ -272,6 +273,55 @@ public class DetailDialogKeyDeliveryTests
         Assert.Contains("⧗ Comment resolution", text);
         // A non-blocking policy carries no blocking marker.
         Assert.DoesNotContain("Comment resolution (blocking)", text);
+    }
+
+    private static readonly AdoContext Context = new()
+    {
+        Name = "work",
+        OrganizationUrl = new Uri("https://dev.azure.com/contoso"),
+        Project = "My Project",
+    };
+
+    [Fact]
+    public async Task PrDialog_Gb_Opens_The_Branch_Url()
+    {
+        var vm = new PrDetailViewModel(new PolicyRenderStore(), 42);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new PrDetailDialog(App, vm, NoopEditor(), _ => { }, context: Context);
+        string? captured = null;
+        detail.OpenUrlAction = url => captured = url;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('g'));
+        dialog.NewKeyDownEvent(new Key('b'));
+
+        Assert.NotNull(captured);
+        Assert.Contains("_git/", captured);
+        Assert.Contains("version=GB", captured);
+    }
+
+    [Fact]
+    public async Task PrDialog_Gb_Without_Context_Does_Not_Throw_Or_Open()
+    {
+        var vm = new PrDetailViewModel(new PolicyRenderStore(), 42);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new PrDetailDialog(App, vm, NoopEditor(), _ => { }); // no context
+        var opened = false;
+        detail.OpenUrlAction = _ => opened = true;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        var ex = Record.Exception(() =>
+        {
+            dialog.NewKeyDownEvent(new Key('g'));
+            dialog.NewKeyDownEvent(new Key('b'));
+        });
+
+        Assert.Null(ex);
+        Assert.False(opened);
     }
 
     // ---- Work-item detail ----
