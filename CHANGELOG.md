@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 — 2026-07-07
+
 ### Added
 - **Team PR tab.** A new `team` sub-tab (`Tab` order: review queue / team / mine /
   active) shows the RAW UNION of PRs where a team you belong to is a requested
