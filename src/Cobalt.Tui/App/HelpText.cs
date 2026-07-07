@@ -62,6 +62,9 @@ public static class HelpText
         [AppCommand.ExpandContext] = "expand context",
         [AppCommand.ExpandAllContext] = "expand whole file",
         [AppCommand.AddPrComment] = "add PR comment",
+        [AppCommand.ScrollLeft] = "scroll diff left",
+        [AppCommand.ScrollRight] = "scroll diff right",
+        [AppCommand.OpenBranch] = "open source branch in browser",
     };
 
     // The only global keys a modal dialog actually honors: the shared scroll seam plus

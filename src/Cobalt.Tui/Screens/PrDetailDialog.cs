@@ -1,5 +1,6 @@
 using Cobalt.Tui.App;
 using Cobalt.Tui.Editor;
+using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.Tasks;
@@ -14,12 +15,15 @@ namespace Cobalt.Tui.Screens;
 /// Modal PR detail: reviewers/votes, merge status, comment threads, and the
 /// actions (vote, reply, resolve/reactivate, complete, abandon).
 /// </summary>
+#pragma warning disable CS9113 // 'context' unused for now; wired by a later diff-view track
 public sealed class PrDetailDialog(
     IApplication app,
     PrDetailViewModel vm,
     EditorService editor,
     Action<string> log,
-    IPrDiffSource? diffSource = null)
+    IPrDiffSource? diffSource = null,
+    AdoContext? context = null)
+#pragma warning restore CS9113
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly PrActions _actions = new(app, log);

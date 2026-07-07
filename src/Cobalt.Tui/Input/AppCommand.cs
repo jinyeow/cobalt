@@ -68,4 +68,7 @@ public enum AppCommand
     ExpandContext,
     ExpandAllContext,
     AddPrComment,
+    ScrollLeft,
+    ScrollRight,
+    OpenBranch,
 }

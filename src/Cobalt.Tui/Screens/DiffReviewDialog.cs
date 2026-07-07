@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 using Cobalt.Core.Text;
 using Cobalt.Core.Text.Syntax;
@@ -18,8 +19,10 @@ namespace Cobalt.Tui.Screens;
 /// selected file (right). `c` comments on the selected line, `[`/`]` change file,
 /// Tab cycles the panes, and j/k/gg/G/Ctrl-d/u scroll the focused pane.
 /// </summary>
+#pragma warning disable CS9113 // 'context' unused for now; wired by a later diff-view track
 public sealed class DiffReviewDialog(
-    IApplication app, PrDiffViewModel vm, EditorService editor, Action<string> log)
+    IApplication app, PrDiffViewModel vm, EditorService editor, Action<string> log, AdoContext? context = null)
+#pragma warning restore CS9113
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly KeymapRouter _router = new(KeyBindingTable.Default());

@@ -33,6 +33,7 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     private int _selectedFileIndex;
 
     public int PrId => pr.PullRequestId;
+    public PullRequest PullRequest => pr;
     public bool IsLoading { get; private set; }
     public bool IsBusy { get; private set; }
     public string? Error { get; private set; }

@@ -63,6 +63,7 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.PullRequestDetail, "C", AppCommand.CompletePr);
         table.Bind(KeyScope.PullRequestDetail, "A", AppCommand.AbandonPr);
         table.Bind(KeyScope.PullRequestDetail, "g c", AppCommand.AddPrComment);
+        table.Bind(KeyScope.PullRequestDetail, "g b", AppCommand.OpenBranch);
 
         table.Bind(KeyScope.DiffReview, "c", AppCommand.Comment);
         // Note: x/u (resolve/reactivate) belong to PR detail, NOT diff review —
@@ -90,6 +91,11 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.DiffReview, "s", AppCommand.ToggleDiffMode);
         // Scoped Tab shadows the global NextTab: in diff review Tab cycles the two panes.
         table.Bind(KeyScope.DiffReview, "Tab", AppCommand.CyclePane);
+        // Scoped h/l shadow the global Back/Open (same mechanism as scoped Tab above):
+        // in diff review they scroll the focused pane horizontally instead.
+        table.Bind(KeyScope.DiffReview, "h", AppCommand.ScrollLeft);
+        table.Bind(KeyScope.DiffReview, "l", AppCommand.ScrollRight);
+        table.Bind(KeyScope.DiffReview, "g b", AppCommand.OpenBranch);
 
         table.Bind(KeyScope.ThreadView, "c", AppCommand.Comment);
         table.Bind(KeyScope.ThreadView, "x", AppCommand.ResolveThread);
