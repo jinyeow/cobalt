@@ -907,4 +907,17 @@ public class DiffReviewDialogKeyTests
         Assert.Contains("_git/", opened);
         Assert.Contains("version=GB", opened);
     }
+
+    [Fact]
+    public async Task Search_Bar_Hides_When_Focus_Leaves_It_Without_Enter_Or_Esc()
+    {
+        var (detail, dialog) = await BuiltSearchDialog();
+        dialog.NewKeyDownEvent(new Key('/'));
+        Assert.True(detail.SearchBar.Visible);
+        Assert.True(detail.SearchBar.HasFocus);
+
+        detail.DiffPane.SetFocus(); // focus leaves the bar (Tab/click equivalent), no Enter/Esc
+
+        Assert.False(detail.SearchBar.Visible); // hidden, not orphaned with stale text
+    }
 }

@@ -184,7 +184,9 @@ public sealed class DiffReviewDialog(
 
         // A one-line inline search bar anchored to the bottom, hidden until '/'. Enter applies
         // the query and hides it; Esc hides and clears. While it has focus HandleKey early-returns
-        // so typed runes / '/' / Tab reach the field rather than the command router.
+        // so typed runes reach the field rather than the command router; if focus leaves the bar
+        // any other way (Tab, a mouse click), HasFocusChanged hides it so it never orphans with
+        // stale text (which would otherwise make the next q/Esc close the whole dialog).
         _searchBar = new TextField
         {
             Y = Pos.AnchorEnd(1),
@@ -204,6 +206,17 @@ public sealed class DiffReviewDialog(
                 k.Handled = true;
                 HideSearchBar();
                 ApplySearch(null); // clear the highlight/matches
+            }
+        };
+        // Focus escaping the bar without Enter/Esc (Tab, a click) must not leave it orphaned;
+        // hide it (cancel). Idempotent with HideSearchBar, which sets Visible=false first.
+        _searchBar.HasFocusChanged += (_, _) =>
+        {
+            if (!_searchBar.HasFocus && _searchBar.Visible)
+            {
+                _searchBar.Visible = false;
+                _searchBar.SetNeedsDraw();
+                _dialog?.SetNeedsDraw();
             }
         };
 
@@ -324,12 +337,12 @@ public sealed class DiffReviewDialog(
                 }
                 return true;
             case AppCommand.ScrollLeft:
-                _diffPane.ScrollHorizontal(-(count ?? 1)); // clamps at column 0
-                _diffPane.SetNeedsDraw();
+                HorizontalScrollTarget.ScrollHorizontal(-(count ?? 1)); // clamps at column 0
+                HorizontalScrollTarget.SetNeedsDraw();
                 return true;
             case AppCommand.ScrollRight:
-                _diffPane.ScrollHorizontal(count ?? 1); // DiffListDataSource.Render honors Viewport.X
-                _diffPane.SetNeedsDraw();
+                HorizontalScrollTarget.ScrollHorizontal(count ?? 1); // DiffListDataSource.Render honors Viewport.X
+                HorizontalScrollTarget.SetNeedsDraw();
                 return true;
             case AppCommand.CyclePane:
                 if (_diffPane.HasFocus)
@@ -587,6 +600,10 @@ public sealed class DiffReviewDialog(
         _diffPane.SetFocus();
     }
 
+    /// <summary>h/l scroll whichever pane has focus horizontally (the diff pane by default, or the
+    /// file list when it holds focus — so long tree rows can scroll too), mirroring VimScroll.</summary>
+    private Terminal.Gui.ViewBase.View HorizontalScrollTarget => _diffPane.HasFocus ? _diffPane : _fileList;
+
     /// <summary>g b: open the PR's source branch in the browser (or the test seam).</summary>
     private void OpenSourceBranch()
     {
@@ -602,7 +619,11 @@ public sealed class DiffReviewDialog(
             OpenUrlAction(url);
             return;
         }
-        if (!BrowserLauncher.TryOpen(url, out var error))
+        if (BrowserLauncher.TryOpen(url, out var error))
+        {
+            log($"opening branch {pr.SourceBranch}");
+        }
+        else
         {
             log($"could not open browser: {error}");
         }
