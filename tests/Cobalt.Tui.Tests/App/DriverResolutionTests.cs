@@ -72,6 +72,14 @@ public class DriverResolutionTests
     }
 
     [Fact]
+    public void Multiplexer_Without_A_Dotnet_Driver_Falls_Back_To_Null()
+    {
+        // Defensive: if a future Terminal.Gui drops/renames the 'dotnet' driver, auto-detect
+        // degrades to TG's default rather than throwing (which would hit the crash boundary).
+        Assert.Null(CobaltTuiApp.ResolveDriver(EnvVars(zellij: "0"), ["windows", "ansi"]));
+    }
+
+    [Fact]
     public void Explicit_Value_Overrides_Multiplexer_Detection()
     {
         // COBALT_DRIVER=windows forces the Win32 driver even inside a multiplexer.

@@ -23,6 +23,7 @@ using var connection = AdoConnection.Create(context, tokens);
 var workItems = new WorkItemsApi(connection.Http, context);
 var git = new GitApi(connection.Http, context);
 var ct = CancellationToken.None;
+var anyFailed = false;
 
 Header("context");
 Console.WriteLine($"  name         : {context.Name}");
@@ -130,7 +131,9 @@ await Probe("Team-tab PR routes  (reviewerId={teamGuid} + active-PR union)", asy
 });
 
 Header("done");
-return 0;
+// Non-zero if any probe failed, so a script/wrapper sees a broken route as failure
+// (each probe still printed its own error above and the rest continued).
+return anyFailed ? 1 : 0;
 
 static string? ParseContext(string[] argv)
 {
@@ -144,7 +147,7 @@ static void Header(string title)
     Console.WriteLine($"== {title} ".PadRight(78, '='));
 }
 
-static async Task Probe(string title, Func<Task> body)
+async Task Probe(string title, Func<Task> body)
 {
     Header(title);
     try
@@ -154,7 +157,9 @@ static async Task Probe(string title, Func<Task> body)
     catch (Exception ex)
     {
         // Diagnostic tool: surface the failing route's exact type + message (a 404/401/shape
-        // mismatch here IS the finding) instead of aborting the remaining probes.
+        // mismatch here IS the finding) instead of aborting the remaining probes — but record
+        // the failure so the process exit code reflects it.
+        anyFailed = true;
         Console.WriteLine($"  !! {ex.GetType().Name}: {FirstLine(ex.Message)}");
         if (ex is AdoApiException ado)
         {

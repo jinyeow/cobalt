@@ -89,7 +89,9 @@ public static class CobaltTuiApp
 
         var inMultiplexer = !string.IsNullOrEmpty(env("ZELLIJ")) || !string.IsNullOrEmpty(env("TMUX"));
         return inMultiplexer
-            ? knownDrivers.First(d => d.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            // FirstOrDefault, not First: if 'dotnet' is somehow unregistered, fall back to
+            // TG's default (null) rather than throwing into the crash boundary.
+            ? knownDrivers.FirstOrDefault(d => d.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
             : null;
     }
 
