@@ -710,4 +710,31 @@ public class DiffReviewDialogKeyTests
 
         Assert.False(shown);
     }
+
+    [Fact]
+    public async Task Comment_On_A_Fold_Marker_Is_Refused_Not_Silently_Dropped()
+    {
+        // 20 identical leading lines fold to a marker at row 0, so the cursor there
+        // anchors to no diff line; commenting must be refused (not silently lost).
+        var captured = new List<string>();
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Edit)] };
+        var ctx = string.Join("\n", Enumerable.Range(0, 20).Select(i => $"ctx{i}"));
+        source.Blobs[("/a.cs", "base")] = ctx + "\nold\n";
+        source.Blobs[("/a.cs", "src")] = ctx + "\nnew\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), captured.Add);
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+        detail.DiffPane.SetFocus();
+
+        detail.DiffPane.SelectedItem = 0;
+        Assert.Equal(-1, detail.SelectedDiffLineIndex); // row 0 is a fold marker
+
+        dialog.NewKeyDownEvent(new Key('c'));
+
+        Assert.Contains(captured, m => m.Contains("no diff line here"));
+        Assert.DoesNotContain(captured, m => m.Contains("line comment added"));
+    }
 }

@@ -42,6 +42,23 @@ public sealed class DiffFoldState
         return new DiffFoldState(_lines, _blocks, expanded);
     }
 
+    /// <summary>
+    /// Returns a new state with the fold that hides <paramref name="lineIndex"/> expanded.
+    /// A no-op if that line is already visible or out of range — so a caller can "reveal
+    /// this line" without unfolding the rest of the file.
+    /// </summary>
+    public DiffFoldState ExpandContaining(int lineIndex)
+    {
+        foreach (var block in _blocks)
+        {
+            if (block is FoldBlock fb && lineIndex >= fb.StartIndex && lineIndex < fb.EndIndex)
+            {
+                return Expand(fb.FoldId);
+            }
+        }
+        return this;
+    }
+
     /// <summary>Returns a new state with every fold expanded.</summary>
     public DiffFoldState ExpandAll()
     {

@@ -170,4 +170,37 @@ public class DiffFoldTests
 
         Assert.Equal(lines[2], rows[2].Line);
     }
+
+    [Fact]
+    public void ExpandContaining_Reveals_Only_The_Fold_Hiding_That_Line()
+    {
+        // change · 20 context (fold 1) · change · 20 context (fold 2) · change
+        var lines = new List<DiffLine> { Add() };
+        lines.AddRange(ContextRun(20));
+        lines.Add(Add());
+        lines.AddRange(ContextRun(20));
+        lines.Add(Add());
+        var state = DiffFoldState.Create(lines, radius: 3);
+        Assert.DoesNotContain(state.Rows(), r => r.LineIndex == 10); // hidden by fold 1
+        Assert.DoesNotContain(state.Rows(), r => r.LineIndex == 30); // hidden by fold 2
+
+        var expanded = state.ExpandContaining(10);
+
+        Assert.Contains(expanded.Rows(), r => r.LineIndex == 10);       // fold 1 revealed
+        Assert.DoesNotContain(expanded.Rows(), r => r.LineIndex == 30); // fold 2 still collapsed
+        Assert.DoesNotContain(state.Rows(), r => r.LineIndex == 10);    // original unchanged (immutable)
+    }
+
+    [Fact]
+    public void ExpandContaining_A_Visible_Line_Is_A_No_Op()
+    {
+        var lines = new List<DiffLine> { Add() };
+        lines.AddRange(ContextRun(20));
+        lines.Add(Add());
+        var state = DiffFoldState.Create(lines, radius: 3);
+
+        var result = state.ExpandContaining(0); // a change line — always visible
+
+        Assert.Equal(state.Rows().Count, result.Rows().Count);
+    }
 }

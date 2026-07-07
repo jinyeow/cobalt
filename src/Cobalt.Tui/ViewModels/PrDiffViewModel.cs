@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Cobalt.Core.Ado;
 using Cobalt.Core.Models;
 using Cobalt.Core.Text;
@@ -23,7 +24,10 @@ public interface IPrDiffSource
 /// </summary>
 public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 {
-    private readonly Dictionary<string, FileDiff> _diffCache = new(StringComparer.Ordinal);
+    // Concurrent: the background stats prefetch writes on threadpool continuations while the
+    // UI thread reads it (StatsFor / TotalAdditions) during render, and user navigation is a
+    // second writer — a plain Dictionary would throw mid-enumeration on a multi-file PR.
+    private readonly ConcurrentDictionary<string, FileDiff> _diffCache = new(StringComparer.Ordinal);
     private readonly HashSet<string> _viewed = new(StringComparer.Ordinal);
     private PrIteration? _iteration;
     private int _selectedFileIndex;
@@ -78,7 +82,19 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         foreach (var file in Files)
         {
             ct.ThrowIfCancellationRequested();
-            await ComputeDiffForFileAsync(file, ct).ConfigureAwait(false);
+            try
+            {
+                await ComputeDiffForFileAsync(file, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
+            {
+                throw; // genuine user/dialog cancel (carries our token) stops the whole prefetch
+            }
+            catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
+            {
+                // One file's blob fetch failed (e.g. a 404 on a rename/edge path). Skip its
+                // stats and keep prefetching the rest — background stats are best-effort.
+            }
             Changed?.Invoke();
         }
     }

@@ -578,4 +578,37 @@ public class PrDiffViewModelTests
         Assert.NotNull(vm.StatsFor("/a.cs"));
         Assert.Null(vm.StatsFor("/b.cs"));
     }
+
+    private sealed class OneFileFailsSource : IPrDiffSource
+    {
+        public Task<PrIteration?> GetLatestIterationAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromResult<PrIteration?>(new(2, "src", "tgt", "base"));
+        public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repo, int prId, int iterationId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<FileChange>>([new("/good.cs", FileChangeKind.Edit), new("/bad.cs", FileChangeKind.Edit)]);
+        public Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct) =>
+            path.Contains("bad") ? Task.FromException<string>(new HttpRequestException("404")) : Task.FromResult("a\nb\n");
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PrThread>>([]);
+        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
+            Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task PrefetchAllDiffs_Skips_A_Failing_File_And_Continues()
+    {
+        var vm = new PrDiffViewModel(new OneFileFailsSource(), Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // /bad.cs throws an expected (404-style) error; the prefetch must skip it, not abort/crash.
+        await vm.PrefetchAllDiffsAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.StatsFor("/good.cs"));
+        Assert.Null(vm.StatsFor("/bad.cs"));
+    }
 }

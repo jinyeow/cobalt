@@ -394,6 +394,13 @@ public sealed class DiffReviewDialog(
             return;
         }
         var lineIndex = SelectedDiffLine();
+        if (lineIndex < 0)
+        {
+            // The cursor is on a fold marker (or otherwise off any real line); commenting
+            // there would silently no-op, so refuse before opening the editor.
+            log("no diff line here to comment on — expand the fold or move to a line");
+            return;
+        }
         string? text;
         try
         {
@@ -568,7 +575,7 @@ public sealed class DiffReviewDialog(
     {
         if (!_sideBySide && _foldState is not null && !IsLineVisible(lineIndex))
         {
-            _foldState = _foldState.ExpandAll();
+            _foldState = _foldState.ExpandContaining(lineIndex);
             Render();
         }
         SelectDiffLine(lineIndex);
@@ -664,16 +671,23 @@ public sealed class DiffReviewDialog(
     private void ToggleThreadFilter()
     {
         vm.OnlyUnresolvedFiles = !vm.OnlyUnresolvedFiles;
-        // The displayed file may not survive the filter; fall back to the first filtered file.
-        // SelectFile sets _fileIndex synchronously, so the following Render tracks the new identity.
-        if (vm.OnlyUnresolvedFiles && vm.SelectedFile is { } file &&
-            !vm.FilteredFiles.Any(f => string.Equals(f.Path, file.Path, StringComparison.Ordinal)) &&
-            vm.FilteredFiles.Count > 0)
+        Render(); // Render re-points off a now-hidden file (RepointIfFilteredOut) if needed.
+        log(vm.OnlyUnresolvedFiles ? "showing files with unresolved threads" : "showing all files");
+    }
+
+    /// <summary>
+    /// When the unresolved-only filter is active and the displayed file no longer survives it
+    /// — because it was just filtered on, or its last unresolved thread was resolved — move off
+    /// it to the first still-visible file so the diff pane never strands on a hidden file.
+    /// SelectFile sets <c>_fileIndex</c> synchronously, so the surrounding Render tracks it.
+    /// </summary>
+    private void RepointIfFilteredOut()
+    {
+        if (vm.OnlyUnresolvedFiles && vm.FilteredFiles.Count > 0 && vm.SelectedFile is { } file &&
+            !vm.FilteredFiles.Any(f => string.Equals(f.Path, file.Path, StringComparison.Ordinal)))
         {
             _ = SelectFile(FileIndexForPath(vm.FilteredFiles[0].Path));
         }
-        Render();
-        log(vm.OnlyUnresolvedFiles ? "showing files with unresolved threads" : "showing all files");
     }
 
     /// <summary>v: pick a vote (MessageBox, or the test chooser) and apply it to the PR.</summary>
@@ -779,6 +793,7 @@ public sealed class DiffReviewDialog(
         }
 
         // Rebuild the file tree, keeping the highlight on the displayed file's row.
+        RepointIfFilteredOut();
         RebuildFileList(SelectedFileNodePath());
 
         if (vm.CurrentDiff is { } diff)
