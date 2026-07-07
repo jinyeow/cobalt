@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+      - name: Test
+        run: dotnet test Cobalt.slnx --configuration Release
+      - name: Pack
+        shell: bash
+        run: dotnet pack src/Cobalt --configuration Release -o nupkg -p:ContinuousIntegrationBuild=true /p:Version=${GITHUB_REF_NAME#v}
+      - name: Push to NuGet
+        if: ${{ vars.NUGET_PUBLISH == 'true' }}
+        run: dotnet nuget push nupkg/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      - name: Attach package to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: nupkg/*.nupkg
