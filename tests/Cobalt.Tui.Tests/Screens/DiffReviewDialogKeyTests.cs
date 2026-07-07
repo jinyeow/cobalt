@@ -1,4 +1,5 @@
 using System.Drawing;
+using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 using Cobalt.Core.Text;
 using Cobalt.Tui.Editor;
@@ -736,5 +737,174 @@ public class DiffReviewDialogKeyTests
 
         Assert.Contains(captured, m => m.Contains("no diff line here"));
         Assert.DoesNotContain(captured, m => m.Contains("line comment added"));
+    }
+
+    // ---- Item 3: Enter on the diff pane opens the thread (not close the dialog) ----
+
+    [Fact]
+    public async Task Enter_On_The_Diff_Pane_Opens_The_Thread_And_Does_Not_Close()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads =
+            [
+                new PrThread(7, PrThreadStatus.Active,
+                    [new PrComment(1, "Sam", "looks good to me", false)], "/a.cs", RightLine: 2, LeftLine: null),
+            ],
+        };
+        source.Blobs[("/a.cs", "base")] = "keep\nold\n";
+        source.Blobs[("/a.cs", "src")] = "keep\nnew\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        string? shown = null;
+        var closed = false;
+        detail.ViewThreadAction = t => shown = t;
+        detail.CloseAction = () => closed = true;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+        detail.DiffPane.SetFocus();
+
+        var addedIndex = vm.CurrentDiff!.Lines.ToList().FindIndex(l => l.Kind == DiffLineKind.Added);
+        detail.DiffPane.SelectedItem = addedIndex;
+        dialog.NewKeyDownEvent(Key.Enter);
+
+        Assert.NotNull(shown);           // Enter opened the thread overlay (via the seam)
+        Assert.Contains("#7", shown);
+        Assert.False(closed);            // Enter did not close the dialog
+    }
+
+    // ---- Item 2: h / l horizontally scroll the diff pane (count-aware) ----
+
+    // A single added file with two 200-char lines, so the diff pane content is far wider
+    // than the pane and horizontal scrolling has room to move.
+    private static async Task<(DiffReviewDialog Detail, Dialog Dialog)> BuiltWideDialog()
+    {
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Add)] };
+        source.Blobs[("/a.cs", "src")] = new string('x', 200) + "\n" + new string('y', 200) + "\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+        dialog.SetFocus();
+        detail.DiffPane.SetFocus();
+        return (detail, dialog);
+    }
+
+    [Fact]
+    public async Task L_And_H_Scroll_The_Diff_Pane_Horizontally_Count_Aware_And_Clamp_At_Zero()
+    {
+        var (detail, dialog) = await BuiltWideDialog();
+        Assert.Equal(0, detail.DiffPane.Viewport.X);
+
+        dialog.NewKeyDownEvent(new Key('l'));
+        Assert.Equal(1, detail.DiffPane.Viewport.X); // one column right
+
+        dialog.NewKeyDownEvent(new Key('5'));
+        dialog.NewKeyDownEvent(new Key('l'));
+        Assert.Equal(6, detail.DiffPane.Viewport.X); // count-aware: +5
+
+        dialog.NewKeyDownEvent(new Key('h'));
+        Assert.Equal(5, detail.DiffPane.Viewport.X); // one column left
+
+        dialog.NewKeyDownEvent(new Key('9'));
+        dialog.NewKeyDownEvent(new Key('h'));
+        Assert.Equal(0, detail.DiffPane.Viewport.X); // clamps at 0
+    }
+
+    // ---- Item 4: viewed indicator is a leading [✓] / [ ] column ----
+
+    [Fact]
+    public async Task Viewed_File_Row_Leads_With_A_Check_Column_Unviewed_With_A_Blank()
+    {
+        var (detail, dialog) = await BuiltDialog(); // a, b, c, d at root; file 0 (a.cs) is current
+
+        dialog.NewKeyDownEvent(new Key('m')); // mark the current file (a.cs) viewed
+
+        var strings = detail.FileList.Source!.ToList().Cast<string>().ToList();
+        var viewedRow = strings.First(s => s.Contains("a.cs")).TrimStart();
+        var unviewedRow = strings.First(s => s.Contains("b.cs")).TrimStart();
+        Assert.StartsWith("[✓]", viewedRow);
+        Assert.StartsWith("[ ]", unviewedRow);
+        Assert.DoesNotContain("✓", unviewedRow);
+    }
+
+    // ---- Item 1: inline search bar replacing the $EDITOR prompt ----
+
+    [Fact]
+    public async Task Slash_Shows_The_Inline_Search_Bar_And_Focuses_It()
+    {
+        var (detail, dialog) = await BuiltSearchDialog(); // no SearchPromptAction seam → real bar path
+        Assert.False(detail.SearchBar.Visible);
+
+        dialog.NewKeyDownEvent(new Key('/'));
+
+        Assert.True(detail.SearchBar.Visible);
+        Assert.True(detail.SearchBar.HasFocus);
+    }
+
+    [Fact]
+    public async Task Bar_Text_Then_Enter_Runs_The_Search_And_Hides_The_Bar()
+    {
+        var (detail, dialog) = await BuiltSearchDialog();
+        dialog.NewKeyDownEvent(new Key('/'));
+        detail.SearchBar.Text = "needle";
+
+        dialog.NewKeyDownEvent(Key.Enter);
+
+        Assert.Equal(2, detail.SearchMatchCount);
+        Assert.Equal(1, detail.SelectedDiffLineIndex); // diff cursor on the first match line
+        Assert.False(detail.SearchBar.Visible);        // bar hidden after applying
+    }
+
+    [Fact]
+    public async Task Esc_In_The_Bar_Hides_It_And_Clears_The_Search()
+    {
+        var (detail, dialog) = await BuiltSearchDialog();
+        dialog.NewKeyDownEvent(new Key('/'));
+        detail.SearchBar.Text = "needle";
+        dialog.NewKeyDownEvent(Key.Enter);
+        Assert.Equal(2, detail.SearchMatchCount);
+
+        dialog.NewKeyDownEvent(new Key('/')); // reopen the bar
+        dialog.NewKeyDownEvent(Key.Esc);
+
+        Assert.False(detail.SearchBar.Visible);
+        Assert.Equal(0, detail.SearchMatchCount); // cleared
+    }
+
+    // ---- Item 5: g b opens the PR's source branch in the browser ----
+
+    [Fact]
+    public async Task G_B_Opens_The_Source_Branch_Url_In_The_Browser()
+    {
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Add)] };
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var context = new AdoContext
+        {
+            Name = "dev",
+            OrganizationUrl = new Uri("https://dev.azure.com/contoso"),
+            Project = "Contoso.Web",
+        };
+        string? opened = null;
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { }, context)
+        {
+            OpenUrlAction = u => opened = u,
+        };
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('g'));
+        dialog.NewKeyDownEvent(new Key('b'));
+
+        Assert.NotNull(opened);
+        Assert.Contains("_git/", opened);
+        Assert.Contains("version=GB", opened);
     }
 }
