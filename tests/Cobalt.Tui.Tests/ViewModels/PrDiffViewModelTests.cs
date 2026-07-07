@@ -14,6 +14,9 @@ public class PrDiffViewModelTests
         public IReadOnlyList<PrThread> Threads { get; set; } = [];
         public (string path, int line, bool right, string text)? LastComment { get; private set; }
         public string? LastProject { get; private set; }
+        public (string project, string repo, int prId, int threadId, string text)? LastReply { get; private set; }
+        public (string project, string repo, int prId, int threadId, PrThreadStatus status)? LastStatusChange { get; private set; }
+        public (string project, string repo, int prId, PrVote vote)? LastVote { get; private set; }
 
         public Task<PrIteration?> GetLatestIterationAsync(string project, string repo, int prId, CancellationToken ct)
         {
@@ -37,14 +40,23 @@ public class PrDiffViewModelTests
             return Task.CompletedTask;
         }
 
-        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
-            Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct)
+        {
+            LastReply = (project, repo, prId, threadId, text);
+            return Task.CompletedTask;
+        }
 
-        public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
-            Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct)
+        {
+            LastStatusChange = (project, repo, prId, threadId, status);
+            return Task.CompletedTask;
+        }
 
-        public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
-            Task.CompletedTask;
+        public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct)
+        {
+            LastVote = (project, repo, prId, vote);
+            return Task.CompletedTask;
+        }
     }
 
     private static PullRequest Pr() =>
@@ -306,5 +318,264 @@ public class PrDiffViewModelTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => vm.LoadAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ReplyToThread_Calls_Source_And_Refreshes_Threads()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "here", false)], "/a.cs", 2, null)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // Source is refreshed after the reply; simulate the server reflecting the new comment.
+        source.Threads =
+        [
+            new PrThread(1, PrThreadStatus.Active,
+                [new PrComment(1, "Sam", "here", false), new PrComment(2, "Jin", "reply", false)], "/a.cs", 2, null),
+        ];
+
+        await vm.ReplyToThreadAsync(1, "reply", TestContext.Current.CancellationToken);
+
+        Assert.Equal("Contoso.Web", source.LastReply?.project);
+        Assert.Equal("repo-1", source.LastReply?.repo);
+        Assert.Equal(10, source.LastReply?.prId);
+        Assert.Equal(1, source.LastReply?.threadId);
+        Assert.Equal("reply", source.LastReply?.text);
+        Assert.Equal(2, vm.Threads[0].Comments.Count);
+    }
+
+    [Fact]
+    public async Task ResolveThread_Sets_Fixed_Status_And_Refreshes_Threads()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "here", false)], "/a.cs", 2, null)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        source.Threads = [new PrThread(1, PrThreadStatus.Fixed, [new PrComment(1, "Sam", "here", false)], "/a.cs", 2, null)];
+
+        await vm.ResolveThreadAsync(1, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, source.LastStatusChange?.threadId);
+        Assert.Equal(PrThreadStatus.Fixed, source.LastStatusChange?.status);
+        Assert.Equal(PrThreadStatus.Fixed, vm.Threads[0].Status);
+    }
+
+    [Fact]
+    public async Task ReactivateThread_Sets_Active_Status_And_Refreshes_Threads()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads = [new PrThread(1, PrThreadStatus.Fixed, [new PrComment(1, "Sam", "here", false)], "/a.cs", 2, null)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        source.Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "here", false)], "/a.cs", 2, null)];
+
+        await vm.ReactivateThreadAsync(1, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, source.LastStatusChange?.threadId);
+        Assert.Equal(PrThreadStatus.Active, source.LastStatusChange?.status);
+        Assert.Equal(PrThreadStatus.Active, vm.Threads[0].Status);
+    }
+
+    [Fact]
+    public async Task Vote_Calls_Source_With_The_Prs_Identity_And_Chosen_Vote()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        await vm.VoteAsync(PrVote.Approved, TestContext.Current.CancellationToken);
+
+        Assert.Equal("Contoso.Web", source.LastVote?.project);
+        Assert.Equal("repo-1", source.LastVote?.repo);
+        Assert.Equal(10, source.LastVote?.prId);
+        Assert.Equal(PrVote.Approved, source.LastVote?.vote);
+    }
+
+    [Fact]
+    public async Task UnresolvedThreadCount_Counts_Only_Active_Non_System_Threads()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads =
+            [
+                new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null),
+                new PrThread(2, PrThreadStatus.Fixed, [new PrComment(1, "Sam", "resolved", false)], "/a.cs", 3, null),
+                new PrThread(3, PrThreadStatus.Active, [new PrComment(1, "System", "system note", true)], "/a.cs", 4, null),
+            ],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, vm.UnresolvedThreadCount);
+    }
+
+    [Fact]
+    public async Task FilteredFiles_Defaults_To_All_Files_And_Leaves_Files_Untouched()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        source.Blobs[("/b.cs", "base")] = "y\n";
+        source.Blobs[("/b.cs", "src")] = "y\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(vm.OnlyUnresolvedFiles);
+        Assert.Equal(2, vm.FilteredFiles.Count);
+        Assert.Equal(2, vm.Files.Count);
+    }
+
+    [Fact]
+    public async Task FilteredFiles_Keeps_Only_Files_With_An_Unresolved_Thread_When_Toggled_On()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+            Threads =
+            [
+                new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null),
+                new PrThread(2, PrThreadStatus.Fixed, [new PrComment(1, "Sam", "resolved", false)], "/b.cs", 3, null),
+            ],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        source.Blobs[("/b.cs", "base")] = "y\n";
+        source.Blobs[("/b.cs", "src")] = "y\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.OnlyUnresolvedFiles = true;
+
+        Assert.Single(vm.FilteredFiles);
+        Assert.Equal("/a.cs", vm.FilteredFiles[0].Path);
+        // Files (used for index-based navigation) must stay untouched.
+        Assert.Equal(2, vm.Files.Count);
+        Assert.Equal("/a.cs", vm.Files[0].Path);
+        Assert.Equal("/b.cs", vm.Files[1].Path);
+    }
+
+    [Fact]
+    public async Task MarkViewed_Tracks_Viewed_Files_By_Path()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        source.Blobs[("/b.cs", "base")] = "y\n";
+        source.Blobs[("/b.cs", "src")] = "y\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(vm.IsViewed("/a.cs"));
+
+        vm.MarkViewed("/a.cs");
+
+        Assert.True(vm.IsViewed("/a.cs"));
+        Assert.False(vm.IsViewed("/b.cs"));
+    }
+
+    [Fact]
+    public async Task StatsFor_Returns_Null_Until_The_Files_Diff_Is_Computed()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        source.Blobs[("/b.cs", "base")] = "1\n";
+        source.Blobs[("/b.cs", "src")] = "1\n2\n3\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(vm.StatsFor("/b.cs"));
+        Assert.Equal((1, 0), vm.StatsFor("/a.cs"));
+
+        await vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+
+        Assert.Equal((2, 0), vm.StatsFor("/b.cs"));
+    }
+
+    [Fact]
+    public async Task PrefetchAllDiffsAsync_Computes_Every_Files_Diff_And_Raises_Changed()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        source.Blobs[("/b.cs", "base")] = "1\n";
+        source.Blobs[("/b.cs", "src")] = "1\n2\n3\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var changedCount = 0;
+        vm.Changed += () => changedCount++;
+
+        await vm.PrefetchAllDiffsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal((1, 0), vm.StatsFor("/a.cs"));
+        Assert.Equal((2, 0), vm.StatsFor("/b.cs"));
+        Assert.Equal(3, vm.TotalAdditions);
+        Assert.Equal(0, vm.TotalDeletions);
+        Assert.True(changedCount >= 2);
+    }
+
+    [Fact]
+    public async Task PrefetchAllDiffsAsync_Stops_When_Cancelled()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        // /b.cs blobs deliberately omitted: if the loop reached it after cancellation, this would
+        // silently succeed with empty text instead of the test failing loudly.
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        using var cts = new CancellationTokenSource();
+        vm.Changed += () => cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => vm.PrefetchAllDiffsAsync(cts.Token));
+
+        Assert.NotNull(vm.StatsFor("/a.cs"));
+        Assert.Null(vm.StatsFor("/b.cs"));
     }
 }
