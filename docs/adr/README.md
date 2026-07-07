@@ -22,3 +22,4 @@ immutable once accepted; superseding decisions get a new number that links back.
 | [0015](0015-team-pr-view.md) | Team PR tab (raw union of team-reviewed and teammate-authored PRs) | Accepted |
 | [0016](0016-terminal-driver-selection.md) | Terminal.Gui driver selection under multiplexers (`COBALT_DRIVER`) | Accepted |
 | [0017](0017-diff-review-ux-tree-sidebyside-responsive.md) | Diff-review UX: directory tree, side-by-side toggle, responsive panes | Accepted |
+| [0018](0018-diff-review-as-a-complete-review-surface.md) | Diff review as a complete review surface (threads, nav, search, fold, stats, policy) | Accepted |

@@ -73,12 +73,20 @@ Pull Requests · `Tab` next tab · `:` command palette
 `c` comment · `a` assign · `t` tags; the detail additionally has `e` edit
 description in `$EDITOR`. In the PR section: `Tab` cycles the review queue / team /
 mine / active sub-tabs; on a PR (the highlighted list row or its detail): `v` vote; the
-detail additionally has `c` reply · `x` resolve thread · `u` reactivate · `C`
-complete · `A` abandon · `d` open diff review.
-In diff review: `Tab` switches file list / diff pane · `[`/`]` prev/next file ·
-`z` collapse/expand the folder under the cursor (`Enter` on a folder also toggles) ·
-`s` switch the diff between **unified** and **side-by-side** · `c` comment on the selected
-line · `o`/`Enter` on the diff pane show the existing comment thread(s) on that line.
+detail additionally has `c` reply · `g c` add a PR-level comment · `x` resolve thread ·
+`u` reactivate · `C` complete · `A` abandon · `d` open diff review, and shows the PR's
+**branch-policy / build status** (pass/fail, blocking).
+In diff review (vim `]`/`[` bracket motions, all count-aware): `Tab` switches file list /
+diff pane · `]f`/`[f` next/prev file · `]c`/`[c` next/prev **change hunk** · `]t`/`[t`
+next/prev **comment thread** · `]v`/`[v` next/prev **unviewed** file. `z` collapses/expands
+the folder under the cursor (`Enter` on a folder also toggles) · `m` marks the current file
+**viewed** (a ✓ in the tree). `s` switches the diff between **unified** and **side-by-side**;
+unchanged context is **folded** by default — `e` expands a fold, `E` the whole file. `/`
+searches the current file, `n`/`N` jump between matches. `c` comments on the selected line;
+`o`/`Enter` opens the existing comment **thread(s)** on that line, where `c` replies, `x`
+resolves, `u` reactivates. `v` votes on the PR; `T` filters the file list to files with
+**unresolved threads** (the header shows the unresolved count). Each file row shows its
+`+added −deleted` count (with a PR total in the header) as the diffs load in the background.
 The changed-file list is a **directory tree** — files group under their folder and the
 distinguishing filename always shows in full, instead of a flat, left-truncated path.
 The layout is **responsive**: on a narrow terminal the file list hides so the diff keeps the
@@ -87,7 +95,7 @@ Anywhere in a list: `yy` yanks the item's web
 URL to the clipboard · `gx` opens it in your browser.
 
 **Count prefixes.** Motions take a numeric count, vim-style: `5j` moves down five
-rows, `10G` jumps to line 10, `3]` advances three files in diff review, and a count
+rows, `10G` jumps to line 10, `3]f` advances three files in diff review, and a count
 multiplies `Ctrl-d`/`Ctrl-u`. Digits are reserved for counts, which is why sections
 moved off `1`/`2` and onto the `gt`/`gT`/`g1`/`g2` chords.
 

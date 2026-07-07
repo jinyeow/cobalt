@@ -11,6 +11,19 @@
   scrolls the last page into view (last line at the bottom).
 
 ### Added
+- **The diff review is now a complete review surface.** In diff review you can read a line's
+  comment thread(s) with `o`/`Enter` and **reply (`c`) / resolve (`x`) / reactivate (`u`)**
+  right there; **vote** on the PR with `v`; and **mark a file viewed** with `m` (a ✓ in the
+  tree). Navigation gained vim bracket motions (count-aware): `]c`/`[c` between **change
+  hunks**, `]t`/`[t` between **comment threads**, `]v`/`[v` between **unviewed** files
+  (`]`/`[` file nav moved to `]f`/`[f` to free the vim-standard `]c`). Unchanged context is
+  **folded** by default (`e` expands a fold, `E` the whole file); `/`+`n`/`N` searches within
+  the file; `T` filters the file list to files with **unresolved threads** (with a header
+  count); and each file row shows its `+added −deleted` stat (PR total in the header) as
+  diffs load in the background.
+- **Branch-policy / build status and PR-level comments in PR detail.** The PR detail view
+  shows the pull request's policy evaluations (build, required reviewers, comment resolution)
+  with pass/fail and a blocking marker; `g c` posts a PR-level (non-line) comment.
 - **View existing comments on a diff line.** In diff review, `o`/`Enter` on the diff pane
   opens the comment thread(s) anchored to the selected line (the ones flagged by the `●`
   marker) in a scrollable overlay — previously the marker showed a thread existed but its
