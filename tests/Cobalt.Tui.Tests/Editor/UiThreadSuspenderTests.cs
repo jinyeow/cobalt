@@ -158,31 +158,31 @@ public class UiThreadSuspenderTests
 
         var task = suspender.RunSuspendedAsync(() => 7, TestContext.Current.CancellationToken);
 
-        var ranDuringCompletion = false;
-        var completing = false;
+        var continuationThreadId = 0;
         using var continuationRan = new ManualResetEventSlim(false);
         // ExecuteSynchronously asks to run inline on the completing thread; the flag on
-        // the TCS must override that and force the continuation asynchronous.
+        // the TCS must override that and force the continuation onto another thread.
         var continuation = task.ContinueWith(
             _ =>
             {
-                if (Volatile.Read(ref completing))
-                {
-                    ranDuringCompletion = true;
-                }
+                continuationThreadId = Environment.CurrentManagedThreadId;
                 continuationRan.Set();
             },
             TestContext.Current.CancellationToken,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
 
-        Volatile.Write(ref completing, true);
+        var completingThreadId = Environment.CurrentManagedThreadId;
         queued!();                       // completes the TCS via TrySetResult(7)
-        Volatile.Write(ref completing, false);
 
-        Assert.False(ranDuringCompletion);          // continuation was posted async, not inline
         Assert.True(continuationRan.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
         await continuation;
+        // The continuation ran on a different thread than the one that completed the TCS —
+        // i.e. asynchronously, not inline. Remove RunContinuationsAsynchronously and it runs
+        // inline on the completing thread, so the ids match and this fails. Reads the thread
+        // the continuation actually ran on, so there is no timing race (the old flag-window
+        // version could see the pool thread run before the flag was reset).
+        Assert.NotEqual(completingThreadId, continuationThreadId);
         Assert.Equal(7, await task);
     }
 }
