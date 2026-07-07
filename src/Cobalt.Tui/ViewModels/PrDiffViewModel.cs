@@ -24,6 +24,7 @@ public interface IPrDiffSource
 public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 {
     private readonly Dictionary<string, FileDiff> _diffCache = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _viewed = new(StringComparer.Ordinal);
     private PrIteration? _iteration;
     private int _selectedFileIndex;
 
@@ -40,6 +41,47 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 
     public FileChange? SelectedFile =>
         Files.Count == 0 ? null : Files[Math.Clamp(_selectedFileIndex, 0, Files.Count - 1)];
+
+    public int UnresolvedThreadCount => Threads.Count(IsUnresolved);
+
+    public bool OnlyUnresolvedFiles { get; set; }
+
+    /// <summary>
+    /// A filtered projection of <see cref="Files"/> for display only. Never reorders or mutates
+    /// <see cref="Files"/> itself, so existing index-based navigation (SelectFileAsync) stays valid.
+    /// </summary>
+    public IReadOnlyList<FileChange> FilteredFiles =>
+        OnlyUnresolvedFiles
+            ? [.. Files.Where(f => Threads.Any(t => IsUnresolved(t) && string.Equals(t.FilePath, f.Path, StringComparison.Ordinal)))]
+            : Files;
+
+    private static bool IsUnresolved(PrThread thread) =>
+        thread.Status == PrThreadStatus.Active && !thread.IsSystemOnly;
+
+    public void MarkViewed(string path) => _viewed.Add(path);
+
+    public bool IsViewed(string path) => _viewed.Contains(path);
+
+    /// <summary>Additions/deletions for a file whose diff has already been computed; null otherwise.</summary>
+    public (int Additions, int Deletions)? StatsFor(string path) =>
+        _diffCache.TryGetValue(path, out var diff) ? (diff.Additions, diff.Deletions) : null;
+
+    public int TotalAdditions => _diffCache.Values.Sum(d => d.Additions);
+    public int TotalDeletions => _diffCache.Values.Sum(d => d.Deletions);
+
+    /// <summary>
+    /// Computes every file's diff sequentially into the cache (so <see cref="StatsFor"/> and the
+    /// totals fill in), raising <see cref="Changed"/> after each so the UI can update lazily.
+    /// </summary>
+    public async Task PrefetchAllDiffsAsync(CancellationToken ct)
+    {
+        foreach (var file in Files)
+        {
+            ct.ThrowIfCancellationRequested();
+            await ComputeDiffForFileAsync(file, ct).ConfigureAwait(false);
+            Changed?.Invoke();
+        }
+    }
 
     public async Task LoadAsync(CancellationToken ct)
     {
@@ -152,18 +194,87 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         }
     }
 
+    public Task ReplyToThreadAsync(int threadId, string text, CancellationToken ct) =>
+        RunThreadMutationAsync(() =>
+            source.ReplyToThreadAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, threadId, text, ct), ct);
+
+    public Task ResolveThreadAsync(int threadId, CancellationToken ct) =>
+        RunThreadMutationAsync(() =>
+            source.SetThreadStatusAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, threadId, PrThreadStatus.Fixed, ct), ct);
+
+    public Task ReactivateThreadAsync(int threadId, CancellationToken ct) =>
+        RunThreadMutationAsync(() =>
+            source.SetThreadStatusAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, threadId, PrThreadStatus.Active, ct), ct);
+
+    public async Task VoteAsync(PrVote vote, CancellationToken ct)
+    {
+        IsBusy = true;
+        Error = null;
+        Changed?.Invoke();
+        try
+        {
+            await source.VoteAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, vote, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
+        {
+            throw; // genuine user/dialog cancel (carries our token) stays silent
+        }
+        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
+        {
+            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
+            // surfaced as an expected error rather than a silent no-data pane (L2).
+            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+            Changed?.Invoke();
+        }
+    }
+
+    private async Task RunThreadMutationAsync(Func<Task> mutate, CancellationToken ct)
+    {
+        IsBusy = true;
+        Error = null;
+        Changed?.Invoke();
+        try
+        {
+            await mutate().ConfigureAwait(false);
+            Threads = await source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
+        {
+            throw; // genuine user/dialog cancel (carries our token) stays silent
+        }
+        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
+        {
+            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
+            // surfaced as an expected error rather than a silent no-data pane (L2).
+            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+            Changed?.Invoke();
+        }
+    }
+
     private async Task ComputeCurrentDiffAsync(CancellationToken ct)
     {
         var file = SelectedFile;
-        if (file is null || _iteration is null)
+        CurrentDiff = file is null ? null : await ComputeDiffForFileAsync(file, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Computes (or returns the cached) diff for one file. Does not touch <see cref="CurrentDiff"/>.</summary>
+    private async Task<FileDiff?> ComputeDiffForFileAsync(FileChange file, CancellationToken ct)
+    {
+        if (_iteration is null)
         {
-            CurrentDiff = null;
-            return;
+            return null;
         }
         if (_diffCache.TryGetValue(file.Path, out var cached))
         {
-            CurrentDiff = cached;
-            return;
+            return cached;
         }
 
         // Added files have no base version; deleted files have no source version.
@@ -176,7 +287,8 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
             ? ""
             : await source.GetFileContentAsync(pr.ProjectName, pr.RepositoryId, file.Path, _iteration.SourceCommitId ?? "", ct).ConfigureAwait(false);
 
-        CurrentDiff = DiffService.Unified(baseText, sourceText);
-        _diffCache[file.Path] = CurrentDiff;
+        var diff = DiffService.Unified(baseText, sourceText);
+        _diffCache[file.Path] = diff;
+        return diff;
     }
 }
