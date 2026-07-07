@@ -80,6 +80,8 @@ In diff review: `Tab` switches file list / diff pane · `[`/`]` prev/next file �
 `s` switch the diff between **unified** and **side-by-side** · `c` comment on the selected
 line. The changed-file list is a **directory tree** — files group under their folder and the
 distinguishing filename always shows in full, instead of a flat, left-truncated path.
+The layout is **responsive**: on a narrow terminal the file list hides so the diff keeps the
+full width, and side-by-side falls back to unified when there isn't room for two columns.
 Anywhere in a list: `yy` yanks the item's web
 URL to the clipboard · `gx` opens it in your browser.
 

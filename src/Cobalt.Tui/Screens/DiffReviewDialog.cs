@@ -35,6 +35,8 @@ public sealed class DiffReviewDialog(
     private string? _renderedDiffPath;
     private bool _sideBySide;
     private IReadOnlyList<SideBySideRow> _sbsRows = [];
+    private int _lastDialogWidth = -1;
+    private int _diffContentWidth = 1;
 
     private CancellationToken Token => _cts.Token;
 
@@ -65,6 +67,9 @@ public sealed class DiffReviewDialog(
     /// <summary>Test seam: the unified diff-line index the comment action would target for the current selection.</summary>
     internal int SelectedDiffLineIndex => SelectedDiffLine();
 
+    /// <summary>Test seam: whether the changed-file list pane is currently shown (hidden at narrow widths).</summary>
+    internal bool FileListVisible => _fileList.Visible;
+
     public void Show()
     {
         using var dialog = Build();
@@ -73,6 +78,7 @@ public sealed class DiffReviewDialog(
 
         _closed = true;
         vm.Changed -= OnChanged;
+        dialog.ViewportChanged -= OnViewportChanged;
         _cts.Cancel();
         _cts.Dispose();
     }
@@ -92,18 +98,20 @@ public sealed class DiffReviewDialog(
         };
         _dialog = dialog;
 
+        // Pane X/Width are set by ApplyResponsiveLayout (called from Render) so they can
+        // collapse gracefully at narrow widths; the initial values are placeholders.
         _fileList = new ListView
         {
             X = 0,
             Y = 0,
-            Width = Dim.Percent(28),
+            Width = 28,
             Height = Dim.Fill(),
             CanFocus = true,
         };
-        _diffHeader = new Label { X = Pos.Right(_fileList) + 1, Y = 0, Width = Dim.Fill(), Height = 1 };
+        _diffHeader = new Label { X = 29, Y = 0, Width = Dim.Fill(), Height = 1 };
         _diffPane = new ListView
         {
-            X = Pos.Right(_fileList) + 1,
+            X = 29,
             Y = 1,
             Width = Dim.Fill(),
             Height = Dim.Fill(),
@@ -130,6 +138,8 @@ public sealed class DiffReviewDialog(
 
         vm.Changed += OnChanged;
         dialog.KeyDown += HandleKey;
+        // Re-apply the responsive layout when the terminal (and so the dialog) is resized.
+        dialog.ViewportChanged += OnViewportChanged;
 
         dialog.Add(_fileList, _diffHeader, _diffPane);
         Render();
@@ -143,6 +153,40 @@ public sealed class DiffReviewDialog(
             Render();
         }
     });
+
+    private void OnViewportChanged(object? sender, Terminal.Gui.ViewBase.DrawEventArgs e)
+    {
+        if (_closed || _dialog is null || _dialog.Viewport.Width == _lastDialogWidth)
+        {
+            return;
+        }
+        _lastDialogWidth = _dialog.Viewport.Width;
+        Render();
+    }
+
+    /// <summary>
+    /// Collapse the panes gracefully at narrow widths: hide the file list below a
+    /// threshold (diff takes the whole row), size it as a fraction otherwise, and force
+    /// unified when the diff pane is too narrow for two columns. Pure decision in
+    /// <see cref="ResponsiveLayout"/>; this only applies it to the views.
+    /// </summary>
+    private void ApplyResponsiveLayout()
+    {
+        var total = _dialog?.Viewport.Width ?? 0;
+        var layout = ResponsiveLayout.Compute(total);
+
+        _fileList.Visible = layout.ShowFileList;
+        _fileList.Width = Math.Max(1, layout.FileListWidth);
+        var diffX = layout.ShowFileList ? layout.FileListWidth + 1 : 0;
+        _diffHeader.X = diffX;
+        _diffPane.X = diffX;
+        _diffContentWidth = Math.Max(1, total - diffX);
+
+        if (!layout.AllowSideBySide)
+        {
+            _sideBySide = false; // too narrow for two columns — stay unified
+        }
+    }
 
     private void HandleKey(object? sender, Terminal.Gui.Input.Key key)
     {
@@ -330,6 +374,8 @@ public sealed class DiffReviewDialog(
 
     private void Render()
     {
+        ApplyResponsiveLayout();
+
         if (vm.IsLoading)
         {
             _diffHeader.Text = " loading diff…";
@@ -364,7 +410,7 @@ public sealed class DiffReviewDialog(
             if (_sideBySide)
             {
                 _sbsRows = SideBySideComposer.Pair(diff.Lines);
-                var columnWidth = Math.Max(1, (_diffPane.Viewport.Width - SideBySideComposer.Separator.Length) / 2);
+                var columnWidth = Math.Max(1, (_diffContentWidth - SideBySideComposer.Separator.Length) / 2);
                 styled = [.. SideBySideComposer.Compose(diff.Lines, _sbsRows, language, HasThread, columnWidth)];
             }
             else

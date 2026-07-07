@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- **Responsive diff-review layout.** The two panes now degrade gracefully as the terminal
+  shrinks: below a width threshold the changed-file list hides so the diff pane spans the
+  whole row, and side-by-side automatically falls back to unified when the diff pane is too
+  narrow for two columns. The file-list width scales with the terminal (clamped) and the
+  layout re-applies on resize. The threshold decision is a pure, unit-tested view model.
 - **Side-by-side diff toggle.** `s` switches the diff pane between the unified view and a
   two-column side-by-side view (old on the left, new on the right). Rows pair the k-th
   removed line with the k-th added line — the same rule `DiffService` uses for intra-line

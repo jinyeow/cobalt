@@ -316,4 +316,32 @@ public class DiffReviewDialogKeyTests
 
         Assert.Equal(detail.SideBySideRows[deletionRow].LeftIndex, detail.SelectedDiffLineIndex);
     }
+
+    // ---- responsive layout (Item 2) ----
+
+    [Fact]
+    public async Task Narrowing_Hides_The_File_List_And_Forces_Unified()
+    {
+        var (detail, dialog) = await BuiltModifiedDialog(); // laid out at 120 wide
+        dialog.NewKeyDownEvent(new Key('s'));
+        Assert.True(detail.SideBySide);
+        Assert.True(detail.FileListVisible);
+
+        dialog.Layout(new Size(48, 24)); // shrink below the file-list threshold
+
+        Assert.False(detail.FileListVisible);
+        Assert.False(detail.SideBySide); // fell back to unified — too narrow for two columns
+    }
+
+    [Fact]
+    public async Task Widening_Restores_The_File_List()
+    {
+        var (detail, dialog) = await BuiltModifiedDialog();
+        dialog.Layout(new Size(48, 24));
+        Assert.False(detail.FileListVisible);
+
+        dialog.Layout(new Size(120, 24));
+
+        Assert.True(detail.FileListVisible);
+    }
 }
