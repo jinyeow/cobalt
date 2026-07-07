@@ -48,6 +48,20 @@ public static class HelpText
         [AppCommand.CyclePane] = "switch file list / diff pane",
         [AppCommand.ToggleFold] = "collapse/expand folder",
         [AppCommand.ToggleDiffMode] = "unified / side-by-side diff",
+        [AppCommand.NextHunk] = "next change hunk",
+        [AppCommand.PrevHunk] = "previous change hunk",
+        [AppCommand.NextThread] = "next comment thread",
+        [AppCommand.PrevThread] = "previous comment thread",
+        [AppCommand.NextUnviewedFile] = "next unviewed file",
+        [AppCommand.PrevUnviewedFile] = "previous unviewed file",
+        [AppCommand.SearchDiff] = "search in diff",
+        [AppCommand.SearchNext] = "next match",
+        [AppCommand.SearchPrev] = "previous match",
+        [AppCommand.MarkViewed] = "mark file viewed",
+        [AppCommand.ToggleThreadFilter] = "filter to unresolved threads",
+        [AppCommand.ExpandContext] = "expand context",
+        [AppCommand.ExpandAllContext] = "expand whole file",
+        [AppCommand.AddPrComment] = "add PR comment",
     };
 
     // The only global keys a modal dialog actually honors: the shared scroll seam plus

@@ -43,6 +43,9 @@ public class DetailDialogKeyDeliveryTests
         public Task SetThreadStatusAsync(string project, string repositoryId, int id, int threadId, PrThreadStatus status, CancellationToken ct) => Task.CompletedTask;
         public Task AbandonAsync(string project, string repositoryId, int id, CancellationToken ct) => Task.CompletedTask;
         public Task CompleteAsync(string project, string repositoryId, int id, string mergeStrategy, bool deleteSource, CancellationToken ct) => Task.CompletedTask;
+        public Task AddPrCommentAsync(string project, string repositoryId, int id, string text, CancellationToken ct) => Task.CompletedTask;
+        public Task<IReadOnlyList<PolicyEvaluation>> GetPolicyEvaluationsAsync(string project, int id, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PolicyEvaluation>>([]);
     }
 
     private static PrDetailDialog NewPrDialog()

@@ -11,6 +11,9 @@ public interface IPrDiffSource
     Task<string> GetFileContentAsync(string project, string repositoryId, string path, string commit, CancellationToken ct);
     Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repositoryId, int prId, CancellationToken ct);
     Task AddLineCommentAsync(string project, string repositoryId, int prId, string path, int line, bool rightSide, string text, CancellationToken ct);
+    Task ReplyToThreadAsync(string project, string repositoryId, int prId, int threadId, string text, CancellationToken ct);
+    Task SetThreadStatusAsync(string project, string repositoryId, int prId, int threadId, PrThreadStatus status, CancellationToken ct);
+    Task VoteAsync(string project, string repositoryId, int prId, PrVote vote, CancellationToken ct);
 }
 
 /// <summary>

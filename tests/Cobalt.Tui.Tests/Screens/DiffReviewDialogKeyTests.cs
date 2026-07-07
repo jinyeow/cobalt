@@ -44,6 +44,12 @@ public class DiffReviewDialogKeyTests
             Task.FromResult(Threads);
         public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
             Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
+            Task.CompletedTask;
     }
 
     private static PullRequest Pr() =>
@@ -102,6 +108,7 @@ public class DiffReviewDialogKeyTests
         var (detail, dialog) = await BuiltDialog();
 
         dialog.NewKeyDownEvent(new Key(']'));
+        dialog.NewKeyDownEvent(new Key('f'));
 
         Assert.Equal(1, detail.FileIndex);
     }
@@ -111,10 +118,13 @@ public class DiffReviewDialogKeyTests
     {
         var (detail, dialog) = await BuiltDialog();
         dialog.NewKeyDownEvent(new Key(']'));
+        dialog.NewKeyDownEvent(new Key('f'));
         dialog.NewKeyDownEvent(new Key(']'));
+        dialog.NewKeyDownEvent(new Key('f'));
         Assert.Equal(2, detail.FileIndex);
 
         dialog.NewKeyDownEvent(new Key('['));
+        dialog.NewKeyDownEvent(new Key('f'));
 
         Assert.Equal(1, detail.FileIndex);
     }
@@ -126,6 +136,7 @@ public class DiffReviewDialogKeyTests
 
         dialog.NewKeyDownEvent(new Key('3'));
         dialog.NewKeyDownEvent(new Key(']'));
+        dialog.NewKeyDownEvent(new Key('f'));
 
         Assert.Equal(3, detail.FileIndex); // 0 → 3 (four files, clamped within range)
     }
@@ -214,6 +225,7 @@ public class DiffReviewDialogKeyTests
         for (var i = 0; i < 5; i++)
         {
             dialog.NewKeyDownEvent(new Key(']'));
+            dialog.NewKeyDownEvent(new Key('f'));
             Assert.Equal(FileTreeRowKind.File, detail.Rows[detail.FileList.SelectedItem!.Value].Kind);
         }
 

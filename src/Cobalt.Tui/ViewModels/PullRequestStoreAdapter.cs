@@ -130,6 +130,13 @@ public sealed class PullRequestStoreAdapter(
             .ConfigureAwait(false);
     }
 
+    // Stubs pending the PR-detail track (Phase 0 contract lock only — no behavior).
+    public Task AddPrCommentAsync(string project, string repositoryId, int id, string text, CancellationToken ct) =>
+        throw new NotImplementedException("provided by PR-detail track");
+
+    public Task<IReadOnlyList<PolicyEvaluation>> GetPolicyEvaluationsAsync(string project, int id, CancellationToken ct) =>
+        throw new NotImplementedException("provided by PR-detail track");
+
     // ---- IPrDiffSource ----
 
     public Task<PrIteration?> GetLatestIterationAsync(string project, string repositoryId, int prId, CancellationToken ct) =>

@@ -36,6 +36,15 @@ public class PrDiffViewModelTests
             LastComment = (path, line, right, text);
             return Task.CompletedTask;
         }
+
+        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
+            Task.CompletedTask;
     }
 
     private static PullRequest Pr() =>
@@ -248,6 +257,12 @@ public class PrDiffViewModelTests
         public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<PrThread>>([]);
         public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
             Task.CompletedTask;
     }
 

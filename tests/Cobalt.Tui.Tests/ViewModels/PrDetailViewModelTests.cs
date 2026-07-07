@@ -62,6 +62,12 @@ public class PrDetailViewModelTests
             Completed = true;
             return Task.CompletedTask;
         }
+
+        public Task AddPrCommentAsync(string project, string repo, int id, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public Task<IReadOnlyList<PolicyEvaluation>> GetPolicyEvaluationsAsync(string project, int id, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PolicyEvaluation>>([]);
     }
 
     private static PullRequest PrWithoutSourceCommit() =>
@@ -192,6 +198,9 @@ public class PrDetailViewModelTests
         public Task SetThreadStatusAsync(string project, string repo, int id, int threadId, PrThreadStatus status, CancellationToken ct) => Task.CompletedTask;
         public Task AbandonAsync(string project, string repo, int id, CancellationToken ct) => Task.CompletedTask;
         public Task CompleteAsync(string project, string repo, int id, string mergeStrategy, bool deleteSource, CancellationToken ct) => Task.CompletedTask;
+        public Task AddPrCommentAsync(string project, string repo, int id, string text, CancellationToken ct) => Task.CompletedTask;
+        public Task<IReadOnlyList<PolicyEvaluation>> GetPolicyEvaluationsAsync(string project, int id, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PolicyEvaluation>>([]);
     }
 
     [Fact]

@@ -12,6 +12,8 @@ public interface IPullRequestStore
     Task SetThreadStatusAsync(string project, string repositoryId, int id, int threadId, PrThreadStatus status, CancellationToken ct);
     Task AbandonAsync(string project, string repositoryId, int id, CancellationToken ct);
     Task CompleteAsync(string project, string repositoryId, int id, string mergeStrategy, bool deleteSource, CancellationToken ct);
+    Task AddPrCommentAsync(string project, string repositoryId, int id, string text, CancellationToken ct);
+    Task<IReadOnlyList<PolicyEvaluation>> GetPolicyEvaluationsAsync(string project, int id, CancellationToken ct);
 }
 
 /// <summary>
