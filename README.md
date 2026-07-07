@@ -132,6 +132,25 @@ If neither variable is set, `c`/`e`/comment actions fall back to `vi`; if that
 isn't installed you'll see *"could not start editor … set $VISUAL or $EDITOR"*.
 A full-screen editor gets a clean terminal (the TUI suspends while it runs).
 
+## Terminal multiplexers (zellij / tmux)
+
+Inside a multiplexer, cobalt runs against a pseudo-terminal rather than a real Win32
+console, and Terminal.Gui's default `windows` driver (Win32 console APIs) drops
+keystrokes and breaks the `$EDITOR` handoff there. cobalt **auto-detects zellij and
+tmux** (`ZELLIJ`/`TMUX`) and switches to the stdio/ANSI `dotnet` driver, so it works
+there with no configuration.
+
+For any other multiplexer, or to override, set `COBALT_DRIVER`:
+
+```sh
+export COBALT_DRIVER=dotnet     # bash/zsh
+$env:COBALT_DRIVER = 'dotnet'   # PowerShell
+```
+
+Accepted values are `windows`, `dotnet`, and `ansi`; an explicit value always wins
+(e.g. `COBALT_DRIVER=windows` forces the Win32 driver back). On a bare console, leave
+it unset. See [ADR 0016](docs/adr/0016-terminal-driver-selection.md).
+
 ## Crash logs
 
 Expected Azure DevOps failures (auth, network, API) surface in the message bar. An

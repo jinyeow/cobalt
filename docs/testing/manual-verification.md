@@ -28,6 +28,7 @@ Fill in before starting:
 | Date / tester | |
 | OS + version | |
 | Terminal emulator | |
+| Terminal multiplexer? (zellij/tmux auto-detect `dotnet`; others need `COBALT_DRIVER=dotnet`) | |
 | `$TERM` | |
 | Truecolor terminal? (`$COLORTERM`) | |
 | .NET SDK version (`dotnet --version`, needs 10.0.100+) | |

@@ -65,6 +65,14 @@
   being masked as an "error" string (CodeQL `cs/catch-of-all-exceptions`).
 
 ### Fixed
+- **Dropped input and broken editor handoff under terminal multiplexers.** Inside zellij
+  (and tmux), fast repeated motions lost keystrokes (`j`×6 landed on row 4) and `$EDITOR`
+  opened a dead, un-quittable buffer. Root cause: Terminal.Gui's default Win32-console
+  `windows` driver is unreliable through a multiplexer's pseudo-terminal. cobalt now
+  **auto-detects zellij/tmux** (`ZELLIJ`/`TMUX`) and switches to the `dotnet` driver; a
+  `COBALT_DRIVER` environment override (`windows`/`dotnet`/`ansi`) covers any other
+  multiplexer or forces a specific driver. The default on a bare console is unchanged. See
+  [ADR 0016](docs/adr/0016-terminal-driver-selection.md).
 - **Cross-project work-item drill-in under org scope.** With `:scope org` the list spans
   every project, but pressing `s`/edit/comment/open on an item from another project used
   to query the context project (wrong state list, or a 404). The detail/mutation path now

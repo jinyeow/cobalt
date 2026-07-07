@@ -186,9 +186,10 @@ public sealed class CobaltShell : Window
             _workItemList?.Navigate(command, count);
             _prList?.Navigate(command, count);
             // Force a full redraw now (true, not false): a programmatic InvokeCommand move
-            // may not flag the view dirty on every driver, so LayoutAndDraw(false) would
-            // skip it and the move would only paint on the next event — which reads as
-            // "the key needs a second press" (Windows). Forcing the frame paints it now.
+            // may not flag the view dirty on every driver, so LayoutAndDraw(false) could
+            // skip it and the move would only paint on the next event. (The "needs a second
+            // press" symptom under a multiplexer is actually the Win32-console driver dropping
+            // input, not a missed paint — see ADR 0016; this forced paint is still correct.)
             _app.LayoutAndDraw(true);
             return;
         }
