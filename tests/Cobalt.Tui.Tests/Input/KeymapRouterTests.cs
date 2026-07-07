@@ -26,6 +26,16 @@ public class KeymapRouterTests
     }
 
     [Fact]
+    public void H_Goes_Back()
+    {
+        // vim "h" (move out) goes back / closes, alongside q.
+        var result = Router().Feed("h", KeyScope.PullRequestDetail);
+
+        Assert.Equal(KeyResultKind.Matched, result.Kind);
+        Assert.Equal(AppCommand.Back, result.Command);
+    }
+
+    [Fact]
     public void Sequence_gg_Requires_Two_Keys()
     {
         var router = Router();

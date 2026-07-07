@@ -56,8 +56,9 @@
   [ADR 0013](docs/adr/0013-exception-handling-policy.md).
 
 ### Changed
-- **`l` opens the selected item** (vim "move into"), alongside `Enter`/`o`. It was
-  previously bound to an unimplemented `MoveRight`, so it only reported "not available".
+- **`l` opens the selected item and `h` goes back/closes** (vim "move into"/"move out"),
+  alongside `Enter`/`o` and `q`. They were previously bound to unimplemented
+  `MoveRight`/`MoveLeft`, so they only reported "not available".
 - **`Ctrl-d`/`Ctrl-u` are a true half page everywhere.** In lists they previously did a
   full page (the `ListView` primitive); they now move half the viewport, matching the
   detail dialogs and vim, via the shared `VimScroll` seam.

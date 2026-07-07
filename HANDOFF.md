@@ -53,11 +53,13 @@ cobalt                    # or: cobalt --context oss
 
 **Priority 1 — flagged "can't verify without a real terminal / real org" (verify first):**
 
-- [ ] **Double-input / responsiveness** — a single `j`/`k` moves once and repaints immediately (no "press twice"). The fix forces a full redraw after nav; confirm on Windows especially.
-- [ ] **Editor resume** — `c` (comment) → edit in `$EDITOR` → `:wq`: on return the dialog still takes keys (`q/e/s/t/c`) **and** there are no stray escape codes in the corner. (Fix: `ClearContents` + full redraw + refocus `TopRunnableView`.)
-- [ ] **Org-wide work items** (`:scope org`, the default) — the WI list shows items assigned to you **across all projects**, and a **project column** appears when rows span >1 project. This hits a project-segment-less `_apis/wit/wiql` + `workitemsbatch` route only verified here by shape.
-- [ ] **Cross-project WI drill-in** (the round-2 HIGH fix) — with context project A, open/act on an item from project B (`s` change-state, edit `e`, comment `c`): it must use **B's** metadata (correct states, no 404), not A's.
-- [ ] **Team PR tab** — the new tab between "review queue" and "mine": shows the raw union of PRs where a team you're on is a reviewer + PRs authored by teammates. Depends on `_apis/teams?$mine=true` and `reviewerId={teamGuid}` (documented-by-example).
+_All P1 items verified on 2026-07-07 (zellij + Windows Terminal, HollardInsuranceRetail / TSC Cloud DevOps)._
+
+- [x] **Double-input / responsiveness** — **PASS after fix.** Root cause was NOT a missed repaint: TG's Win32-console `windows` driver drops input through a multiplexer's pty. cobalt now auto-detects zellij/tmux → `dotnet` driver (`COBALT_DRIVER` override); single `j`/`k` now moves once. See ADR 0016.
+- [x] **Editor resume** — **PASS after fix.** Same driver fix restored the `$EDITOR` tty handoff (was a blank, un-quittable buffer under the `windows` driver); comment → nvim → `:wq` returns with keys working and no stray escape codes.
+- [x] **Org-wide work items** (`:scope org`) — **PASS.** Verified via the `tools/uat` route prober: 84 items across 3 projects, project column path exercised.
+- [x] **Cross-project WI drill-in** (the round-2 HIGH fix) — **PASS.** An item in a different project returned its own type's states and detail with no 404.
+- [x] **Team PR tab** — **PASS.** `reviewerId={teamGuid}` is authoritative (per-team counts cross-checked against the org-wide active set); permission-group teams legitimately return 0.
 
 **Priority 2 — vim layer & filters (mechanics, verify feel):**
 

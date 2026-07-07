@@ -64,7 +64,7 @@ cobalt --context oss  # launch against a named context
 ## Keys (vim layer)
 
 `j/k` move · `gg`/`G` top/bottom · `Ctrl-d`/`Ctrl-u` half-page · `/` filter ·
-`Enter`/`o`/`l` open · `gt`/`gT` next/prev section · `g1`/`g2` jump to Work Items /
+`Enter`/`o`/`l` open · `h`/`q` back/close · `gt`/`gT` next/prev section · `g1`/`g2` jump to Work Items /
 Pull Requests · `Tab` next tab · `:` command palette
 (`:q` quit, `:context NAME` switch context, `:scope org|project` list breadth,
 `:done show|hide` completed work items, `:project NAME` narrow to one project,
