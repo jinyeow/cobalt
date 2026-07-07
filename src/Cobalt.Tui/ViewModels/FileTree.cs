@@ -22,7 +22,18 @@ public sealed record FileTreeRow(
     FileChangeKind? ChangeType,
     int? FileIndex,
     string NodePath,
-    bool Collapsed);
+    bool Collapsed,
+    int? Additions = null,
+    int? Deletions = null,
+    bool Viewed = false,
+    bool HasUnresolved = false);
+
+/// <summary>Per-file review metadata (diff stat + review state) overlaid onto a leaf's <see cref="FileTreeRow"/>.</summary>
+public sealed record FileAnnotation(
+    int? Additions = null,
+    int? Deletions = null,
+    bool Viewed = false,
+    bool HasUnresolved = false);
 
 /// <summary>
 /// Pure projection of a PR's changed files into a directory tree of display rows
@@ -51,7 +62,9 @@ public static class FileTree
     private sealed record FileLeaf(string Name, string Path, int Index, FileChangeKind ChangeType);
 
     public static IReadOnlyList<FileTreeRow> Flatten(
-        IReadOnlyList<FileChange> files, IReadOnlySet<string> collapsedDirs)
+        IReadOnlyList<FileChange> files,
+        IReadOnlySet<string> collapsedDirs,
+        IReadOnlyDictionary<string, FileAnnotation>? annotations = null)
     {
         var root = new DirNode();
         for (var i = 0; i < files.Count; i++)
@@ -66,12 +79,17 @@ public static class FileTree
         }
 
         var rows = new List<FileTreeRow>();
-        Emit(root, "", 0, collapsedDirs, rows);
+        Emit(root, "", 0, collapsedDirs, rows, annotations);
         return rows;
     }
 
     private static void Emit(
-        DirNode node, string path, int depth, IReadOnlySet<string> collapsed, List<FileTreeRow> rows)
+        DirNode node,
+        string path,
+        int depth,
+        IReadOnlySet<string> collapsed,
+        List<FileTreeRow> rows,
+        IReadOnlyDictionary<string, FileAnnotation>? annotations)
     {
         foreach (var (segment, child) in node.Subdirs)
         {
@@ -92,14 +110,17 @@ public static class FileTree
             rows.Add(new FileTreeRow(FileTreeRowKind.Directory, depth, label, null, null, nodePath, isCollapsed));
             if (!isCollapsed)
             {
-                Emit(current, nodePath, depth + 1, collapsed, rows);
+                Emit(current, nodePath, depth + 1, collapsed, rows, annotations);
             }
         }
 
         foreach (var leaf in node.Files.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
         {
+            var annotation = annotations is not null && annotations.TryGetValue(leaf.Path, out var found) ? found : null;
             rows.Add(new FileTreeRow(
-                FileTreeRowKind.File, depth, leaf.Name, leaf.ChangeType, leaf.Index, leaf.Path, Collapsed: false));
+                FileTreeRowKind.File, depth, leaf.Name, leaf.ChangeType, leaf.Index, leaf.Path, Collapsed: false,
+                Additions: annotation?.Additions, Deletions: annotation?.Deletions,
+                Viewed: annotation?.Viewed ?? false, HasUnresolved: annotation?.HasUnresolved ?? false));
         }
     }
 

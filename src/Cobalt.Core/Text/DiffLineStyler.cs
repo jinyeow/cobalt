@@ -3,7 +3,11 @@ using Cobalt.Core.Text.Syntax;
 namespace Cobalt.Core.Text;
 
 /// <summary>Foreground = syntax token; background = diff state (+ emphasis for changed words).</summary>
-public sealed record RunStyle(TokenKind Token, DiffLineKind LineKind, bool Emphasis, bool IsGutter);
+public sealed record RunStyle(TokenKind Token, DiffLineKind LineKind, bool Emphasis, bool IsGutter)
+{
+    /// <summary>Set by <see cref="DiffLineStyler.WithSearchHits"/> on runs (or run slices) overlapping a search match.</summary>
+    public bool SearchHit { get; init; }
+}
 
 /// <summary>A styled slice of <see cref="StyledLine.DisplayText"/>: [Start, Start+Length).</summary>
 public sealed record StyledRun(int Start, int Length, RunStyle Style);
@@ -95,6 +99,62 @@ public static class DiffLineStyler
                     new RunStyle(token.Kind, kind, Emphasis: inSpan, IsGutter: false)));
                 pos = boundary;
             }
+        }
+    }
+
+    /// <summary>
+    /// Marks search-hit spans on an already-composed <see cref="StyledLine"/> without
+    /// touching <see cref="Compose"/>'s output shape: each run overlapping a hit span
+    /// is split at the span's boundaries (mirroring <see cref="AppendCodeRuns"/>'s
+    /// splitting) so <see cref="RunStyle.SearchHit"/> lands exactly on the matched
+    /// text, keeping every other style field unchanged. <paramref name="hitSpansInText"/>
+    /// are in <see cref="DiffLine.Text"/> coordinates and are shifted by
+    /// <paramref name="gutterLen"/> to line up with <see cref="StyledLine.DisplayText"/>.
+    /// </summary>
+    public static StyledLine WithSearchHits(StyledLine line, IReadOnlyList<LineSpan> hitSpansInText, int gutterLen)
+    {
+        if (hitSpansInText.Count == 0)
+        {
+            return line;
+        }
+
+        var spans = hitSpansInText.Select(s => new LineSpan(s.Start + gutterLen, s.Length)).ToList();
+        var runs = new List<StyledRun>(line.Runs.Count);
+        foreach (var run in line.Runs)
+        {
+            SplitRunBySearchHits(run, spans, runs);
+        }
+        return line with { Runs = runs };
+    }
+
+    private static void SplitRunBySearchHits(StyledRun run, IReadOnlyList<LineSpan> spans, List<StyledRun> output)
+    {
+        var pos = run.Start;
+        var end = run.Start + run.Length;
+        while (pos < end)
+        {
+            var inSpan = false;
+            var boundary = end;
+            foreach (var s in spans)
+            {
+                var sStart = s.Start;
+                var sEnd = s.Start + s.Length;
+                if (sStart <= pos && pos < sEnd)
+                {
+                    inSpan = true;
+                    if (sEnd < boundary)
+                    {
+                        boundary = sEnd;
+                    }
+                }
+                else if (sStart > pos && sStart < boundary)
+                {
+                    boundary = sStart;
+                }
+            }
+
+            output.Add(new StyledRun(pos, boundary - pos, run.Style with { SearchHit = inSpan }));
+            pos = boundary;
         }
     }
 }
