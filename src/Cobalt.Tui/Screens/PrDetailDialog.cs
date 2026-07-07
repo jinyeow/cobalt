@@ -44,6 +44,9 @@ public sealed class PrDetailDialog(
     /// <summary>Test seam: replaces the real reply path (needs the editor) so a test can observe the 'c' key.</summary>
     internal Action? ReplyAction { get; set; }
 
+    /// <summary>Test seam: replaces the real PR-comment path (needs the editor) so a test can observe the 'g c' chord.</summary>
+    internal Action? AddCommentAction { get; set; }
+
     /// <summary>Test seam: replaces the real complete flow (needs MessageBox/run loop) so a test can observe 'C'.</summary>
     internal Action? CompleteAction { get; set; }
 
@@ -74,7 +77,7 @@ public sealed class PrDetailDialog(
     {
         var dialog = new Dialog
         {
-            Title = $"PR !{vm.Id} — q close · d diff · v vote · c reply · x resolve · u reactivate · C complete · A abandon",
+            Title = $"PR !{vm.Id} — q close · d diff · v vote · c reply · gc comment · x resolve · u reactivate · C complete · A abandon",
             Width = Dim.Percent(92),
             Height = Dim.Percent(92),
         };
@@ -188,6 +191,16 @@ public sealed class PrDetailDialog(
                     _ = FireAndForget.Observe(ReplyAsync(), app, log);
                 }
                 return true;
+            case AppCommand.AddPrComment:
+                if (AddCommentAction is not null)
+                {
+                    AddCommentAction();
+                }
+                else
+                {
+                    _ = FireAndForget.Observe(AddCommentAsync(), app, log);
+                }
+                return true;
             case AppCommand.ResolveThread:
                 _ = FireAndForget.Observe(ThreadStatusAsync(resolve: true), app, log);
                 return true;
@@ -247,6 +260,14 @@ public sealed class PrDetailDialog(
             ? ["  (none)"]
             : pr.Reviewers.Select(r => $"  {VoteGlyph(r.Vote)} {r.DisplayName}{(r.IsRequired ? " (required)" : "")}"));
 
+        if (vm.Policies.Count > 0)
+        {
+            lines.Add("");
+            lines.Add("Policies:");
+            lines.AddRange(vm.Policies.Select(p =>
+                $"  {PolicyGlyph(p.Status)} {p.DisplayName}{(p.IsBlocking ? " (blocking)" : "")}"));
+        }
+
         if (pr.LinkedWorkItemIds.Count > 0)
         {
             lines.Add("");
@@ -297,6 +318,24 @@ public sealed class PrDetailDialog(
         if (!string.IsNullOrWhiteSpace(text))
         {
             await RunAndLog(vm.ReplyAsync(thread.Value, text.Trim(), Token), "reply posted").ConfigureAwait(false);
+        }
+    }
+
+    private async Task AddCommentAsync()
+    {
+        string? text;
+        try
+        {
+            text = await editor.EditAsync("", ".md", Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
+        {
+            app.Invoke(() => log($"editor failed: {ex.Message}"));
+            return;
+        }
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            await RunAndLog(vm.AddPrCommentAsync(text.Trim(), Token), "comment posted").ConfigureAwait(false);
         }
     }
 
@@ -382,5 +421,12 @@ public sealed class PrDetailDialog(
         PrVote.WaitingForAuthor => "⧗",
         PrVote.Rejected => "✗",
         _ => "·",
+    };
+
+    private static string PolicyGlyph(string status) => status.ToLowerInvariant() switch
+    {
+        "approved" => "✓",
+        "rejected" => "✗",
+        _ => "⧗", // queued / running / notApplicable / etc.
     };
 }

@@ -111,6 +111,22 @@ public class DetailDialogKeyDeliveryTests
     }
 
     [Fact]
+    public void PrDialog_Gc_Reaches_The_Add_Comment_Seam()
+    {
+        var detail = NewPrDialog();
+        var commented = false;
+        detail.AddCommentAction = () => commented = true;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('g'));
+        dialog.NewKeyDownEvent(new Key('c'));
+
+        Assert.True(commented);
+    }
+
+    [Fact]
     public void PrDialog_PageDown_Still_Scrolls_The_Body()
     {
         var detail = NewPrDialog();
@@ -217,6 +233,45 @@ public class DetailDialogKeyDeliveryTests
 
         Assert.True(completed);
         Assert.True(abandoned);
+    }
+
+    private sealed class PolicyRenderStore : IPullRequestStore
+    {
+        public Task<PullRequest> GetPullRequestAsync(int id, CancellationToken ct) =>
+            Task.FromResult(new PullRequest(42, "Title", null, "active", false, "feature", "main", "succeeded",
+                "Jin", "repo-1", "web", [], [], "abc", "Proj", ProjectId: "guid"));
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repositoryId, int id, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PrThread>>([]);
+        public Task VoteAsync(string project, string repositoryId, int id, PrVote vote, CancellationToken ct) => Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repositoryId, int id, int threadId, string text, CancellationToken ct) => Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repositoryId, int id, int threadId, PrThreadStatus status, CancellationToken ct) => Task.CompletedTask;
+        public Task AbandonAsync(string project, string repositoryId, int id, CancellationToken ct) => Task.CompletedTask;
+        public Task CompleteAsync(string project, string repositoryId, int id, string mergeStrategy, bool deleteSource, CancellationToken ct) => Task.CompletedTask;
+        public Task AddPrCommentAsync(string project, string repositoryId, int id, string text, CancellationToken ct) => Task.CompletedTask;
+        public Task<IReadOnlyList<PolicyEvaluation>> GetPolicyEvaluationsAsync(string projectId, int id, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PolicyEvaluation>>(
+            [
+                new PolicyEvaluation("Build validation", "approved", true),
+                new PolicyEvaluation("Minimum reviewers", "rejected", true),
+                new PolicyEvaluation("Comment resolution", "queued", false),
+            ]);
+    }
+
+    [Fact]
+    public async Task PrDialog_Renders_Policies_Section_With_Pass_Fail_Pending_Glyphs()
+    {
+        var vm = new PrDetailViewModel(new PolicyRenderStore(), 42);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new PrDetailDialog(App, vm, NoopEditor(), _ => { });
+        detail.Build();
+
+        var text = detail.Body.Text;
+        Assert.Contains("Policies:", text);
+        Assert.Contains("✓ Build validation (blocking)", text);
+        Assert.Contains("✗ Minimum reviewers (blocking)", text);
+        Assert.Contains("⧗ Comment resolution", text);
+        // A non-blocking policy carries no blocking marker.
+        Assert.DoesNotContain("Comment resolution (blocking)", text);
     }
 
     // ---- Work-item detail ----
