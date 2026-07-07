@@ -1,0 +1,10 @@
+name: "cobalt CodeQL config"
+
+# Exclude build output and source-generated code (e.g. the System.Text.Json
+# source-generator's obj/**/*.g.cs) from analysis. These paths produced ~110
+# false-positive quality alerts (cs/useless-cast-to-self) that buried the real
+# findings. paths-ignore only takes effect for C# under build-mode: none
+# (buildless extraction) — see codeql.yml.
+paths-ignore:
+  - "**/obj/**"
+  - "**/bin/**"
