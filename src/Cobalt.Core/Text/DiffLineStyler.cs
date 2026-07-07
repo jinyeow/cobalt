@@ -44,7 +44,25 @@ public static class DiffLineStyler
             new(0, gutterLen, new RunStyle(TokenKind.Plain, line.Kind, Emphasis: false, IsGutter: true)),
         };
 
-        var spans = line.ChangedSpans ?? [];
+        AppendCodeRuns(runs, tokens, line.ChangedSpans ?? [], line.Kind, gutterLen);
+        return new StyledLine(displayText, runs);
+    }
+
+    /// <summary>
+    /// Appends the code runs for one text segment: each syntax token, split at every
+    /// <paramref name="spans"/> boundary so emphasis lands exactly on the changed
+    /// words while keeping the token's kind. Run offsets are shifted by
+    /// <paramref name="offset"/> (the gutter width of the column the text sits in).
+    /// Shared by the unified styler and the side-by-side composer so both partition
+    /// code identically.
+    /// </summary>
+    internal static void AppendCodeRuns(
+        List<StyledRun> runs,
+        IReadOnlyList<SyntaxToken> tokens,
+        IReadOnlyList<LineSpan> spans,
+        DiffLineKind kind,
+        int offset)
+    {
         foreach (var token in tokens)
         {
             var pos = token.Start;
@@ -72,13 +90,11 @@ public static class DiffLineStyler
                 }
 
                 runs.Add(new StyledRun(
-                    gutterLen + pos,
+                    offset + pos,
                     boundary - pos,
-                    new RunStyle(token.Kind, line.Kind, Emphasis: inSpan, IsGutter: false)));
+                    new RunStyle(token.Kind, kind, Emphasis: inSpan, IsGutter: false)));
                 pos = boundary;
             }
         }
-
-        return new StyledLine(displayText, runs);
     }
 }

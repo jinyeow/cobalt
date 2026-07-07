@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- **Side-by-side diff toggle.** `s` switches the diff pane between the unified view and a
+  two-column side-by-side view (old on the left, new on the right). Rows pair the k-th
+  removed line with the k-th added line — the same rule `DiffService` uses for intra-line
+  emphasis — so a modified line's before/after sit on one row, with surplus lines shown
+  one-sided. The composer is pure and unit-tested; comment anchoring maps the selected
+  side-by-side row back to the correct original line and side (new-side preferred, old side
+  for a deletion-only row). The cursor keeps its line across a toggle.
 - **Directory-tree file list in diff review.** The changed-file list is now a
   collapsible directory tree instead of a flat, left-truncated path list: files group
   under their folder, single-child directory chains compress (`src/Web/Api`), and the

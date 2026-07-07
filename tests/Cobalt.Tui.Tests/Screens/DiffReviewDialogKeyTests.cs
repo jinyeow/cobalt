@@ -247,4 +247,73 @@ public class DiffReviewDialogKeyTests
         dialog.NewKeyDownEvent(new Key('z'));
         Assert.Equal(expanded, detail.FileList.Source!.Count);
     }
+
+    // ---- side-by-side toggle (Item 3) ----
+
+    // A single modified file: "keep" unchanged, "old" → "new". Unified diff is
+    // [Context keep, Removed old, Added new]; side-by-side pairs the removed+added.
+    private static async Task<(DiffReviewDialog Detail, Dialog Dialog)> BuiltModifiedDialog()
+    {
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Edit)] };
+        source.Blobs[("/a.cs", "base")] = "keep\nold\n";
+        source.Blobs[("/a.cs", "src")] = "keep\nnew\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+        detail.DiffPane.SetFocus();
+        return (detail, dialog);
+    }
+
+    [Fact]
+    public async Task S_Toggles_Side_By_Side_And_Back()
+    {
+        var (detail, dialog) = await BuiltModifiedDialog();
+        var unifiedRows = detail.DiffPane.Source!.Count; // 3 unified lines
+
+        dialog.NewKeyDownEvent(new Key('s'));
+        Assert.True(detail.SideBySide);
+        Assert.Equal(2, detail.DiffPane.Source!.Count); // context row + one paired modify row
+
+        dialog.NewKeyDownEvent(new Key('s'));
+        Assert.False(detail.SideBySide);
+        Assert.Equal(unifiedRows, detail.DiffPane.Source!.Count);
+    }
+
+    [Fact]
+    public async Task Comment_On_A_Paired_Row_Anchors_To_The_New_Side_Line()
+    {
+        var (detail, dialog) = await BuiltModifiedDialog();
+        dialog.NewKeyDownEvent(new Key('s'));
+
+        // The paired modify row maps to both sides; the comment anchors on the new (right) line.
+        var pairedRow = detail.SideBySideRows.ToList().FindIndex(r => r.LeftIndex is not null && r.RightIndex is not null);
+        detail.DiffPane.SelectedItem = pairedRow;
+
+        var row = detail.SideBySideRows[pairedRow];
+        Assert.Equal(row.RightIndex, detail.SelectedDiffLineIndex); // new side wins
+    }
+
+    [Fact]
+    public async Task Comment_On_A_Deletion_Only_Row_Anchors_To_The_Old_Side_Line()
+    {
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Edit)] };
+        source.Blobs[("/a.cs", "base")] = "keep\ngone\n";
+        source.Blobs[("/a.cs", "src")] = "keep\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+        dialog.NewKeyDownEvent(new Key('s'));
+
+        var deletionRow = detail.SideBySideRows.ToList().FindIndex(r => r.LeftIndex is not null && r.RightIndex is null);
+        detail.DiffPane.SelectedItem = deletionRow;
+
+        Assert.Equal(detail.SideBySideRows[deletionRow].LeftIndex, detail.SelectedDiffLineIndex);
+    }
 }

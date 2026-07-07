@@ -71,6 +71,8 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.DiffReview, "[", AppCommand.PrevFile);
         // z collapses/expands the directory under the cursor in the file tree.
         table.Bind(KeyScope.DiffReview, "z", AppCommand.ToggleFold);
+        // s toggles the diff pane between unified and side-by-side.
+        table.Bind(KeyScope.DiffReview, "s", AppCommand.ToggleDiffMode);
         // Scoped Tab shadows the global NextTab: in diff review Tab cycles the two panes.
         table.Bind(KeyScope.DiffReview, "Tab", AppCommand.CyclePane);
 

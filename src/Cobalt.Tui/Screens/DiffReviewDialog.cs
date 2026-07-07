@@ -33,6 +33,8 @@ public sealed class DiffReviewDialog(
     private List<string> _fileListStrings = [];
     private int _fileIndex;
     private string? _renderedDiffPath;
+    private bool _sideBySide;
+    private IReadOnlyList<SideBySideRow> _sbsRows = [];
 
     private CancellationToken Token => _cts.Token;
 
@@ -53,6 +55,15 @@ public sealed class DiffReviewDialog(
 
     /// <summary>Test seam: the flattened file-tree rows currently shown in the file list.</summary>
     internal IReadOnlyList<FileTreeRow> Rows => _rows;
+
+    /// <summary>Test seam: whether the diff pane is in side-by-side mode.</summary>
+    internal bool SideBySide => _sideBySide;
+
+    /// <summary>Test seam: the side-by-side row map (empty in unified mode).</summary>
+    internal IReadOnlyList<SideBySideRow> SideBySideRows => _sbsRows;
+
+    /// <summary>Test seam: the unified diff-line index the comment action would target for the current selection.</summary>
+    internal int SelectedDiffLineIndex => SelectedDiffLine();
 
     public void Show()
     {
@@ -75,7 +86,7 @@ public sealed class DiffReviewDialog(
     {
         var dialog = new Dialog
         {
-            Title = $"diff review !{vm.PrId} — q close · Tab files/diff · [ ] file · z fold · c comment · ? keys",
+            Title = $"diff review !{vm.PrId} — q close · Tab files/diff · [ ] file · z fold · s split · c comment · ? keys",
             Width = Dim.Percent(96),
             Height = Dim.Percent(96),
         };
@@ -210,6 +221,9 @@ public sealed class DiffReviewDialog(
             case AppCommand.ToggleFold:
                 ToggleFoldAtCursor();
                 return true;
+            case AppCommand.ToggleDiffMode:
+                ToggleDiffMode();
+                return true;
             case AppCommand.Comment:
                 _ = FireAndForget.Observe(CommentAsync(), app, log);
                 return true;
@@ -249,7 +263,7 @@ public sealed class DiffReviewDialog(
         {
             return;
         }
-        var lineIndex = _diffPane.SelectedItem ?? 0;
+        var lineIndex = SelectedDiffLine();
         string? text;
         try
         {
@@ -266,6 +280,52 @@ public sealed class DiffReviewDialog(
         }
         await vm.AddCommentAtLineAsync(lineIndex, text.Trim(), Token).ConfigureAwait(false);
         app.Invoke(() => log(vm.Error is { } e ? $"comment failed: {e}" : "line comment added"));
+    }
+
+    /// <summary>s: flip the diff pane between unified and side-by-side, keeping the cursor on the same line.</summary>
+    private void ToggleDiffMode()
+    {
+        var focused = SelectedDiffLine();
+        _sideBySide = !_sideBySide;
+        Render();
+        SelectDiffLine(focused);
+        _diffPane.SetNeedsDraw();
+        log(_sideBySide ? "side-by-side diff" : "unified diff");
+    }
+
+    /// <summary>The unified diff-line index the diff-pane cursor points at, in either mode (new side preferred).</summary>
+    private int SelectedDiffLine()
+    {
+        var sel = _diffPane.SelectedItem ?? 0;
+        if (_sideBySide && sel >= 0 && sel < _sbsRows.Count)
+        {
+            var row = _sbsRows[sel];
+            return row.RightIndex ?? row.LeftIndex ?? 0;
+        }
+        return sel;
+    }
+
+    /// <summary>Move the diff-pane cursor to the row showing a given unified diff line, in either mode.</summary>
+    private void SelectDiffLine(int unifiedIndex)
+    {
+        if (_diffPane.Source is not { Count: > 0 } source)
+        {
+            return;
+        }
+        var target = unifiedIndex;
+        if (_sideBySide)
+        {
+            target = 0;
+            for (var i = 0; i < _sbsRows.Count; i++)
+            {
+                if (_sbsRows[i].RightIndex == unifiedIndex || _sbsRows[i].LeftIndex == unifiedIndex)
+                {
+                    target = i;
+                    break;
+                }
+            }
+        }
+        _diffPane.SelectedItem = Math.Clamp(target, 0, source.Count - 1);
     }
 
     private void Render()
@@ -285,10 +345,11 @@ public sealed class DiffReviewDialog(
         if (vm.CurrentDiff is { } diff)
         {
             var file = vm.SelectedFile;
+            var mode = _sideBySide ? "  (side-by-side)" : "";
             _diffHeader.Text = file is null
                 ? ""
                 : $" {file.Path}   +{diff.Additions} -{diff.Deletions}" +
-                  (diff.IsBinary ? "  (binary)" : diff.TooLarge ? "  (too large)" : "");
+                  (diff.IsBinary ? "  (binary)" : diff.TooLarge ? "  (too large)" : mode);
 
             // Rebuild the diff pane (thread markers may have changed after a comment),
             // but preserve the reviewer's line position on a same-file refresh; reset
@@ -298,16 +359,24 @@ public sealed class DiffReviewDialog(
             _renderedDiffPath = file?.Path;
 
             var language = LanguageDetector.FromPath(file?.Path ?? "");
-            var styled = diff.Lines
-                .Select(l => DiffLineStyler.Compose(
-                    l,
-                    SyntaxTokenizer.Tokenize(l.Text, language),
-                    vm.ThreadsForDiffLine(l).Count > 0))
-                .ToList();
-            _diffPane.Source = new DiffListDataSource(styled);
-            if (diff.Lines.Count > 0)
+            bool HasThread(DiffLine l) => vm.ThreadsForDiffLine(l).Count > 0;
+            List<StyledLine> styled;
+            if (_sideBySide)
             {
-                _diffPane.SelectedItem = Math.Clamp(keepLine ?? 0, 0, diff.Lines.Count - 1);
+                _sbsRows = SideBySideComposer.Pair(diff.Lines);
+                var columnWidth = Math.Max(1, (_diffPane.Viewport.Width - SideBySideComposer.Separator.Length) / 2);
+                styled = [.. SideBySideComposer.Compose(diff.Lines, _sbsRows, language, HasThread, columnWidth)];
+            }
+            else
+            {
+                _sbsRows = [];
+                styled = [.. diff.Lines.Select(l =>
+                    DiffLineStyler.Compose(l, SyntaxTokenizer.Tokenize(l.Text, language), HasThread(l)))];
+            }
+            _diffPane.Source = new DiffListDataSource(styled);
+            if (styled.Count > 0)
+            {
+                _diffPane.SelectedItem = Math.Clamp(keepLine ?? 0, 0, styled.Count - 1);
             }
         }
         _diffPane.SetNeedsDraw();

@@ -77,9 +77,10 @@ detail additionally has `c` reply · `x` resolve thread · `u` reactivate · `C`
 complete · `A` abandon · `d` open diff review.
 In diff review: `Tab` switches file list / diff pane · `[`/`]` prev/next file ·
 `z` collapse/expand the folder under the cursor (`Enter` on a folder also toggles) ·
-`c` comment on the selected line. The changed-file list is a **directory tree** — files
-group under their folder and the distinguishing filename always shows in full, instead of
-a flat, left-truncated path. Anywhere in a list: `yy` yanks the item's web
+`s` switch the diff between **unified** and **side-by-side** · `c` comment on the selected
+line. The changed-file list is a **directory tree** — files group under their folder and the
+distinguishing filename always shows in full, instead of a flat, left-truncated path.
+Anywhere in a list: `yy` yanks the item's web
 URL to the clipboard · `gx` opens it in your browser.
 
 **Count prefixes.** Motions take a numeric count, vim-style: `5j` moves down five

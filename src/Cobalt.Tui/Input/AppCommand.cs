@@ -53,4 +53,5 @@ public enum AppCommand
     PrevFile,
     CyclePane,
     ToggleFold,
+    ToggleDiffMode,
 }
