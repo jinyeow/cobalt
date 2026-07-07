@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Fixed
+- **Diff-review UAT polish.** `Enter` on the diff pane now opens the line's comment thread
+  (it was being swallowed by the dialog's default-accept and closing the review). Searching
+  the diff (`/`) uses an **inline search bar** instead of launching `$EDITOR`. The
+  viewed/unviewed marker is now a clear leading `[✓]`/`[ ]` column.
 - **Detail/overlay windows now scroll a line at a time with visible feedback.** The
   read-only text panes (PR detail, work-item detail, and the `?`/`:messages`/key-reference
   overlays) moved an invisible caret that only scrolled the viewport once it reached the
@@ -11,6 +15,10 @@
   scrolls the last page into view (last line at the bottom).
 
 ### Added
+- **Horizontal scroll and open-branch in diff review.** `h`/`l` (or `←`/`→`) scroll the focused
+  pane horizontally for long lines (so those keys scroll rather than back/open inside diff
+  review — close it with `q`/`Esc`); `g b` opens the PR's source branch in the browser (also
+  from PR detail).
 - **The diff review is now a complete review surface.** In diff review you can read a line's
   comment thread(s) with `o`/`Enter` and **reply (`c`) / resolve (`x`) / reactivate (`u`)**
   right there; **vote** on the PR with `v`; and **mark a file viewed** with `m` (a ✓ in the

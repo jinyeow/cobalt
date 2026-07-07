@@ -73,20 +73,24 @@ Pull Requests · `Tab` next tab · `:` command palette
 `c` comment · `a` assign · `t` tags; the detail additionally has `e` edit
 description in `$EDITOR`. In the PR section: `Tab` cycles the review queue / team /
 mine / active sub-tabs; on a PR (the highlighted list row or its detail): `v` vote; the
-detail additionally has `c` reply · `g c` add a PR-level comment · `x` resolve thread ·
-`u` reactivate · `C` complete · `A` abandon · `d` open diff review, and shows the PR's
-**branch-policy / build status** (pass/fail, blocking).
+detail additionally has `c` reply · `g c` add a PR-level comment · `g b` open the source
+branch in the browser · `x` resolve thread · `u` reactivate · `C` complete · `A` abandon ·
+`d` open diff review, and shows the PR's **branch-policy / build status** (pass/fail, blocking).
 In diff review (vim `]`/`[` bracket motions, all count-aware): `Tab` switches file list /
 diff pane · `]f`/`[f` next/prev file · `]c`/`[c` next/prev **change hunk** · `]t`/`[t`
 next/prev **comment thread** · `]v`/`[v` next/prev **unviewed** file. `z` collapses/expands
 the folder under the cursor (`Enter` on a folder also toggles) · `m` marks the current file
-**viewed** (a ✓ in the tree). `s` switches the diff between **unified** and **side-by-side**;
-unchanged context is **folded** by default — `e` expands a fold, `E` the whole file. `/`
-searches the current file, `n`/`N` jump between matches. `c` comments on the selected line;
-`o`/`Enter` opens the existing comment **thread(s)** on that line, where `c` replies, `x`
-resolves, `u` reactivates. `v` votes on the PR; `T` filters the file list to files with
-**unresolved threads** (the header shows the unresolved count). Each file row shows its
-`+added −deleted` count (with a PR total in the header) as the diffs load in the background.
+**viewed** (a `[✓]`/`[ ]` column in the tree). `s` switches the diff between **unified** and
+**side-by-side**; unchanged context is **folded** by default — `e` expands a fold, `E` the
+whole file. `/` opens an **inline search** of the current file (type, `Enter` to search,
+`n`/`N` jump between matches, `Esc` cancels). `h`/`l` (or `←`/`→`) **scroll horizontally** for
+long lines — so inside diff review those keys scroll rather than back/open, and you close the
+review with `q`/`Esc`. `c` comments on the selected line; `o`/`Enter` opens the existing
+comment **thread(s)** on that line, where `c` replies, `x` resolves, `u` reactivates. `v`
+votes on the PR; `g b` opens the PR's **source branch** in the browser; `T` filters the file
+list to files with **unresolved threads** (the header shows the unresolved count). Each file
+row shows its `+added −deleted` count (with a PR total in the header) as diffs load in the
+background.
 The changed-file list is a **directory tree** — files group under their folder and the
 distinguishing filename always shows in full, instead of a flat, left-truncated path.
 The layout is **responsive**: on a narrow terminal the file list hides so the diff keeps the
