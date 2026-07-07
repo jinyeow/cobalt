@@ -16,6 +16,16 @@ public class KeymapRouterTests
     }
 
     [Fact]
+    public void L_Opens_The_Selection()
+    {
+        // vim "l" (move into) opens the selected row, alongside Enter/o.
+        var result = Router().Feed("l", KeyScope.WorkItemList);
+
+        Assert.Equal(KeyResultKind.Matched, result.Kind);
+        Assert.Equal(AppCommand.Open, result.Command);
+    }
+
+    [Fact]
     public void Sequence_gg_Requires_Two_Keys()
     {
         var router = Router();

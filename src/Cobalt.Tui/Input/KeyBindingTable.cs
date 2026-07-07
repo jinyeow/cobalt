@@ -18,13 +18,13 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.Global, "k", AppCommand.MoveUp);
         table.Bind(KeyScope.Global, "Up", AppCommand.MoveUp);
         table.Bind(KeyScope.Global, "h", AppCommand.MoveLeft);
-        table.Bind(KeyScope.Global, "l", AppCommand.MoveRight);
         table.Bind(KeyScope.Global, "g g", AppCommand.MoveTop);
         table.Bind(KeyScope.Global, "G", AppCommand.MoveBottom);
         table.Bind(KeyScope.Global, "C-d", AppCommand.HalfPageDown);
         table.Bind(KeyScope.Global, "C-u", AppCommand.HalfPageUp);
         table.Bind(KeyScope.Global, "Enter", AppCommand.Open);
         table.Bind(KeyScope.Global, "o", AppCommand.Open);
+        table.Bind(KeyScope.Global, "l", AppCommand.Open); // vim "move into" opens the selection
         table.Bind(KeyScope.Global, "q", AppCommand.Back);
         table.Bind(KeyScope.Global, "r", AppCommand.Refresh);
         table.Bind(KeyScope.Global, "?", AppCommand.Help);
