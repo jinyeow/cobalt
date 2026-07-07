@@ -19,10 +19,8 @@ namespace Cobalt.Tui.Screens;
 /// selected file (right). `c` comments on the selected line, `[`/`]` change file,
 /// Tab cycles the panes, and j/k/gg/G/Ctrl-d/u scroll the focused pane.
 /// </summary>
-#pragma warning disable CS9113 // 'context' unused for now; wired by a later diff-view track
 public sealed class DiffReviewDialog(
     IApplication app, PrDiffViewModel vm, EditorService editor, Action<string> log, AdoContext? context = null)
-#pragma warning restore CS9113
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly KeymapRouter _router = new(KeyBindingTable.Default());
@@ -31,6 +29,7 @@ public sealed class DiffReviewDialog(
     private ListView _fileList = null!;
     private ListView _diffPane = null!;
     private Label _diffHeader = null!;
+    private TextField _searchBar = null!;
     private readonly HashSet<string> _collapsedDirs = new(StringComparer.Ordinal);
     private IReadOnlyList<FileTreeRow> _rows = [];
     private List<string> _fileListStrings = [];
@@ -65,6 +64,9 @@ public sealed class DiffReviewDialog(
     /// <summary>Test seam: supplies the search query in place of the editor prompt (needs a run loop).</summary>
     internal Func<string?>? SearchPromptAction { get; set; }
 
+    /// <summary>Test seam: opens the branch/PR URL in place of the OS browser launch (needs a real process).</summary>
+    internal Action<string>? OpenUrlAction { get; set; }
+
     /// <summary>Test seam: replaces the real vote picker (needs MessageBox/run loop) so a test can drive the choice.</summary>
     internal Func<string, IReadOnlyList<string>, int?>? VoteChooser { get; set; }
 
@@ -79,6 +81,9 @@ public sealed class DiffReviewDialog(
 
     /// <summary>Test seam: the unified-diff pane.</summary>
     internal ListView DiffPane => _diffPane;
+
+    /// <summary>Test seam: the inline search bar (hidden until '/').</summary>
+    internal TextField SearchBar => _searchBar;
 
     /// <summary>Test seam: the currently selected file index.</summary>
     internal int FileIndex => _fileIndex;
@@ -168,12 +173,46 @@ public sealed class DiffReviewDialog(
             ActivateRow(_fileList.SelectedItem ?? -1);
         };
 
+        // Enter on the diff pane opens the selected line's comment thread(s). The Dialog
+        // consumes Enter as a default-accept before Dispatch's Open case can run, so mirror
+        // the file-list workaround: handle it here and stop the accept from closing the dialog.
+        _diffPane.Accepting += (_, e) =>
+        {
+            e.Handled = true;
+            ViewThreadAtCursor();
+        };
+
+        // A one-line inline search bar anchored to the bottom, hidden until '/'. Enter applies
+        // the query and hides it; Esc hides and clears. While it has focus HandleKey early-returns
+        // so typed runes / '/' / Tab reach the field rather than the command router.
+        _searchBar = new TextField
+        {
+            Y = Pos.AnchorEnd(1),
+            Width = Dim.Fill(),
+            Visible = false,
+        };
+        _searchBar.Accepting += (_, e) =>
+        {
+            e.Handled = true; // stop the Dialog's default-accept from closing us
+            ApplySearch(_searchBar.Text);
+            HideSearchBar();
+        };
+        _searchBar.KeyDown += (_, k) =>
+        {
+            if (k == Terminal.Gui.Input.Key.Esc)
+            {
+                k.Handled = true;
+                HideSearchBar();
+                ApplySearch(null); // clear the highlight/matches
+            }
+        };
+
         vm.Changed += OnChanged;
         dialog.KeyDown += HandleKey;
         // Re-apply the responsive layout when the terminal (and so the dialog) is resized.
         dialog.ViewportChanged += OnViewportChanged;
 
-        dialog.Add(_fileList, _diffHeader, _diffPane);
+        dialog.Add(_fileList, _diffHeader, _diffPane, _searchBar);
         Render();
         return dialog;
     }
@@ -222,6 +261,12 @@ public sealed class DiffReviewDialog(
 
     private void HandleKey(object? sender, Terminal.Gui.Input.Key key)
     {
+        // While the inline search bar is focused, let its own handlers (Enter/Esc) and the
+        // TextField (runes, '/', Tab) own the key — the command router must not intercept it.
+        if (_searchBar.Visible && _searchBar.HasFocus)
+        {
+            return;
+        }
         var token = KeyTokenizer.ToToken(key);
         if (token is null)
         {
@@ -277,6 +322,14 @@ public sealed class DiffReviewDialog(
                 {
                     TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.DiffReview));
                 }
+                return true;
+            case AppCommand.ScrollLeft:
+                _diffPane.ScrollHorizontal(-(count ?? 1)); // clamps at column 0
+                _diffPane.SetNeedsDraw();
+                return true;
+            case AppCommand.ScrollRight:
+                _diffPane.ScrollHorizontal(count ?? 1); // DiffListDataSource.Render honors Viewport.X
+                _diffPane.SetNeedsDraw();
                 return true;
             case AppCommand.CyclePane:
                 if (_diffPane.HasFocus)
@@ -353,6 +406,9 @@ public sealed class DiffReviewDialog(
                 return true;
             case AppCommand.Comment:
                 _ = FireAndForget.Observe(CommentAsync(), app, log);
+                return true;
+            case AppCommand.OpenBranch:
+                OpenSourceBranch();
                 return true;
             default:
                 return false;
@@ -511,7 +567,7 @@ public sealed class DiffReviewDialog(
         _diffPane.SetNeedsDraw();
     }
 
-    /// <summary>/: prompt for a query (editor, or the test seam) and search the current file's diff.</summary>
+    /// <summary>/: reveal the inline search bar (or, under test, take the query from the seam).</summary>
     private void BeginSearch()
     {
         if (SearchPromptAction is not null)
@@ -519,22 +575,37 @@ public sealed class DiffReviewDialog(
             ApplySearch(SearchPromptAction());
             return;
         }
-        _ = FireAndForget.Observe(PromptAndSearchAsync(), app, log);
+        _searchBar.Text = "";
+        _searchBar.Visible = true;
+        _searchBar.SetFocus();
     }
 
-    private async Task PromptAndSearchAsync()
+    /// <summary>Hide the inline search bar and return focus to the diff pane (so n/N work).</summary>
+    private void HideSearchBar()
     {
-        string? query;
-        try
+        _searchBar.Visible = false;
+        _diffPane.SetFocus();
+    }
+
+    /// <summary>g b: open the PR's source branch in the browser (or the test seam).</summary>
+    private void OpenSourceBranch()
+    {
+        if (context is null)
         {
-            query = await editor.EditAsync("", ".txt", Token).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
-        {
-            app.Invoke(() => log($"editor failed: {ex.Message}"));
+            log("no context configured — cannot open the source branch");
             return;
         }
-        app.Invoke(() => ApplySearch(query));
+        var pr = vm.PullRequest;
+        var url = AdoUrls.Branch(context, pr.ProjectName, pr.RepositoryName, pr.SourceBranch);
+        if (OpenUrlAction is not null)
+        {
+            OpenUrlAction(url);
+            return;
+        }
+        if (!BrowserLauncher.TryOpen(url, out var error))
+        {
+            log($"could not open browser: {error}");
+        }
     }
 
     private void ApplySearch(string? query)
@@ -775,8 +846,8 @@ public sealed class DiffReviewDialog(
     /// <summary>The dialog title: PR id, running +Σ/-Σ diff totals, unresolved count, then the key hints.</summary>
     private string TitleFor() =>
         $"diff review !{vm.PrId}  +{vm.TotalAdditions} -{vm.TotalDeletions}  {vm.UnresolvedThreadCount} unresolved — " +
-        "q close · Tab panes · [f/]f file · [c/]c hunk · [t/]t thread · [v/]v unviewed · / search · n/N · " +
-        "z fold · e/E context · s split · c comment · o thread · v vote · m viewed · T filter · ? keys";
+        "q close · Tab panes · h/l scroll · [f/]f file · [c/]c hunk · [t/]t thread · [v/]v unviewed · / search · n/N · " +
+        "z fold · e/E context · s split · c comment · o thread · gb branch · v vote · m viewed · T filter · ? keys";
 
     private void Render()
     {
@@ -1038,10 +1109,10 @@ public sealed class DiffReviewDialog(
             FileChangeKind.Rename => "»",
             _ => "~",
         };
-        var viewed = row.Viewed ? " ✓" : "";
+        var viewed = row.Viewed ? "[✓] " : "[ ] ";
         var unresolved = row.HasUnresolved ? " ●" : "";
         var stats = row.Additions is { } a && row.Deletions is { } d ? $"  +{a} -{d}" : "";
-        return $"{indent}{glyph} {row.Label}{viewed}{unresolved}{stats}";
+        return $"{indent}{viewed}{glyph} {row.Label}{unresolved}{stats}";
     }
 }
 
