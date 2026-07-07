@@ -42,6 +42,25 @@ public class VimScrollTests
         return tv;
     }
 
+    private static TextView LaidOutWrappedTextView(int lines = 30, int width = 30, int height = 12)
+    {
+        // Long lines (well past the ~inner-width viewport) so WordWrap breaks each logical
+        // line into several visual rows: Lines (wrapped) must exceed the logical line count.
+        var body = string.Join("\n", Enumerable.Range(0, lines).Select(i => $"line {i} " + new string('x', 200)));
+        var tv = new TextView
+        {
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+            ReadOnly = true,
+            WordWrap = true,
+            Text = body,
+        };
+        var window = new Window();
+        window.Add(tv);
+        window.Layout(new Size(width, height));
+        return tv;
+    }
+
     [Theory]
     [InlineData(AppCommand.MoveDown)]
     [InlineData(AppCommand.MoveUp)]
@@ -224,6 +243,23 @@ public class VimScrollTests
         VimScroll.Apply(tv, AppCommand.MoveDown, 10); // try to run off the end
 
         Assert.Equal(maxTop, tv.CurrentRow); // clamped at the last page
+    }
+
+    [Fact]
+    public void TextView_MoveBottom_Reveals_Last_Content_When_WordWrapped()
+    {
+        var tv = LaidOutWrappedTextView(lines: 30);
+
+        // Gate: prove wrapping actually happened headlessly, else the test proves nothing.
+        Assert.True(tv.Lines > 30, $"expected wrapped rows > 30 logical lines, got {tv.Lines}");
+        var maxTop = tv.Lines - tv.Viewport.Height;
+
+        VimScroll.Apply(tv, AppCommand.MoveBottom, null);
+        var afterG = tv.CurrentRow;
+        VimScroll.Apply(tv, AppCommand.MoveDown, null); // a further move must not scroll past
+
+        Assert.Equal(afterG, tv.CurrentRow);           // already at the bottom
+        Assert.Equal(maxTop, tv.CurrentRow);           // last wrapped row sits at viewport bottom
     }
 
     [Fact]
