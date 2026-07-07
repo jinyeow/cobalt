@@ -158,12 +158,13 @@ public class DetailDialogKeyDeliveryTests
     }
 
     [Fact]
-    public void PrDialog_G_Jumps_To_Last_Row_And_gg_Back_To_Top()
+    public void PrDialog_G_Scrolls_Last_Page_And_gg_Back_To_Top()
     {
         var detail = LaidOutPrDialog(out var dialog);
+        var maxTop = detail.Body.Lines - detail.Body.Viewport.Height; // pager: top of the last page
 
         dialog.NewKeyDownEvent(new Key('G'));
-        Assert.Equal(199, detail.Body.CurrentRow);
+        Assert.Equal(maxTop, detail.Body.CurrentRow);
 
         dialog.NewKeyDownEvent(new Key('g'));
         dialog.NewKeyDownEvent(new Key('g'));
@@ -339,9 +340,10 @@ public class DetailDialogKeyDeliveryTests
     public void WorkItemDialog_G_And_gg_Jump_To_Ends()
     {
         var detail = LaidOutWorkItemDialog(out var dialog);
+        var maxTop = detail.Body.Lines - detail.Body.Viewport.Height; // pager: top of the last page
 
         dialog.NewKeyDownEvent(new Key('G'));
-        Assert.Equal(199, detail.Body.CurrentRow);
+        Assert.Equal(maxTop, detail.Body.CurrentRow);
 
         dialog.NewKeyDownEvent(new Key('g'));
         dialog.NewKeyDownEvent(new Key('g'));

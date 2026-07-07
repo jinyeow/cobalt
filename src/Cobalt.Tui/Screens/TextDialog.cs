@@ -47,6 +47,7 @@ internal static class TextDialog
             Height = Dim.Fill(),
             ReadOnly = true,
             Text = text,
+            ScrollBars = true, // position indicator; content is scrolled pager-style (VimScroll)
         };
         view = textView;
 

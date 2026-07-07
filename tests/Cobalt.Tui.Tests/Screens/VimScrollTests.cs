@@ -202,13 +202,28 @@ public class VimScrollTests
     }
 
     [Fact]
-    public void TextView_MoveBottom_Goes_To_Last_Row()
+    public void TextView_MoveBottom_Scrolls_The_Last_Page_Into_View()
     {
+        // Pager semantics: G shows the last page (last line at the bottom), so the top
+        // visible row — which the invisible caret is pinned to — is lines - height.
         var tv = LaidOutTextView(lines: 200);
+        var maxTop = tv.Lines - tv.Viewport.Height;
 
         VimScroll.Apply(tv, AppCommand.MoveBottom, null);
 
-        Assert.Equal(199, tv.CurrentRow);
+        Assert.Equal(maxTop, tv.CurrentRow);
+    }
+
+    [Fact]
+    public void TextView_Cannot_Scroll_Past_The_Last_Page()
+    {
+        var tv = LaidOutTextView(lines: 200);
+        var maxTop = tv.Lines - tv.Viewport.Height;
+
+        VimScroll.Apply(tv, AppCommand.MoveBottom, null);
+        VimScroll.Apply(tv, AppCommand.MoveDown, 10); // try to run off the end
+
+        Assert.Equal(maxTop, tv.CurrentRow); // clamped at the last page
     }
 
     [Fact]
