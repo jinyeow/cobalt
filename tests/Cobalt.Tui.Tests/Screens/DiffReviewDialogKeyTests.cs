@@ -330,6 +330,310 @@ public class DiffReviewDialogKeyTests
         Assert.Equal(detail.SideBySideRows[deletionRow].LeftIndex, detail.SelectedDiffLineIndex);
     }
 
+    // ---- context folding (Item 10) ----
+
+    // A modified file with 8 identical leading context lines then one changed line, so the
+    // distant top context run (indices 0..7, > radius 3) collapses into a fold marker.
+    private static async Task<(DiffReviewDialog Detail, Dialog Dialog)> BuiltFoldedDialog()
+    {
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Edit)] };
+        var head = string.Join("\n", Enumerable.Range(0, 8).Select(i => $"ctx {i}"));
+        source.Blobs[("/a.cs", "base")] = head + "\nold\n";
+        source.Blobs[("/a.cs", "src")] = head + "\nnew\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+        detail.DiffPane.SetFocus();
+        return (detail, dialog);
+    }
+
+    [Fact]
+    public async Task Fold_Collapses_Distant_Context_By_Default()
+    {
+        var (detail, _) = await BuiltFoldedDialog();
+
+        // 10 unified lines (8 context + removed + added) collapse: the top 5 context lines fold.
+        Assert.NotNull(detail.DiffRows[0].FoldId);
+        Assert.Equal(5, detail.DiffRows[0].HiddenCount);
+        Assert.Equal(6, detail.DiffRows.Count); // marker + 3 kept context + removed + added
+    }
+
+    [Fact]
+    public async Task Folded_Row_Anchors_To_Its_Original_Line_Not_Its_Row_Index()
+    {
+        var (detail, _) = await BuiltFoldedDialog();
+
+        // Rows: [fold marker, line 5, line 6, line 7, removed 8, added 9]. Row 1's cursor anchors
+        // to unified line 5 — the invariant the single row map exists to guarantee (row ≠ line).
+        Assert.Equal(5, detail.DiffRows[1].LineIndex);
+        detail.DiffPane.SelectedItem = 1;
+        Assert.Equal(5, detail.SelectedDiffLineIndex);
+    }
+
+    [Fact]
+    public async Task Search_Match_Hidden_In_A_Fold_Auto_Expands_And_Selects()
+    {
+        var (detail, dialog) = await BuiltFoldedDialog();
+        detail.SearchPromptAction = () => "ctx 2"; // line index 2 sits inside the collapsed top fold
+
+        dialog.NewKeyDownEvent(new Key('/'));
+
+        Assert.Equal(1, detail.SearchMatchCount);
+        Assert.DoesNotContain(detail.DiffRows, r => r.FoldId is not null); // fold expanded to reveal it
+        Assert.Equal(2, detail.SelectedDiffLineIndex);
+    }
+
+    [Fact]
+    public async Task Selecting_A_Fold_Marker_Anchors_To_Nothing()
+    {
+        var (detail, _) = await BuiltFoldedDialog();
+        var foldRow = detail.DiffRows.ToList().FindIndex(r => r.FoldId is not null);
+        detail.DiffPane.SelectedItem = foldRow;
+
+        Assert.Equal(-1, detail.SelectedDiffLineIndex); // anchorless — comment/thread guards bail
+    }
+
+    [Fact]
+    public async Task E_On_A_Fold_Marker_Expands_That_Fold()
+    {
+        var (detail, dialog) = await BuiltFoldedDialog();
+        var foldRow = detail.DiffRows.ToList().FindIndex(r => r.FoldId is not null);
+        detail.DiffPane.SelectedItem = foldRow;
+
+        dialog.NewKeyDownEvent(new Key('e'));
+
+        Assert.DoesNotContain(detail.DiffRows, r => r.FoldId is not null);
+    }
+
+    [Fact]
+    public async Task Shift_E_Expands_Every_Fold()
+    {
+        var (detail, dialog) = await BuiltFoldedDialog();
+        var folded = detail.DiffRows.Count;
+
+        dialog.NewKeyDownEvent(new Key('E'));
+
+        Assert.Equal(10, detail.DiffRows.Count); // every unified line now visible
+        Assert.True(detail.DiffRows.Count > folded);
+        Assert.DoesNotContain(detail.DiffRows, r => r.FoldId is not null);
+    }
+
+    [Fact]
+    public async Task Side_By_Side_Does_Not_Fold()
+    {
+        var (detail, dialog) = await BuiltFoldedDialog();
+        dialog.NewKeyDownEvent(new Key('s'));
+
+        Assert.True(detail.SideBySide);
+        Assert.DoesNotContain(detail.DiffRows, r => r.FoldId is not null); // full context in SBS
+    }
+
+    // ---- diff search (Item 7) ----
+
+    // An added file with the term "needle" on two lines (indices 1 and 3).
+    private static async Task<(DiffReviewDialog Detail, Dialog Dialog)> BuiltSearchDialog()
+    {
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Add)] };
+        source.Blobs[("/a.cs", "src")] = "alpha\nneedle one\nbeta\nneedle two\ngamma\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+        detail.DiffPane.SetFocus();
+        return (detail, dialog);
+    }
+
+    [Fact]
+    public async Task Slash_Jumps_To_The_First_Match_And_n_N_Cycle()
+    {
+        var (detail, dialog) = await BuiltSearchDialog();
+        detail.SearchPromptAction = () => "needle";
+
+        dialog.NewKeyDownEvent(new Key('/'));
+        Assert.Equal(2, detail.SearchMatchCount);
+        Assert.Equal(1, detail.SelectedDiffLineIndex); // first match line
+
+        dialog.NewKeyDownEvent(new Key('n'));
+        Assert.Equal(3, detail.SelectedDiffLineIndex); // next match line
+
+        dialog.NewKeyDownEvent(new Key('N'));
+        Assert.Equal(1, detail.SelectedDiffLineIndex); // back to first
+    }
+
+    // ---- hunk / thread / unviewed navigation (Item 2) ----
+
+    // Two changed lines (top + bottom) separated by 5 context lines: two hunks at line 0 and 7.
+    private static async Task<(DiffReviewDialog Detail, Dialog Dialog)> BuiltTwoHunkDialog()
+    {
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Edit)] };
+        source.Blobs[("/a.cs", "base")] = "a\nb\nc\nd\ne\nf\ng\n";
+        source.Blobs[("/a.cs", "src")] = "A\nb\nc\nd\ne\nf\nG\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+        detail.DiffPane.SetFocus();
+        return (detail, dialog);
+    }
+
+    [Fact]
+    public async Task Bracket_c_Navigates_Hunks()
+    {
+        var (detail, dialog) = await BuiltTwoHunkDialog();
+
+        dialog.NewKeyDownEvent(new Key(']'));
+        dialog.NewKeyDownEvent(new Key('c'));
+        Assert.Equal(7, detail.SelectedDiffLineIndex); // second hunk (removed 'g')
+
+        dialog.NewKeyDownEvent(new Key('['));
+        dialog.NewKeyDownEvent(new Key('c'));
+        Assert.Equal(0, detail.SelectedDiffLineIndex); // back to first hunk
+    }
+
+    [Fact]
+    public async Task Bracket_t_Navigates_Threads()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add)],
+            Threads =
+            [
+                new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "c1", false)], "/a.cs", RightLine: 2, LeftLine: null),
+                new PrThread(2, PrThreadStatus.Active, [new PrComment(2, "Sam", "c2", false)], "/a.cs", RightLine: 5, LeftLine: null),
+            ],
+        };
+        source.Blobs[("/a.cs", "src")] = "l0\nl1\nl2\nl3\nl4\nl5\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+        detail.DiffPane.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key(']'));
+        dialog.NewKeyDownEvent(new Key('t'));
+        Assert.Equal(1, detail.SelectedDiffLineIndex); // right line 2 → index 1
+
+        dialog.NewKeyDownEvent(new Key(']'));
+        dialog.NewKeyDownEvent(new Key('t'));
+        Assert.Equal(4, detail.SelectedDiffLineIndex); // right line 5 → index 4
+    }
+
+    [Fact]
+    public async Task Bracket_v_Moves_To_Next_Unviewed_Skipping_Viewed()
+    {
+        var (detail, dialog) = await BuiltDialog(); // a, b, c, d at root
+        detail.FileList.SetFocus();
+
+        // Mark file b viewed, then return to a.
+        dialog.NewKeyDownEvent(new Key(']'));
+        dialog.NewKeyDownEvent(new Key('f'));
+        Assert.Equal(1, detail.FileIndex);
+        dialog.NewKeyDownEvent(new Key('m'));
+        dialog.NewKeyDownEvent(new Key('['));
+        dialog.NewKeyDownEvent(new Key('f'));
+        Assert.Equal(0, detail.FileIndex);
+
+        dialog.NewKeyDownEvent(new Key(']'));
+        dialog.NewKeyDownEvent(new Key('v'));
+
+        Assert.Equal(2, detail.FileIndex); // skipped the viewed b, landed on c
+    }
+
+    // ---- mark viewed / stats (Items 8, 5) ----
+
+    [Fact]
+    public async Task M_Marks_The_Current_File_Viewed()
+    {
+        var (detail, dialog) = await BuiltModifiedDialog();
+        Assert.False(detail.Rows.Single(r => r.Kind == FileTreeRowKind.File).Viewed);
+
+        dialog.NewKeyDownEvent(new Key('m'));
+
+        Assert.True(detail.Rows.Single(r => r.Kind == FileTreeRowKind.File).Viewed);
+    }
+
+    [Fact]
+    public async Task File_Row_Shows_Diff_Stats()
+    {
+        var (detail, _) = await BuiltModifiedDialog(); // one line removed + one added
+
+        var row = detail.Rows.Single(r => r.Kind == FileTreeRowKind.File);
+        Assert.Equal(1, row.Additions);
+        Assert.Equal(1, row.Deletions);
+    }
+
+    // ---- vote (Item 4) ----
+
+    [Fact]
+    public async Task V_Applies_The_Chosen_Vote()
+    {
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Add)] };
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        PrVote? applied = null;
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { })
+        {
+            VoteChooser = (_, labels) => labels.ToList().IndexOf("reject"),
+            VoteAction = v => applied = v,
+        };
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('v'));
+
+        Assert.Equal(PrVote.Rejected, applied); // picker choice maps to the right vote
+    }
+
+    // ---- unresolved-file filter (Item 6) ----
+
+    [Fact]
+    public async Task T_Filters_To_Files_With_Unresolved_Threads()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes =
+            [
+                new FileChange("/a.cs", FileChangeKind.Add), // index 0
+                new FileChange("/b.cs", FileChangeKind.Add), // index 1 — has the thread
+                new FileChange("/c.cs", FileChangeKind.Add), // index 2
+            ],
+            Threads =
+            [
+                new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "fix", false)], "/b.cs", RightLine: 1, LeftLine: null),
+            ],
+        };
+        foreach (var p in new[] { "/a.cs", "/b.cs", "/c.cs" })
+        {
+            source.Blobs[(p, "src")] = "x\n";
+        }
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+        detail.FileList.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('T'));
+
+        var files = detail.Rows.Where(r => r.Kind == FileTreeRowKind.File).ToList();
+        Assert.Single(files);
+        Assert.Equal("/b.cs", files[0].NodePath);
+        Assert.True(files[0].HasUnresolved);
+        Assert.Equal(1, detail.FileIndex); // current file resolved to b's identity in vm.Files
+    }
+
     // ---- responsive layout (Item 2) ----
 
     [Fact]

@@ -120,7 +120,10 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines) : IListD
             }
             : listView.GetAttributeForRole(RoleFor(style.Token)).Foreground;
 
-        var background = BackgroundFor(listView, style.LineKind, style.Emphasis);
+        // A search hit wins the background so matches stand out over the diff tint.
+        var background = style.SearchHit
+            ? new Color("#6b5a00")
+            : BackgroundFor(listView, style.LineKind, style.Emphasis);
         return new Attribute(foreground, background);
     }
 

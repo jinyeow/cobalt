@@ -34,11 +34,21 @@ public sealed class DiffReviewDialog(
     private int _fileIndex;
     private string? _renderedDiffPath;
     private bool _sideBySide;
-    private IReadOnlyList<SideBySideRow> _sbsRows = [];
+    private DiffFoldState? _foldState;
+    private IReadOnlyList<DiffRow> _diffRows = [];
+    private string? _searchQuery;
+    private IReadOnlyList<(int LineIndex, LineSpan Span)> _searchMatches = [];
+    private int _searchIndex;
     private int _lastDialogWidth = -1;
     private int _diffContentWidth = 1;
 
     private CancellationToken Token => _cts.Token;
+
+    private static readonly string[] VoteLabels =
+        ["approve", "approve w/ suggestions", "wait for author", "reject", "reset"];
+
+    private static readonly PrVote[] VoteValues =
+        [PrVote.Approved, PrVote.ApprovedWithSuggestions, PrVote.WaitingForAuthor, PrVote.Rejected, PrVote.NoVote];
 
     /// <summary>Test seam: replaces the default close (app.RequestStop) so a test can observe close without a run loop.</summary>
     internal Action? CloseAction { get; set; }
@@ -48,6 +58,18 @@ public sealed class DiffReviewDialog(
 
     /// <summary>Test seam: replaces the real comment overlay (needs a run loop) so a test can observe the shown text.</summary>
     internal Action<string>? ViewThreadAction { get; set; }
+
+    /// <summary>Test seam: supplies the search query in place of the editor prompt (needs a run loop).</summary>
+    internal Func<string?>? SearchPromptAction { get; set; }
+
+    /// <summary>Test seam: replaces the real vote picker (needs MessageBox/run loop) so a test can drive the choice.</summary>
+    internal Func<string, IReadOnlyList<string>, int?>? VoteChooser { get; set; }
+
+    /// <summary>Test seam: replaces applying the chosen vote (needs app.Invoke/run loop) so a test can observe it.</summary>
+    internal Action<PrVote>? VoteAction { get; set; }
+
+    /// <summary>Test seam: the number of matches for the active search (0 when no search).</summary>
+    internal int SearchMatchCount => _searchMatches.Count;
 
     /// <summary>Test seam: the changed-file list pane.</summary>
     internal ListView FileList => _fileList;
@@ -64,8 +86,12 @@ public sealed class DiffReviewDialog(
     /// <summary>Test seam: whether the diff pane is in side-by-side mode.</summary>
     internal bool SideBySide => _sideBySide;
 
-    /// <summary>Test seam: the side-by-side row map (empty in unified mode).</summary>
-    internal IReadOnlyList<SideBySideRow> SideBySideRows => _sbsRows;
+    /// <summary>Test seam: the side-by-side row map, projected from the unified row map (empty in unified mode).</summary>
+    internal IReadOnlyList<SideBySideRow> SideBySideRows =>
+        _sideBySide ? [.. _diffRows.Select(r => new SideBySideRow(r.LeftIndex, r.RightIndex))] : [];
+
+    /// <summary>Test seam: the single row→line map every diff-pane consumer (comment, thread, nav, search) goes through.</summary>
+    internal IReadOnlyList<DiffRow> DiffRows => _diffRows;
 
     /// <summary>Test seam: the unified diff-line index the comment action would target for the current selection.</summary>
     internal int SelectedDiffLineIndex => SelectedDiffLine();
@@ -95,7 +121,7 @@ public sealed class DiffReviewDialog(
     {
         var dialog = new Dialog
         {
-            Title = $"diff review !{vm.PrId} — q close · Tab files/diff · [ ] file · z fold · s split · c comment · o view · ? keys",
+            Title = TitleFor(),
             Width = Dim.Percent(96),
             Height = Dim.Percent(96),
         };
@@ -280,6 +306,48 @@ public sealed class DiffReviewDialog(
             case AppCommand.ToggleDiffMode:
                 ToggleDiffMode();
                 return true;
+            case AppCommand.ExpandContext:
+                ExpandFoldAtCursor();
+                return true;
+            case AppCommand.ExpandAllContext:
+                ExpandAllFolds();
+                return true;
+            case AppCommand.SearchDiff:
+                BeginSearch();
+                return true;
+            case AppCommand.SearchNext:
+                StepSearch(forward: true);
+                return true;
+            case AppCommand.SearchPrev:
+                StepSearch(forward: false);
+                return true;
+            case AppCommand.NextHunk:
+                NavHunk(forward: true, count ?? 1);
+                return true;
+            case AppCommand.PrevHunk:
+                NavHunk(forward: false, count ?? 1);
+                return true;
+            case AppCommand.NextThread:
+                NavThread(forward: true, count ?? 1);
+                return true;
+            case AppCommand.PrevThread:
+                NavThread(forward: false, count ?? 1);
+                return true;
+            case AppCommand.NextUnviewedFile:
+                _ = StepUnviewedFile(1);
+                return true;
+            case AppCommand.PrevUnviewedFile:
+                _ = StepUnviewedFile(-1);
+                return true;
+            case AppCommand.MarkViewed:
+                MarkCurrentViewed();
+                return true;
+            case AppCommand.ToggleThreadFilter:
+                ToggleThreadFilter();
+                return true;
+            case AppCommand.Vote:
+                Vote();
+                return true;
             case AppCommand.Comment:
                 _ = FireAndForget.Observe(CommentAsync(), app, log);
                 return true;
@@ -301,7 +369,13 @@ public sealed class DiffReviewDialog(
         }
     }
 
-    private async Task LoadAsync() => await vm.LoadAsync(Token).IgnoreCancellationAsync();
+    private async Task LoadAsync()
+    {
+        await vm.LoadAsync(Token).IgnoreCancellationAsync();
+        // Fill per-file diff stats (StatsFor / totals) in the background so file rows and the
+        // header totals populate; each computed file raises Changed → a re-render.
+        _ = FireAndForget.Observe(vm.PrefetchAllDiffsAsync(Token).IgnoreCancellationAsync(), app, log);
+    }
 
     private async Task SelectFile(int index)
     {
@@ -357,14 +431,15 @@ public sealed class DiffReviewDialog(
             return;
         }
 
-        var text = FormatThreads(threads);
+        // The seam receives the formatted text (headless tests); the real path opens the
+        // interactive thread overlay (reply / resolve / reactivate) on the anchored thread(s).
         if (ViewThreadAction is not null)
         {
-            ViewThreadAction(text);
+            ViewThreadAction(FormatThreads(threads));
         }
         else
         {
-            TextDialog.Show(app, "comments", text);
+            new ThreadViewDialog(app, vm, editor, log, threads).Show();
         }
     }
 
@@ -396,16 +471,268 @@ public sealed class DiffReviewDialog(
         log(_sideBySide ? "side-by-side diff" : "unified diff");
     }
 
-    /// <summary>The unified diff-line index the diff-pane cursor points at, in either mode (new side preferred).</summary>
+    /// <summary>e: expand the fold whose marker is selected, or the first collapsed fold if the cursor is elsewhere.</summary>
+    private void ExpandFoldAtCursor()
+    {
+        if (_sideBySide || _foldState is null)
+        {
+            return;
+        }
+        var sel = _diffPane.SelectedItem ?? -1;
+        var foldId = sel >= 0 && sel < _diffRows.Count ? _diffRows[sel].FoldId : null;
+        foldId ??= _diffRows.FirstOrDefault(r => r.FoldId is not null)?.FoldId;
+        if (foldId is { } id)
+        {
+            _foldState = _foldState.Expand(id);
+            Render();
+            _diffPane.SetNeedsDraw();
+        }
+    }
+
+    /// <summary>E: expand every fold in the current file (show full context).</summary>
+    private void ExpandAllFolds()
+    {
+        if (_sideBySide || _foldState is null)
+        {
+            return;
+        }
+        _foldState = _foldState.ExpandAll();
+        Render();
+        _diffPane.SetNeedsDraw();
+    }
+
+    /// <summary>/: prompt for a query (editor, or the test seam) and search the current file's diff.</summary>
+    private void BeginSearch()
+    {
+        if (SearchPromptAction is not null)
+        {
+            ApplySearch(SearchPromptAction());
+            return;
+        }
+        _ = FireAndForget.Observe(PromptAndSearchAsync(), app, log);
+    }
+
+    private async Task PromptAndSearchAsync()
+    {
+        string? query;
+        try
+        {
+            query = await editor.EditAsync("", ".txt", Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
+        {
+            app.Invoke(() => log($"editor failed: {ex.Message}"));
+            return;
+        }
+        app.Invoke(() => ApplySearch(query));
+    }
+
+    private void ApplySearch(string? query)
+    {
+        if (vm.CurrentDiff is not { } diff || string.IsNullOrWhiteSpace(query))
+        {
+            _searchQuery = null;
+            _searchMatches = [];
+            Render();
+            return;
+        }
+        _searchQuery = query.Trim();
+        _searchMatches = DiffSearch.Find(diff.Lines, _searchQuery);
+        _searchIndex = 0;
+        Render();
+        if (_searchMatches.Count > 0)
+        {
+            EnsureVisibleAndSelect(_searchMatches[_searchIndex].LineIndex);
+        }
+        else
+        {
+            log($"no matches for \"{_searchQuery}\"");
+        }
+    }
+
+    /// <summary>n/N: move to the next/previous search match, wrapping, expanding a fold that hides it.</summary>
+    private void StepSearch(bool forward)
+    {
+        if (_searchMatches.Count == 0)
+        {
+            return;
+        }
+        _searchIndex = forward
+            ? DiffSearch.Next(_searchMatches, _searchIndex)
+            : DiffSearch.Prev(_searchMatches, _searchIndex);
+        EnsureVisibleAndSelect(_searchMatches[_searchIndex].LineIndex);
+    }
+
+    /// <summary>Select the row showing a unified line, expanding all folds first if that line is hidden.</summary>
+    private void EnsureVisibleAndSelect(int lineIndex)
+    {
+        if (!_sideBySide && _foldState is not null && !IsLineVisible(lineIndex))
+        {
+            _foldState = _foldState.ExpandAll();
+            Render();
+        }
+        SelectDiffLine(lineIndex);
+        _diffPane.SetNeedsDraw();
+    }
+
+    private bool IsLineVisible(int lineIndex) =>
+        _diffRows.Any(r => r.LineIndex == lineIndex || r.LeftIndex == lineIndex || r.RightIndex == lineIndex);
+
+    /// <summary>]c/[c: move the diff-pane selection to the next/previous change hunk, count-aware.</summary>
+    private void NavHunk(bool forward, int count)
+    {
+        if (vm.CurrentDiff is not { Lines.Count: > 0 } diff)
+        {
+            return;
+        }
+        var from = CurrentUnifiedLine();
+        var target = forward
+            ? DiffNavigator.NextHunk(diff.Lines, from, count)
+            : DiffNavigator.PrevHunk(diff.Lines, from, count);
+        EnsureVisibleAndSelect(target);
+    }
+
+    /// <summary>]t/[t: move the diff-pane selection to the next/previous commented line, count-aware.</summary>
+    private void NavThread(bool forward, int count)
+    {
+        if (vm.CurrentDiff is not { Lines.Count: > 0 } diff)
+        {
+            return;
+        }
+        bool HasThread(int i) => vm.ThreadsForDiffLine(diff.Lines[i]).Count > 0;
+        var from = CurrentUnifiedLine();
+        var target = forward
+            ? DiffNavigator.NextThread(diff.Lines, from, HasThread, count)
+            : DiffNavigator.PrevThread(diff.Lines, from, HasThread, count);
+        EnsureVisibleAndSelect(target);
+    }
+
+    /// <summary>The unified diff-line nearest the cursor for navigation (skips forward off a fold marker).</summary>
+    private int CurrentUnifiedLine()
+    {
+        var sel = _diffPane.SelectedItem ?? 0;
+        for (var i = sel; i < _diffRows.Count; i++)
+        {
+            if (_diffRows[i].Anchor is { } a)
+            {
+                return a;
+            }
+        }
+        for (var i = sel - 1; i >= 0; i--)
+        {
+            if (_diffRows[i].Anchor is { } a)
+            {
+                return a;
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>]v/[v: select the next/previous file whose diff has not been marked viewed.</summary>
+    private async Task StepUnviewedFile(int delta)
+    {
+        var fileRows = _rows.Where(r => r.FileIndex is not null).ToList();
+        if (fileRows.Count == 0)
+        {
+            return;
+        }
+        var currentPath = _fileIndex >= 0 && _fileIndex < vm.Files.Count ? vm.Files[_fileIndex].Path : null;
+        var current = fileRows.FindIndex(r => string.Equals(r.NodePath, currentPath, StringComparison.Ordinal));
+        for (var i = (current < 0 ? 0 : current) + delta; i >= 0 && i < fileRows.Count; i += delta)
+        {
+            if (!vm.IsViewed(fileRows[i].NodePath))
+            {
+                await SelectFile(FileIndexForPath(fileRows[i].NodePath));
+                return;
+            }
+        }
+    }
+
+    /// <summary>m: mark the file shown in the diff pane viewed (a ✓ in the tree).</summary>
+    private void MarkCurrentViewed()
+    {
+        if (vm.SelectedFile?.Path is not { } path)
+        {
+            return;
+        }
+        vm.MarkViewed(path);
+        Render();
+        log($"marked viewed: {path}");
+    }
+
+    /// <summary>T: toggle the file list between all files and only those with unresolved threads.</summary>
+    private void ToggleThreadFilter()
+    {
+        vm.OnlyUnresolvedFiles = !vm.OnlyUnresolvedFiles;
+        // The displayed file may not survive the filter; fall back to the first filtered file.
+        // SelectFile sets _fileIndex synchronously, so the following Render tracks the new identity.
+        if (vm.OnlyUnresolvedFiles && vm.SelectedFile is { } file &&
+            !vm.FilteredFiles.Any(f => string.Equals(f.Path, file.Path, StringComparison.Ordinal)) &&
+            vm.FilteredFiles.Count > 0)
+        {
+            _ = SelectFile(FileIndexForPath(vm.FilteredFiles[0].Path));
+        }
+        Render();
+        log(vm.OnlyUnresolvedFiles ? "showing files with unresolved threads" : "showing all files");
+    }
+
+    /// <summary>v: pick a vote (MessageBox, or the test chooser) and apply it to the PR.</summary>
+    private void Vote()
+    {
+        var choose = VoteChooser ?? new Func<string, IReadOnlyList<string>, int?>(
+            (title, options) => MessageBox.Query(app, title, "", [.. options]));
+        if (choose("vote", VoteLabels) is { } index && index >= 0 && index < VoteValues.Length)
+        {
+            var vote = VoteValues[index];
+            if (VoteAction is not null)
+            {
+                VoteAction(vote);
+                return;
+            }
+            _ = FireAndForget.Observe(RunVoteAsync(vote, VoteLabels[index]), app, log);
+        }
+    }
+
+    private async Task RunVoteAsync(PrVote vote, string label)
+    {
+        await vm.VoteAsync(vote, Token).ConfigureAwait(false);
+        app.Invoke(() => log(vm.Error is { } e ? $"vote failed: {e}" : $"voted: {label}"));
+    }
+
+    private int FileIndexForPath(string path)
+    {
+        for (var i = 0; i < vm.Files.Count; i++)
+        {
+            if (string.Equals(vm.Files[i].Path, path, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /// <summary>A dim placeholder row standing in for a run of hidden context lines.</summary>
+    private static StyledLine FoldMarkerLine(int hidden)
+    {
+        var text = $"    ··· {hidden} lines ···";
+        return new StyledLine(
+            text,
+            [new StyledRun(0, text.Length, new RunStyle(TokenKind.Comment, DiffLineKind.Context, Emphasis: false, IsGutter: false))]);
+    }
+
+    /// <summary>
+    /// The unified diff-line index the diff-pane cursor points at, in either mode (new side
+    /// preferred). Returns -1 for an anchorless row (a fold marker) so comment/thread guards
+    /// bail cleanly rather than anchoring to line 0.
+    /// </summary>
     private int SelectedDiffLine()
     {
         var sel = _diffPane.SelectedItem ?? 0;
-        if (_sideBySide && sel >= 0 && sel < _sbsRows.Count)
+        if (sel >= 0 && sel < _diffRows.Count)
         {
-            var row = _sbsRows[sel];
-            return row.RightIndex ?? row.LeftIndex ?? 0;
+            return _diffRows[sel].Anchor ?? -1;
         }
-        return sel;
+        return -1;
     }
 
     /// <summary>Move the diff-pane cursor to the row showing a given unified diff line, in either mode.</summary>
@@ -415,25 +742,32 @@ public sealed class DiffReviewDialog(
         {
             return;
         }
-        var target = unifiedIndex;
-        if (_sideBySide)
+        var target = 0;
+        for (var i = 0; i < _diffRows.Count; i++)
         {
-            target = 0;
-            for (var i = 0; i < _sbsRows.Count; i++)
+            var row = _diffRows[i];
+            if (row.LineIndex == unifiedIndex || row.RightIndex == unifiedIndex || row.LeftIndex == unifiedIndex)
             {
-                if (_sbsRows[i].RightIndex == unifiedIndex || _sbsRows[i].LeftIndex == unifiedIndex)
-                {
-                    target = i;
-                    break;
-                }
+                target = i;
+                break;
             }
         }
         _diffPane.SelectedItem = Math.Clamp(target, 0, source.Count - 1);
     }
 
+    /// <summary>The dialog title: PR id, running +Σ/-Σ diff totals, unresolved count, then the key hints.</summary>
+    private string TitleFor() =>
+        $"diff review !{vm.PrId}  +{vm.TotalAdditions} -{vm.TotalDeletions}  {vm.UnresolvedThreadCount} unresolved — " +
+        "q close · Tab panes · [f/]f file · [c/]c hunk · [t/]t thread · [v/]v unviewed · / search · n/N · " +
+        "z fold · e/E context · s split · c comment · o thread · v vote · m viewed · T filter · ? keys";
+
     private void Render()
     {
         ApplyResponsiveLayout();
+        if (_dialog is not null)
+        {
+            _dialog.Title = TitleFor();
+        }
 
         if (vm.IsLoading)
         {
@@ -461,23 +795,64 @@ public sealed class DiffReviewDialog(
             // to the top only when the selected file actually changed.
             var sameFile = file?.Path == _renderedDiffPath;
             var keepLine = sameFile ? _diffPane.SelectedItem : 0;
+            if (!sameFile)
+            {
+                // Search matches are line-index scoped to one file; drop them when the file changes.
+                _searchQuery = null;
+                _searchMatches = [];
+            }
             _renderedDiffPath = file?.Path;
 
             var language = LanguageDetector.FromPath(file?.Path ?? "");
             bool HasThread(DiffLine l) => vm.ThreadsForDiffLine(l).Count > 0;
+            var rows = new List<DiffRow>();
             List<StyledLine> styled;
             if (_sideBySide)
             {
-                _sbsRows = SideBySideComposer.Pair(diff.Lines);
+                // Side-by-side shows full context (no fold), so drop any fold state.
+                _foldState = null;
+                var sbs = SideBySideComposer.Pair(diff.Lines);
+                foreach (var r in sbs)
+                {
+                    rows.Add(new DiffRow(null, r.LeftIndex, r.RightIndex, null, null));
+                }
                 var columnWidth = Math.Max(1, (_diffContentWidth - SideBySideComposer.Separator.Length) / 2);
-                styled = [.. SideBySideComposer.Compose(diff.Lines, _sbsRows, language, HasThread, columnWidth)];
+                styled = [.. SideBySideComposer.Compose(diff.Lines, sbs, language, HasThread, columnWidth)];
             }
             else
             {
-                _sbsRows = [];
-                styled = [.. diff.Lines.Select(l =>
-                    DiffLineStyler.Compose(l, SyntaxTokenizer.Tokenize(l.Text, language), HasThread(l)))];
+                // Unified folds distant context (radius 3) by default; e/E expand. Rebuild the
+                // fold state only when the file changes (or after a mode toggle nulled it), so
+                // e/E expansions survive same-file refreshes (thread markers, mark-viewed).
+                if (!sameFile || _foldState is null)
+                {
+                    _foldState = DiffFoldState.Create(diff.Lines);
+                }
+                var hitsByLine = _searchMatches.Count == 0
+                    ? null
+                    : _searchMatches.GroupBy(m => m.LineIndex)
+                        .ToDictionary(g => g.Key, g => (IReadOnlyList<LineSpan>)[.. g.Select(m => m.Span)]);
+                styled = [];
+                foreach (var foldRow in _foldState.Rows())
+                {
+                    if (foldRow.Line is { } line && foldRow.LineIndex is { } li)
+                    {
+                        rows.Add(new DiffRow(li, null, null, null, null));
+                        var composed = DiffLineStyler.Compose(line, SyntaxTokenizer.Tokenize(line.Text, language), HasThread(line));
+                        if (hitsByLine is not null && hitsByLine.TryGetValue(li, out var spans))
+                        {
+                            composed = DiffLineStyler.WithSearchHits(composed, spans, composed.Runs[0].Length);
+                        }
+                        styled.Add(composed);
+                    }
+                    else
+                    {
+                        rows.Add(new DiffRow(null, null, null, foldRow.FoldId, foldRow.HiddenCount));
+                        styled.Add(FoldMarkerLine(foldRow.HiddenCount ?? 0));
+                    }
+                }
             }
+            _diffRows = rows;
             _diffPane.Source = new DiffListDataSource(styled);
             if (styled.Count > 0)
             {
@@ -495,7 +870,10 @@ public sealed class DiffReviewDialog(
     /// </summary>
     private void RebuildFileList(string? selectNodePath)
     {
-        _rows = FileTree.Flatten(vm.Files, _collapsedDirs);
+        // When the unresolved filter is on, build the tree from the filtered projection; leaves
+        // still carry their real path as NodePath, so opening resolves to vm.Files by path.
+        var files = vm.OnlyUnresolvedFiles ? vm.FilteredFiles : vm.Files;
+        _rows = FileTree.Flatten(files, _collapsedDirs, BuildAnnotations());
         var strings = _rows.Select(FormatRow).ToList();
         if (!strings.SequenceEqual(_fileListStrings, StringComparer.Ordinal))
         {
@@ -522,9 +900,15 @@ public sealed class DiffReviewDialog(
         {
             ToggleFold(row.NodePath);
         }
-        else if (row.FileIndex is { } fileIndex)
+        else if (row.FileIndex is not null)
         {
-            _ = SelectFile(fileIndex);
+            // Resolve by path (not the row's FileIndex, which is filtered-relative) so the diff
+            // pane and _fileIndex always track the same identity in vm.Files.
+            var fileIndex = FileIndexForPath(row.NodePath);
+            if (fileIndex >= 0)
+            {
+                _ = SelectFile(fileIndex);
+            }
         }
     }
 
@@ -569,10 +953,29 @@ public sealed class DiffReviewDialog(
         {
             return;
         }
-        var current = fileRows.FindIndex(r => r.FileIndex == _fileIndex);
+        var currentPath = _fileIndex >= 0 && _fileIndex < vm.Files.Count ? vm.Files[_fileIndex].Path : null;
+        var current = fileRows.FindIndex(r => string.Equals(r.NodePath, currentPath, StringComparison.Ordinal));
         var next = Math.Clamp((current < 0 ? 0 : current) + delta, 0, fileRows.Count - 1);
-        await SelectFile(fileRows[next].FileIndex!.Value);
+        await SelectFile(FileIndexForPath(fileRows[next].NodePath));
     }
+
+    /// <summary>Per-file review metadata (diff stat, viewed, unresolved) keyed by path for the tree.</summary>
+    private IReadOnlyDictionary<string, FileAnnotation> BuildAnnotations()
+    {
+        var map = new Dictionary<string, FileAnnotation>(StringComparer.Ordinal);
+        foreach (var file in vm.Files)
+        {
+            var stats = vm.StatsFor(file.Path);
+            map[file.Path] = new FileAnnotation(
+                stats?.Additions, stats?.Deletions, vm.IsViewed(file.Path), HasUnresolvedThread(file.Path));
+        }
+        return map;
+    }
+
+    private bool HasUnresolvedThread(string path) =>
+        vm.Threads.Any(t =>
+            t.Status == PrThreadStatus.Active && !t.IsSystemOnly &&
+            string.Equals(t.FilePath, path, StringComparison.Ordinal));
 
     private FileTreeRow? NearestAncestorDir(int rowIndex)
     {
@@ -617,6 +1020,23 @@ public sealed class DiffReviewDialog(
             FileChangeKind.Rename => "»",
             _ => "~",
         };
-        return $"{indent}{glyph} {row.Label}";
+        var viewed = row.Viewed ? " ✓" : "";
+        var unresolved = row.HasUnresolved ? " ●" : "";
+        var stats = row.Additions is { } a && row.Deletions is { } d ? $"  +{a} -{d}" : "";
+        return $"{indent}{glyph} {row.Label}{viewed}{unresolved}{stats}";
     }
+}
+
+/// <summary>
+/// One visible diff-pane row mapped back to the original unified <see cref="DiffLine"/> list.
+/// The single map every consumer (comment/thread anchoring, hunk/thread/search navigation)
+/// resolves through, so anchoring stays correct across unified, folded, and side-by-side modes.
+/// A unified line sets <see cref="LineIndex"/>; a side-by-side row sets <see cref="LeftIndex"/>/
+/// <see cref="RightIndex"/>; a fold marker sets <see cref="FoldId"/>/<see cref="HiddenCount"/>
+/// and is anchorless.
+/// </summary>
+internal sealed record DiffRow(int? LineIndex, int? LeftIndex, int? RightIndex, int? FoldId, int? HiddenCount)
+{
+    /// <summary>The unified diff-line this row anchors to (new/right side preferred); null for a fold marker.</summary>
+    public int? Anchor => LineIndex ?? RightIndex ?? LeftIndex;
 }
