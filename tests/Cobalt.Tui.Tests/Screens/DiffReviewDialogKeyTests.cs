@@ -168,4 +168,83 @@ public class DiffReviewDialogKeyTests
 
         Assert.True(closed);
     }
+
+    // ---- directory-tree file list (Item 1) ----
+
+    // Two files under src/Web plus a root README, so the tree has a folder row.
+    private static async Task<(DiffReviewDialog Detail, Dialog Dialog)> BuiltTreeDialog()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes =
+            [
+                new FileChange("/src/Web/Home.cs", FileChangeKind.Add),  // fileIndex 0
+                new FileChange("/src/Web/About.cs", FileChangeKind.Add), // fileIndex 1
+                new FileChange("/README.md", FileChangeKind.Add),        // fileIndex 2
+            ],
+        };
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+        dialog.SetFocus();
+        detail.FileList.SetFocus();
+        return (detail, dialog);
+    }
+
+    [Fact]
+    public async Task Load_Highlights_The_Displayed_Files_Leaf_Not_A_Folder()
+    {
+        var (detail, _) = await BuiltTreeDialog();
+
+        var selected = detail.Rows[detail.FileList.SelectedItem!.Value];
+        Assert.Equal(FileTreeRowKind.File, selected.Kind);
+        Assert.Equal(detail.FileIndex, selected.FileIndex);
+    }
+
+    [Fact]
+    public async Task NextFile_Steps_Over_Folder_Rows_And_Only_Lands_On_Files()
+    {
+        var (detail, dialog) = await BuiltTreeDialog();
+
+        // Walk to the end; every landing is a file leaf, never a folder header.
+        for (var i = 0; i < 5; i++)
+        {
+            dialog.NewKeyDownEvent(new Key(']'));
+            Assert.Equal(FileTreeRowKind.File, detail.Rows[detail.FileList.SelectedItem!.Value].Kind);
+        }
+
+        Assert.Equal(2, detail.FileIndex); // clamped at README (the last visible leaf)
+    }
+
+    [Fact]
+    public async Task Enter_On_A_Folder_Row_Collapses_It()
+    {
+        var (detail, dialog) = await BuiltTreeDialog();
+        var folder = detail.Rows.ToList().FindIndex(r => r.Kind == FileTreeRowKind.Directory);
+        detail.FileList.SelectedItem = folder;
+        var before = detail.FileList.Source!.Count;
+
+        dialog.NewKeyDownEvent(Key.Enter);
+
+        Assert.True(detail.Rows[folder].Collapsed);
+        Assert.True(detail.FileList.Source!.Count < before); // the folder's leaves are hidden
+    }
+
+    [Fact]
+    public async Task Z_Toggles_The_Folder_Under_The_Cursor()
+    {
+        var (detail, dialog) = await BuiltTreeDialog();
+        var folder = detail.Rows.ToList().FindIndex(r => r.Kind == FileTreeRowKind.Directory);
+        detail.FileList.SelectedItem = folder;
+        var expanded = detail.FileList.Source!.Count;
+
+        dialog.NewKeyDownEvent(new Key('z'));
+        Assert.True(detail.FileList.Source!.Count < expanded);
+
+        dialog.NewKeyDownEvent(new Key('z'));
+        Assert.Equal(expanded, detail.FileList.Source!.Count);
+    }
 }

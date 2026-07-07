@@ -69,6 +69,8 @@ public sealed class KeyBindingTable
         // unbound here (they would otherwise be advertised-but-dead keys, M3).
         table.Bind(KeyScope.DiffReview, "]", AppCommand.NextFile);
         table.Bind(KeyScope.DiffReview, "[", AppCommand.PrevFile);
+        // z collapses/expands the directory under the cursor in the file tree.
+        table.Bind(KeyScope.DiffReview, "z", AppCommand.ToggleFold);
         // Scoped Tab shadows the global NextTab: in diff review Tab cycles the two panes.
         table.Bind(KeyScope.DiffReview, "Tab", AppCommand.CyclePane);
 

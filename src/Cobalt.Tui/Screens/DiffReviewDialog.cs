@@ -28,7 +28,9 @@ public sealed class DiffReviewDialog(
     private ListView _fileList = null!;
     private ListView _diffPane = null!;
     private Label _diffHeader = null!;
-    private int _fileCount = -1;
+    private readonly HashSet<string> _collapsedDirs = new(StringComparer.Ordinal);
+    private IReadOnlyList<FileTreeRow> _rows = [];
+    private List<string> _fileListStrings = [];
     private int _fileIndex;
     private string? _renderedDiffPath;
 
@@ -48,6 +50,9 @@ public sealed class DiffReviewDialog(
 
     /// <summary>Test seam: the currently selected file index.</summary>
     internal int FileIndex => _fileIndex;
+
+    /// <summary>Test seam: the flattened file-tree rows currently shown in the file list.</summary>
+    internal IReadOnlyList<FileTreeRow> Rows => _rows;
 
     public void Show()
     {
@@ -70,7 +75,7 @@ public sealed class DiffReviewDialog(
     {
         var dialog = new Dialog
         {
-            Title = $"diff review !{vm.PrId} — q close · Tab files/diff · c comment · [ ] next/prev file · ? keys",
+            Title = $"diff review !{vm.PrId} — q close · Tab files/diff · [ ] file · z fold · c comment · ? keys",
             Width = Dim.Percent(96),
             Height = Dim.Percent(96),
         };
@@ -105,11 +110,11 @@ public sealed class DiffReviewDialog(
         _fileList.KeystrokeNavigator = null;
         _diffPane.KeystrokeNavigator = null;
 
-        // Enter on the file list opens the highlighted file (SelectedItem is valid at that moment).
+        // Enter on the file list opens the highlighted file, or toggles a folder row.
         _fileList.Accepting += (_, e) =>
         {
             e.Handled = true;
-            _ = SelectFile(_fileList.SelectedItem ?? _fileIndex);
+            ActivateRow(_fileList.SelectedItem ?? -1);
         };
 
         vm.Changed += OnChanged;
@@ -197,10 +202,13 @@ public sealed class DiffReviewDialog(
                 }
                 return true;
             case AppCommand.NextFile:
-                _ = SelectFile(_fileIndex + (count ?? 1));
+                _ = StepFile(count ?? 1);
                 return true;
             case AppCommand.PrevFile:
-                _ = SelectFile(_fileIndex - (count ?? 1));
+                _ = StepFile(-(count ?? 1));
+                return true;
+            case AppCommand.ToggleFold:
+                ToggleFoldAtCursor();
                 return true;
             case AppCommand.Comment:
                 _ = FireAndForget.Observe(CommentAsync(), app, log);
@@ -271,17 +279,8 @@ public sealed class DiffReviewDialog(
             _diffHeader.Text = $" error: {e}";
         }
 
-        // Rebuild the file list only when the set changes; SetSource nulls the
-        // selection, so restore it afterwards to keep the highlight and nav index.
-        if (vm.Files.Count != _fileCount)
-        {
-            _fileCount = vm.Files.Count;
-            _fileList.SetSource(new ObservableCollection<string>(vm.Files.Select(FormatFile)));
-        }
-        if (vm.Files.Count > 0)
-        {
-            _fileList.SelectedItem = Math.Clamp(_fileIndex, 0, vm.Files.Count - 1);
-        }
+        // Rebuild the file tree, keeping the highlight on the displayed file's row.
+        RebuildFileList(SelectedFileNodePath());
 
         if (vm.CurrentDiff is { } diff)
         {
@@ -315,16 +314,135 @@ public sealed class DiffReviewDialog(
         _fileList.SetNeedsDraw();
     }
 
-    private static string FormatFile(FileChange f)
+    /// <summary>
+    /// Re-flattens the changed files into the directory tree, refreshes the list
+    /// source only when the rendered rows actually change (SetSource nulls the
+    /// selection), and restores the highlight to <paramref name="selectNodePath"/>.
+    /// </summary>
+    private void RebuildFileList(string? selectNodePath)
     {
-        var glyph = f.ChangeType switch
+        _rows = FileTree.Flatten(vm.Files, _collapsedDirs);
+        var strings = _rows.Select(FormatRow).ToList();
+        if (!strings.SequenceEqual(_fileListStrings, StringComparer.Ordinal))
+        {
+            _fileListStrings = strings;
+            _fileList.SetSource(new ObservableCollection<string>(strings));
+        }
+        if (_rows.Count == 0)
+        {
+            return;
+        }
+        var target = selectNodePath is null ? -1 : IndexOfNode(selectNodePath);
+        _fileList.SelectedItem = target >= 0 ? target : Math.Clamp(_fileList.SelectedItem ?? 0, 0, _rows.Count - 1);
+    }
+
+    /// <summary>Enter/click on a row: open the file, or toggle a folder's collapsed state.</summary>
+    private void ActivateRow(int rowIndex)
+    {
+        if (rowIndex < 0 || rowIndex >= _rows.Count)
+        {
+            return;
+        }
+        var row = _rows[rowIndex];
+        if (row.Kind == FileTreeRowKind.Directory)
+        {
+            ToggleFold(row.NodePath);
+        }
+        else if (row.FileIndex is { } fileIndex)
+        {
+            _ = SelectFile(fileIndex);
+        }
+    }
+
+    /// <summary>z: collapse/expand the folder under the cursor, or the nearest ancestor folder of a file row.</summary>
+    private void ToggleFoldAtCursor()
+    {
+        var sel = _fileList.SelectedItem ?? -1;
+        if (sel < 0 || sel >= _rows.Count)
+        {
+            return;
+        }
+        var row = _rows[sel];
+        if (row.Kind == FileTreeRowKind.Directory)
+        {
+            ToggleFold(row.NodePath);
+            return;
+        }
+        var parent = NearestAncestorDir(sel);
+        if (parent is not null)
+        {
+            _collapsedDirs.Add(parent.NodePath);
+            RebuildFileList(parent.NodePath);
+            _fileList.SetNeedsDraw();
+        }
+    }
+
+    private void ToggleFold(string nodePath)
+    {
+        if (!_collapsedDirs.Remove(nodePath))
+        {
+            _collapsedDirs.Add(nodePath);
+        }
+        RebuildFileList(nodePath);
+        _fileList.SetNeedsDraw();
+    }
+
+    /// <summary>[ / ]: move to the previous/next file among the visible leaves, skipping folder rows.</summary>
+    private async Task StepFile(int delta)
+    {
+        var fileRows = _rows.Where(r => r.FileIndex is not null).ToList();
+        if (fileRows.Count == 0)
+        {
+            return;
+        }
+        var current = fileRows.FindIndex(r => r.FileIndex == _fileIndex);
+        var next = Math.Clamp((current < 0 ? 0 : current) + delta, 0, fileRows.Count - 1);
+        await SelectFile(fileRows[next].FileIndex!.Value);
+    }
+
+    private FileTreeRow? NearestAncestorDir(int rowIndex)
+    {
+        var depth = _rows[rowIndex].Depth;
+        for (var i = rowIndex - 1; i >= 0; i--)
+        {
+            if (_rows[i].Kind == FileTreeRowKind.Directory && _rows[i].Depth < depth)
+            {
+                return _rows[i];
+            }
+        }
+        return null;
+    }
+
+    private int IndexOfNode(string nodePath)
+    {
+        for (var i = 0; i < _rows.Count; i++)
+        {
+            if (string.Equals(_rows[i].NodePath, nodePath, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /// <summary>The tree node path of the file currently shown in the diff pane, for highlight restore.</summary>
+    private string? SelectedFileNodePath() =>
+        _fileIndex >= 0 && _fileIndex < vm.Files.Count ? vm.Files[_fileIndex].Path : null;
+
+    private static string FormatRow(FileTreeRow row)
+    {
+        var indent = new string(' ', row.Depth * 2);
+        if (row.Kind == FileTreeRowKind.Directory)
+        {
+            return $"{indent}{(row.Collapsed ? "▸" : "▾")} {row.Label}/";
+        }
+        var glyph = row.ChangeType switch
         {
             FileChangeKind.Add => "+",
             FileChangeKind.Delete => "-",
             FileChangeKind.Rename => "»",
             _ => "~",
         };
-        var name = f.Path.Length <= 34 ? f.Path : "…" + f.Path[^33..];
-        return $"{glyph} {name}";
+        return $"{indent}{glyph} {row.Label}";
     }
 }

@@ -52,4 +52,5 @@ public enum AppCommand
     NextFile,
     PrevFile,
     CyclePane,
+    ToggleFold,
 }

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+- **Directory-tree file list in diff review.** The changed-file list is now a
+  collapsible directory tree instead of a flat, left-truncated path list: files group
+  under their folder, single-child directory chains compress (`src/Web/Api`), and the
+  distinguishing filename always shows in full. `z` collapses/expands the folder under
+  the cursor (`Enter` on a folder row also toggles); `[`/`]` and `Enter` still step
+  through files, skipping folder headers. The tree projection is a pure, unit-tested
+  view model (ADR 0004).
+
 ## 0.2.0 — 2026-07-07
 
 ### Added

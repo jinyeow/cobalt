@@ -46,6 +46,7 @@ public static class HelpText
         [AppCommand.NextFile] = "next file",
         [AppCommand.PrevFile] = "previous file",
         [AppCommand.CyclePane] = "switch file list / diff pane",
+        [AppCommand.ToggleFold] = "collapse/expand folder",
     };
 
     // The only global keys a modal dialog actually honors: the shared scroll seam plus
