@@ -20,7 +20,9 @@ widths. Reviewers also want to switch between side-by-side and unified diffs.
    the file list below a threshold, or stack panes — instead of the panes fighting for
    space.
 3. **Inline vs side-by-side toggle.** A key to switch the diff pane between the current
-   side-by-side view and a unified/inline view.
+   unified/inline view and a new side-by-side view. (The current view is unified — a single
+   `DiffLine` column with an `old new sign` gutter; there was no side-by-side view to toggle
+   from, so this item adds one.)
 
 ## Constraints / anchors
 
@@ -32,4 +34,6 @@ widths. Reviewers also want to switch between side-by-side and unified diffs.
 
 ## Status
 
-Planning only — no implementation yet. This doc seeds the tracking PR.
+Delivered (PR #4). All three items shipped, keyed as `z` (collapse/expand folder — arrows
+are aliased to `h`/`l` so they were not free) and `s` (unified⇄side-by-side); the layout is
+responsive. Design recorded in [ADR 0017](../adr/0017-diff-review-ux-tree-sidebyside-responsive.md).
