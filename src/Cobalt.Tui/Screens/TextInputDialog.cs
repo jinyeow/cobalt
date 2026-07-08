@@ -30,7 +30,6 @@ namespace Cobalt.Tui.Screens;
 /// </remarks>
 internal sealed class TextInputDialog
 {
-    private readonly IApplication _app;
     private readonly TextInputRequest _request;
     private readonly Func<string, CancellationToken, Task<string?>> _openInEditor;
     private readonly Action<string?> _resolve;
@@ -55,7 +54,6 @@ internal sealed class TextInputDialog
         CancellationToken ct = default,
         Action<Action>? post = null)
     {
-        _app = app;
         _request = request;
         _openInEditor = openInEditor;
         _resolve = resolve;
