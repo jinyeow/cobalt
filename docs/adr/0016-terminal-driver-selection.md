@@ -43,13 +43,10 @@ was dropped before any handler ran. The record is corrected here and in the code
   propagates to `Program.cs` for a clean exit 2 (it is excluded from the crash boundary —
   a typo'd env var is a user error, not a crash).
 
-- **Auto-detect a multiplexer *or Windows Terminal* and default to `dotnet`.** When
-  `COBALT_DRIVER` is unset and `ZELLIJ`, `TMUX`, or `WT_SESSION` (set by Windows Terminal) is
-  present, `ResolveDriver` selects the `dotnet` driver — so cobalt "just works" there with no
-  configuration. Windows Terminal is ANSI-capable, but the Win32-console `windows` driver
-  mishandles the `$EDITOR` suspend/resume there too (a blank screen on return) and leaves
-  escape codes on exit — the same class of defect, confirmed in UAT. On a bare `conhost`
-  console (none of those set) the default is unchanged: `null` → TG picks `windows`.
+- **Auto-detect a multiplexer and default to `dotnet`.** When `COBALT_DRIVER` is unset and
+  `ZELLIJ` or `TMUX` is present in the environment, `ResolveDriver` selects the `dotnet`
+  driver — so cobalt "just works" under the common multiplexers with no configuration. On a
+  bare console (neither var set) the default is unchanged: `null` → TG picks `windows`.
 
 - **The explicit hatch is the complete backstop.** Auto-detect covers only the multiplexers
   it enumerates (zellij, tmux); screen/ssh/ConEmu/WezTerm-mux users, or anyone the detection

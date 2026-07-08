@@ -89,12 +89,7 @@ public static class CobaltTuiApp
         }
 
         var inMultiplexer = !string.IsNullOrEmpty(env("ZELLIJ")) || !string.IsNullOrEmpty(env("TMUX"));
-        // Windows Terminal (sets WT_SESSION) is ANSI-capable, but TG's default Win32-console
-        // 'windows' driver mishandles the $EDITOR suspend/resume there (blank screen on return)
-        // and leaves escape codes on exit — the same class of Win32-console defect ADR 0016 saw
-        // under multiplexers. Prefer the stdio/ANSI 'dotnet' driver there too.
-        var inWindowsTerminal = !string.IsNullOrEmpty(env("WT_SESSION"));
-        return inMultiplexer || inWindowsTerminal
+        return inMultiplexer
             // FirstOrDefault, not First: if 'dotnet' is somehow unregistered, fall back to
             // TG's default (null) rather than throwing into the crash boundary.
             ? knownDrivers.FirstOrDefault(d => d.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
