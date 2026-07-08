@@ -50,8 +50,10 @@ vote → triage), plus branch-policy status and PR-level comments in PR detail.
 
 - The whole review loop lives in the diff view; the heavy logic stays unit-tested without a
   terminal, and comment/thread anchoring is verified across unified/side-by-side/folded modes.
+- The thread overlay re-renders in place after an action: `x`/`u`/reply refetch the thread
+  state (raising the view-model's `Changed`), and the overlay subscribes to re-render its body
+  from the live threads (matched by the ids it opened on) rather than the opening snapshot.
 - Known limitations (deferred): a line with multiple threads acts on the first (the overlay
-  title names it); the thread overlay is a snapshot (no live re-render after an action);
-  search highlighting is unified-only (`n`/`N` still navigate in side-by-side). The policy
+  title names it); search highlighting is unified-only (`n`/`N` still navigate in side-by-side). The policy
   endpoint's exact shape (`7.2-preview.1`) and the `repository.project.id` population are
   runtime assumptions that degrade gracefully (policy fetch is non-fatal).

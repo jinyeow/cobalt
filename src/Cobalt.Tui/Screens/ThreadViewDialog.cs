@@ -24,6 +24,8 @@ public sealed class ThreadViewDialog(
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly KeymapRouter _router = new(KeyBindingTable.Default());
+    private readonly IReadOnlyList<int> _threadIds = threads.Select(t => t.Id).ToList();
+    private bool _closed;
     private Dialog? _dialog;
 #pragma warning disable CS0618 // read-only scrollable pane; see WorkItemDetailDialog
     private TextView? _body;
@@ -57,6 +59,8 @@ public sealed class ThreadViewDialog(
         using var dialog = Build();
         app.Run(dialog);
 
+        _closed = true;
+        vm.Changed -= OnChanged;
         _cts.Cancel();
         _cts.Dispose();
     }
@@ -97,8 +101,42 @@ public sealed class ThreadViewDialog(
         body.KeyDown += HandleKey;
         dialog.KeyDown += HandleKey;
 
+        // A resolve/reactivate/reply refetches vm.Threads and raises Changed; re-render the
+        // body from that live state so the open overlay's [status] updates in place instead of
+        // showing the snapshot it opened with (mirrors DiffReviewDialog's Changed subscription).
+        vm.Changed += OnChanged;
+
         dialog.Add(body);
         return dialog;
+    }
+
+    private void OnChanged() => app.Invoke(() =>
+    {
+        if (!_closed)
+        {
+            RefreshBody();
+        }
+    });
+
+    /// <summary>
+    /// Re-renders the body from the VM's current threads, matched by the ids this overlay
+    /// opened on, so a mutation's new status/comments replace the stale opening snapshot.
+    /// Internal so a view-level test can drive it without the app.Invoke run loop.
+    /// </summary>
+    internal void RefreshBody()
+    {
+        if (_body is null)
+        {
+            return;
+        }
+        var current = _threadIds
+            .Select(id => vm.Threads.FirstOrDefault(t => t.Id == id))
+            .OfType<PrThread>()
+            .ToList();
+        if (current.Count > 0)
+        {
+            _body.Text = FormatThreads(current);
+        }
     }
 
     private void HandleKey(object? sender, Terminal.Gui.Input.Key key)

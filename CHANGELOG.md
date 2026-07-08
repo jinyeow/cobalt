@@ -13,6 +13,10 @@
   (it was being swallowed by the dialog's default-accept and closing the review). Searching
   the diff (`/`) uses an **inline search bar** instead of launching `$EDITOR`. The
   viewed/unviewed marker is now a clear leading `[✓]`/`[ ]` column.
+- **A resolved/reactivated thread updates in the open overlay.** `x`/`u` (and a posted reply)
+  in the thread overlay now re-render its body from the refreshed thread state in place —
+  previously the overlay kept showing the status/comments it opened with until you closed and
+  reopened it.
 - **Detail/overlay windows now scroll a line at a time with visible feedback.** The
   read-only text panes (PR detail, work-item detail, and the `?`/`:messages`/key-reference
   overlays) moved an invisible caret that only scrolled the viewport once it reached the
