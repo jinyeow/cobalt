@@ -31,6 +31,29 @@ public class DetailDialogKeyDeliveryTests
         public Task<int> LaunchAsync(string path, CancellationToken ct) => Task.FromResult(0);
     }
 
+    /// <summary>
+    /// Fake ITextInput for PrDetailDialog's migrated flows (ADR 0020). Records every request and
+    /// returns queued values in order (e.g. the thread-id prompt, then the reply text) — falls
+    /// back to the last queued value (or null) once the queue is exhausted.
+    /// </summary>
+    private sealed class FakeTextInput(params string?[] textsToReturn) : ITextInput
+    {
+        private int _next;
+
+        public List<TextInputRequest> Requests { get; } = [];
+
+        public Task<string?> ReadAsync(TextInputRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            var value = textsToReturn.Length == 0 ? null
+                : textsToReturn[Math.Min(_next, textsToReturn.Length - 1)];
+            _next++;
+            return Task.FromResult(value);
+        }
+    }
+
+    private static ITextInput NoopTextInput() => new FakeTextInput();
+
     // ---- PR detail ----
 
     private sealed class FakePrStore : IPullRequestStore
@@ -49,10 +72,10 @@ public class DetailDialogKeyDeliveryTests
             Task.FromResult<IReadOnlyList<PolicyEvaluation>>([]);
     }
 
-    private static PrDetailDialog NewPrDialog()
+    private static PrDetailDialog NewPrDialog(ITextInput? textInput = null)
     {
         var vm = new PrDetailViewModel(new FakePrStore(), 42);
-        return new PrDetailDialog(App, vm, NoopEditor(), _ => { });
+        return new PrDetailDialog(App, vm, textInput ?? NoopTextInput(), _ => { });
     }
 
     [Fact]
@@ -263,7 +286,7 @@ public class DetailDialogKeyDeliveryTests
     {
         var vm = new PrDetailViewModel(new PolicyRenderStore(), 42);
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new PrDetailDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new PrDetailDialog(App, vm, NoopTextInput(), _ => { });
         detail.Build();
 
         var text = detail.Body.Text;
@@ -287,7 +310,7 @@ public class DetailDialogKeyDeliveryTests
     {
         var vm = new PrDetailViewModel(new PolicyRenderStore(), 42);
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new PrDetailDialog(App, vm, NoopEditor(), _ => { }, context: Context);
+        var detail = new PrDetailDialog(App, vm, NoopTextInput(), _ => { }, context: Context);
         string? captured = null;
         detail.OpenUrlAction = url => captured = url;
         var dialog = detail.Build();
@@ -307,7 +330,7 @@ public class DetailDialogKeyDeliveryTests
     {
         var vm = new PrDetailViewModel(new PolicyRenderStore(), 42);
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new PrDetailDialog(App, vm, NoopEditor(), _ => { }); // no context
+        var detail = new PrDetailDialog(App, vm, NoopTextInput(), _ => { }); // no context
         var opened = false;
         detail.OpenUrlAction = _ => opened = true;
         var dialog = detail.Build();
@@ -322,6 +345,95 @@ public class DetailDialogKeyDeliveryTests
 
         Assert.Null(ex);
         Assert.False(opened);
+    }
+
+    // ---- PR detail: text entry via ITextInput (ADR 0020) ----
+    //
+    // These drive the real 'c' / 'gc' / 'x' / 'u' keys (no seam), so the requests are
+    // captured by the fake exactly as the real dialog issues them. The dialog's vm has no
+    // PullRequest loaded (FakePrStore, no LoadAsync), so the mutation call it hands off to
+    // (ReplyAsync/AddPrCommentAsync/...) early-returns before touching app.Invoke — the
+    // requests are unaffected either way, since they're read before the mutation is called.
+
+    [Fact]
+    public void PrDialog_C_Reads_The_ThreadId_Prompt_Then_The_Reply_Text()
+    {
+        var textInput = new FakeTextInput("3", "looks good");
+        var detail = NewPrDialog(textInput);
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('c'));
+
+        Assert.Equal(2, textInput.Requests.Count);
+        Assert.Equal("reply to thread #", textInput.Requests[0].Title);
+        Assert.True(textInput.Requests[0].SingleLine);
+        Assert.Equal("reply", textInput.Requests[1].Title);
+        Assert.False(textInput.Requests[1].SingleLine);
+    }
+
+    [Fact]
+    public void PrDialog_C_Cancelled_ThreadId_Prompt_Never_Asks_For_Reply_Text()
+    {
+        var textInput = new FakeTextInput((string?)null); // cancels the thread-id prompt
+        var detail = NewPrDialog(textInput);
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('c'));
+
+        Assert.Single(textInput.Requests); // never reached the reply-text prompt
+    }
+
+    [Fact]
+    public void PrDialog_Gc_Reads_Via_TextInput_For_The_PR_Comment()
+    {
+        var textInput = new FakeTextInput("nice work");
+        var detail = NewPrDialog(textInput);
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('g'));
+        dialog.NewKeyDownEvent(new Key('c'));
+
+        var request = Assert.Single(textInput.Requests);
+        Assert.Equal("PR comment", request.Title);
+        Assert.False(request.SingleLine);
+    }
+
+    [Fact]
+    public void PrDialog_X_Reads_The_ThreadId_Prompt_For_Resolve()
+    {
+        var textInput = new FakeTextInput("5");
+        var detail = NewPrDialog(textInput);
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('x'));
+
+        var request = Assert.Single(textInput.Requests);
+        Assert.Equal("resolve thread #", request.Title);
+        Assert.True(request.SingleLine);
+    }
+
+    [Fact]
+    public void PrDialog_U_Reads_The_ThreadId_Prompt_For_Reactivate()
+    {
+        var textInput = new FakeTextInput("5");
+        var detail = NewPrDialog(textInput);
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('u'));
+
+        var request = Assert.Single(textInput.Requests);
+        Assert.Equal("reactivate thread #", request.Title);
+        Assert.True(request.SingleLine);
     }
 
     // ---- Work-item detail ----

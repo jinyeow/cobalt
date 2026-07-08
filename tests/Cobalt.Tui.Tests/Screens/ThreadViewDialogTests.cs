@@ -18,12 +18,17 @@ public class ThreadViewDialogTests
 {
     private static readonly IApplication App = Application.Create();
 
-    private sealed class FakeLauncher : IEditorLauncher
+    /// <summary>Fake ITextInput for the migrated reply flow (ADR 0020); records every request.</summary>
+    private sealed class FakeTextInput(string? textToReturn) : ITextInput
     {
-        public Task<int> LaunchAsync(string path, CancellationToken ct) => Task.FromResult(0);
-    }
+        public List<TextInputRequest> Requests { get; } = [];
 
-    private static EditorService NoopEditor() => new(new FakeLauncher());
+        public Task<string?> ReadAsync(TextInputRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(textToReturn);
+        }
+    }
 
     /// <summary>Diff source whose thread refetch returns <paramref name="threads"/> (default none),
     /// so a mutation (resolve/reactivate) can flip the VM's <see cref="PrDiffViewModel.Threads"/>.</summary>
@@ -39,8 +44,14 @@ public class ThreadViewDialogTests
             Task.FromResult(threads ?? []);
         public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
             Task.CompletedTask;
-        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
-            Task.CompletedTask;
+
+        public string? LastReplyText { get; private set; }
+
+        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct)
+        {
+            LastReplyText = text;
+            return Task.CompletedTask;
+        }
         public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
             Task.CompletedTask;
         public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
@@ -50,19 +61,22 @@ public class ThreadViewDialogTests
     private static PullRequest Pr() =>
         new(10, "t", null, "active", false, "f", "main", "succeeded", "Jin", "repo-1", "web", [], [], "src", "Contoso.Web");
 
-    private static PrDiffViewModel Vm() => new(new FakeDiffSource(), Pr());
+    private static PrDiffViewModel Vm(FakeDiffSource? source = null) => new(source ?? new FakeDiffSource(), Pr());
 
     private static PrThread Thread(int id, PrThreadStatus status = PrThreadStatus.Active) =>
         new(id, status, [new PrComment(1, "Sam", "looks good to me", false)], "/a.cs", RightLine: 2, LeftLine: null);
 
-    private static (ThreadViewDialog View, Dialog Dialog) Built(params PrThread[] threads)
+    private static (ThreadViewDialog View, Dialog Dialog) Built(ITextInput textInput, params PrThread[] threads)
     {
-        var view = new ThreadViewDialog(App, Vm(), NoopEditor(), _ => { }, threads);
+        var view = new ThreadViewDialog(App, Vm(), textInput, _ => { }, threads);
         var dialog = view.Build();
         dialog.Layout(new Size(80, 24));
         dialog.SetFocus();
         return (view, dialog);
     }
+
+    private static (ThreadViewDialog View, Dialog Dialog) Built(params PrThread[] threads) =>
+        Built(new FakeTextInput(null), threads);
 
     [Fact]
     public void Body_Shows_The_Comment_Text()
@@ -196,5 +210,41 @@ public class ThreadViewDialogTests
 
         Assert.Equal(7, view.TargetThreadId); // actions target the first anchored thread
         Assert.Contains("#9", view.Body.Text); // but every thread is shown
+    }
+
+    // ---- reply via ITextInput (ADR 0020) ----
+
+    [Fact]
+    public void C_Without_The_Seam_Reads_Via_TextInput_And_Posts_The_Reply()
+    {
+        var source = new FakeDiffSource();
+        var textInput = new FakeTextInput("looks good");
+        var view = new ThreadViewDialog(App, Vm(source), textInput, _ => { }, [Thread(7)]);
+        var dialog = view.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('c'));
+
+        var request = Assert.Single(textInput.Requests);
+        Assert.Equal("reply", request.Title);
+        Assert.False(request.SingleLine);
+        Assert.Equal("looks good", source.LastReplyText);
+    }
+
+    [Fact]
+    public void C_Without_The_Seam_Cancelled_TextInput_Posts_Nothing()
+    {
+        var source = new FakeDiffSource();
+        var textInput = new FakeTextInput(null);
+        var view = new ThreadViewDialog(App, Vm(source), textInput, _ => { }, [Thread(7)]);
+        var dialog = view.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('c'));
+
+        Assert.Single(textInput.Requests);
+        Assert.Null(source.LastReplyText);
     }
 }

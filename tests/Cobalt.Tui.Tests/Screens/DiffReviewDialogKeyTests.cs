@@ -21,12 +21,19 @@ public class DiffReviewDialogKeyTests
 {
     private static readonly IApplication App = Application.Create();
 
-    private sealed class FakeLauncher : IEditorLauncher
+    /// <summary>Fake ITextInput for the migrated line-comment flow (ADR 0020); records every request.</summary>
+    private sealed class FakeTextInput(string? textToReturn = null) : ITextInput
     {
-        public Task<int> LaunchAsync(string path, CancellationToken ct) => Task.FromResult(0);
+        public List<TextInputRequest> Requests { get; } = [];
+
+        public Task<string?> ReadAsync(TextInputRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(textToReturn);
+        }
     }
 
-    private static EditorService NoopEditor() => new(new FakeLauncher());
+    private static ITextInput NoopTextInput() => new FakeTextInput();
 
     private sealed class FakeDiffSource : IPrDiffSource
     {
@@ -43,8 +50,13 @@ public class DiffReviewDialogKeyTests
             Task.FromResult(Blobs.GetValueOrDefault((path, commit), ""));
         public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
             Task.FromResult(Threads);
-        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
-            Task.CompletedTask;
+        public string? LastLineCommentText { get; private set; }
+
+        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct)
+        {
+            LastLineCommentText = text;
+            return Task.CompletedTask;
+        }
         public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
             Task.CompletedTask;
         public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
@@ -73,7 +85,7 @@ public class DiffReviewDialogKeyTests
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
         var dialog = detail.Build();
         dialog.Layout(new Size(100, 24));
         dialog.SetFocus();
@@ -199,7 +211,7 @@ public class DiffReviewDialogKeyTests
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
         var dialog = detail.Build();
         dialog.Layout(new Size(100, 24));
         dialog.SetFocus();
@@ -274,7 +286,7 @@ public class DiffReviewDialogKeyTests
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
         var dialog = detail.Build();
         dialog.Layout(new Size(120, 24));
         dialog.SetFocus();
@@ -319,7 +331,7 @@ public class DiffReviewDialogKeyTests
         source.Blobs[("/a.cs", "src")] = "keep\n";
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
         var dialog = detail.Build();
         dialog.Layout(new Size(120, 24));
         dialog.SetFocus();
@@ -343,7 +355,7 @@ public class DiffReviewDialogKeyTests
         source.Blobs[("/a.cs", "src")] = head + "\nnew\n";
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
         var dialog = detail.Build();
         dialog.Layout(new Size(120, 24));
         dialog.SetFocus();
@@ -441,7 +453,7 @@ public class DiffReviewDialogKeyTests
         source.Blobs[("/a.cs", "src")] = "alpha\nneedle one\nbeta\nneedle two\ngamma\n";
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
         var dialog = detail.Build();
         dialog.Layout(new Size(120, 24));
         dialog.SetFocus();
@@ -476,7 +488,7 @@ public class DiffReviewDialogKeyTests
         source.Blobs[("/a.cs", "src")] = "A\nb\nc\nd\ne\nf\nG\n";
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
         var dialog = detail.Build();
         dialog.Layout(new Size(120, 24));
         dialog.SetFocus();
@@ -513,7 +525,7 @@ public class DiffReviewDialogKeyTests
         source.Blobs[("/a.cs", "src")] = "l0\nl1\nl2\nl3\nl4\nl5\n";
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
         var dialog = detail.Build();
         dialog.Layout(new Size(120, 24));
         dialog.SetFocus();
@@ -594,7 +606,7 @@ public class DiffReviewDialogKeyTests
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
         PrVote? applied = null;
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { })
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { })
         {
             VoteChooser = (_, labels) => labels.ToList().IndexOf("reject"),
             VoteAction = v => applied = v,
@@ -632,7 +644,7 @@ public class DiffReviewDialogKeyTests
         }
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
         var dialog = detail.Build();
         dialog.Layout(new Size(120, 24));
         dialog.SetFocus();
@@ -693,7 +705,7 @@ public class DiffReviewDialogKeyTests
         source.Blobs[("/a.cs", "src")] = "keep\nnew\n";
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
         string? shown = null;
         detail.ViewThreadAction = t => shown = t;
         var dialog = detail.Build();
@@ -736,7 +748,7 @@ public class DiffReviewDialogKeyTests
         source.Blobs[("/a.cs", "src")] = ctx + "\nnew\n";
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), captured.Add);
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), captured.Add);
         var dialog = detail.Build();
         dialog.Layout(new Size(120, 24));
         dialog.SetFocus();
@@ -749,6 +761,57 @@ public class DiffReviewDialogKeyTests
 
         Assert.Contains(captured, m => m.Contains("no diff line here"));
         Assert.DoesNotContain(captured, m => m.Contains("line comment added"));
+    }
+
+    // ---- comment via ITextInput (ADR 0020) ----
+
+    // The success path only asserts the request: PrDiffViewModel.AddCommentAtLineAsync fires
+    // Changed (→ app.Invoke) before calling the store, and this suite's App never
+    // Application.Init()s (no test in the file does — headless-by-construction), so a real
+    // mutation can't complete synchronously here. Pre-existing (identical under the old
+    // $EDITOR path); the returned-string-is-used behavior is covered where the harness
+    // permits it (WorkItemActionsTests, ThreadViewDialogTests).
+    [Fact]
+    public async Task C_Reads_Via_TextInput_With_The_Expected_Request()
+    {
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Add)] };
+        source.Blobs[("/a.cs", "src")] = "x\ny\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var textInput = new FakeTextInput("looks good");
+        var detail = new DiffReviewDialog(App, vm, textInput, _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+        detail.DiffPane.SetFocus();
+        detail.DiffPane.SelectedItem = 0;
+
+        dialog.NewKeyDownEvent(new Key('c'));
+
+        var request = Assert.Single(textInput.Requests);
+        Assert.Equal("comment", request.Title);
+        Assert.False(request.SingleLine);
+    }
+
+    [Fact]
+    public async Task C_Cancelled_TextInput_Posts_No_Comment()
+    {
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Add)] };
+        source.Blobs[("/a.cs", "src")] = "x\ny\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var textInput = new FakeTextInput(null);
+        var detail = new DiffReviewDialog(App, vm, textInput, _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        dialog.SetFocus();
+        detail.DiffPane.SetFocus();
+        detail.DiffPane.SelectedItem = 0;
+
+        dialog.NewKeyDownEvent(new Key('c'));
+
+        Assert.Single(textInput.Requests);
+        Assert.Null(source.LastLineCommentText);
     }
 
     // ---- Item 3: Enter on the diff pane opens the thread (not close the dialog) ----
@@ -769,7 +832,7 @@ public class DiffReviewDialogKeyTests
         source.Blobs[("/a.cs", "src")] = "keep\nnew\n";
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
         string? shown = null;
         var closed = false;
         detail.ViewThreadAction = t => shown = t;
@@ -798,7 +861,7 @@ public class DiffReviewDialogKeyTests
         source.Blobs[("/a.cs", "src")] = new string('x', 200) + "\n" + new string('y', 200) + "\n";
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { });
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
         var dialog = detail.Build();
         dialog.Layout(new Size(100, 24));
         dialog.SetFocus();
@@ -904,7 +967,7 @@ public class DiffReviewDialogKeyTests
             Project = "Contoso.Web",
         };
         string? opened = null;
-        var detail = new DiffReviewDialog(App, vm, NoopEditor(), _ => { }, context)
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { }, context)
         {
             OpenUrlAction = u => opened = u,
         };
