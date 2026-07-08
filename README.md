@@ -201,3 +201,43 @@ dotnet test Cobalt.slnx      # unit + fuzz + integration tests
 dotnet build Cobalt.slnx
 dotnet run --project src/Cobalt -- --help
 ```
+
+### Testing local changes
+
+**Run straight from source (recommended).** This always compiles the current code — no
+packaging, no tool cache, no version confusion, so it's the surest way to test a change:
+
+```sh
+dotnet run --project src/Cobalt -c Release -- auth login
+dotnet run --project src/Cobalt -c Release -- auth status
+dotnet run --project src/Cobalt -c Release            # launch the TUI
+```
+
+**Or install your build as the `cobalt` global tool.** **Watch the cache:** the package
+version is fixed (`0.2.0`) and NuGet caches packages *by version*, so `dotnet tool
+update`/`install --add-source` can silently reuse a **stale** cached build — which looks
+exactly like "my change didn't take". Give each build a unique version so the install
+can't hit the cache:
+
+```sh
+dotnet tool uninstall -g cobalt-tui
+dotnet pack src/Cobalt/Cobalt.csproj -c Release -o ./artifacts \
+  -p:PackageVersion=0.2.0-local1 -p:PublishRepositoryUrl=false -p:EmbedUntrackedSources=false
+dotnet tool install -g cobalt-tui --add-source ./artifacts --version 0.2.0-local1
+```
+
+Bump `local1` → `local2` … on each rebuild. To keep the same version instead, delete the
+cached package first: `rm -rf ~/.nuget/packages/cobalt-tui` (Windows:
+`rmdir /s /q "%USERPROFILE%\.nuget\packages\cobalt-tui"`). Note `cobalt --version` prints
+only `0.2.0` — it can't tell you which commit you're on; use `git log --oneline -1` for that.
+
+### Before pushing
+
+Run the clean, CI-style build — analyzer errors (e.g. unused `using`s) fire only on a
+*clean* build, so an incremental `dotnet build` can pass while CI fails:
+
+```sh
+dotnet clean Cobalt.slnx -c Release
+dotnet build Cobalt.slnx -c Release -p:ContinuousIntegrationBuild=true --no-incremental  # 0 warnings
+dotnet test Cobalt.slnx
+```
