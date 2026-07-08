@@ -92,23 +92,27 @@ public static class FileTree
         List<FileTreeRow> rows,
         IReadOnlyDictionary<string, FileAnnotation>? annotations)
     {
+        var labelBuilder = new StringBuilder();
+
         foreach (var (segment, child) in node.Subdirs)
         {
             // Compress a single-child directory chain into one row (src/Web/Api),
             // so the tree doesn't waste a line per intermediate directory.
-            var label = new StringBuilder(segment);
+            labelBuilder.Clear();
+            labelBuilder.Append(segment);
+
             var nodePath = path + "/" + segment;
             var current = child;
             while (current.Subdirs.Count == 1 && current.Files.Count == 0)
             {
                 var (onlyName, onlyChild) = current.Subdirs.First();
-                label.Append('/').Append(onlyName);
+                labelBuilder.Append('/').Append(onlyName);
                 nodePath += "/" + onlyName;
                 current = onlyChild;
             }
 
             var isCollapsed = collapsed.Contains(nodePath);
-            rows.Add(new FileTreeRow(FileTreeRowKind.Directory, depth, label.ToString(), null, null, nodePath, isCollapsed));
+            rows.Add(new FileTreeRow(FileTreeRowKind.Directory, depth, labelBuilder.ToString(), null, null, nodePath, isCollapsed));
             if (!isCollapsed)
             {
                 Emit(current, nodePath, depth + 1, collapsed, rows, annotations);
