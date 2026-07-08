@@ -25,6 +25,8 @@ Create `~/.config/cobalt/config.toml` (XDG-aware; `%APPDATA%` on Windows):
 
 ```toml
 default_context = "work"
+# theme = "dark"       # optional: "dark" (default) · "light" · "system" (follow the OS).
+                       # Switch live with :theme; system-follow is Windows-only for now.
 
 [contexts.work]
 organization = "https://dev.azure.com/YOUR_ORG"   # or a bare "YOUR_ORG"
@@ -48,6 +50,16 @@ Two more runtime filters narrow the lists:
   items, client-side for PRs); bare `:project` clears an active filter or reports
   that none is set. Active `:done` / `:project` filters show in the work-item
   list header. The `/` substring filter still composes on top.
+
+## Themes
+
+`theme` picks the colours: `dark` (default — the original look), `light`, or `system`
+(follow the OS light/dark setting). Switch live with `:theme dark|light|system` (bare
+`:theme` reports the current one). Cobalt uses Terminal.Gui's built-in themes for the app
+chrome and syntax highlighting, and its own palette for the diff tints, so both recolour
+together. `system` follows the OS live on **Windows** (via the light/dark registry setting);
+on macOS/Linux it falls back to `dark` for now (use `:theme` to switch manually). See
+[ADR 0019](docs/adr/0019-hybrid-theming.md).
 
 ## Sign in
 
