@@ -563,6 +563,18 @@ public class DiffReviewDialogKeyTests
     }
 
     [Fact]
+    public async Task Shift_M_Marks_The_Current_File_Unviewed()
+    {
+        var (detail, dialog) = await BuiltModifiedDialog();
+        dialog.NewKeyDownEvent(new Key('m'));
+        Assert.True(detail.Rows.Single(r => r.Kind == FileTreeRowKind.File).Viewed);
+
+        dialog.NewKeyDownEvent(new Key('M'));
+
+        Assert.False(detail.Rows.Single(r => r.Kind == FileTreeRowKind.File).Viewed);
+    }
+
+    [Fact]
     public async Task File_Row_Shows_Diff_Stats()
     {
         var (detail, _) = await BuiltModifiedDialog(); // one line removed + one added

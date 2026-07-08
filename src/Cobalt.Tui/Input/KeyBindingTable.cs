@@ -82,6 +82,7 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.DiffReview, "n", AppCommand.SearchNext);
         table.Bind(KeyScope.DiffReview, "N", AppCommand.SearchPrev);
         table.Bind(KeyScope.DiffReview, "m", AppCommand.MarkViewed);
+        table.Bind(KeyScope.DiffReview, "M", AppCommand.MarkUnviewed);
         table.Bind(KeyScope.DiffReview, "T", AppCommand.ToggleThreadFilter);
         table.Bind(KeyScope.DiffReview, "e", AppCommand.ExpandContext);
         table.Bind(KeyScope.DiffReview, "E", AppCommand.ExpandAllContext);

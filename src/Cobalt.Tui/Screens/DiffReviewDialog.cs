@@ -411,6 +411,9 @@ public sealed class DiffReviewDialog(
             case AppCommand.MarkViewed:
                 MarkCurrentViewed();
                 return true;
+            case AppCommand.MarkUnviewed:
+                MarkCurrentUnviewed();
+                return true;
             case AppCommand.ToggleThreadFilter:
                 ToggleThreadFilter();
                 return true;
@@ -760,6 +763,18 @@ public sealed class DiffReviewDialog(
         vm.MarkViewed(path);
         Render();
         log($"marked viewed: {path}");
+    }
+
+    /// <summary>M: mark the file shown in the diff pane unviewed (clears its ✓ in the tree).</summary>
+    private void MarkCurrentUnviewed()
+    {
+        if (vm.SelectedFile?.Path is not { } path)
+        {
+            return;
+        }
+        vm.MarkUnviewed(path);
+        Render();
+        log($"marked unviewed: {path}");
     }
 
     /// <summary>T: toggle the file list between all files and only those with unresolved threads.</summary>

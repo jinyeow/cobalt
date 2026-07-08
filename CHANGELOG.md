@@ -27,8 +27,8 @@
   from PR detail).
 - **The diff review is now a complete review surface.** In diff review you can read a line's
   comment thread(s) with `o`/`Enter` and **reply (`c`) / resolve (`x`) / reactivate (`u`)**
-  right there; **vote** on the PR with `v`; and **mark a file viewed** with `m` (a ✓ in the
-  tree). Navigation gained vim bracket motions (count-aware): `]c`/`[c` between **change
+  right there; **vote** on the PR with `v`; and **mark a file viewed** with `m` / **unviewed** with
+  `M` (a ✓ in the tree). Navigation gained vim bracket motions (count-aware): `]c`/`[c` between **change
   hunks**, `]t`/`[t` between **comment threads**, `]v`/`[v` between **unviewed** files
   (`]`/`[` file nav moved to `]f`/`[f` to free the vim-standard `]c`). Unchanged context is
   **folded** by default (`e` expands a fold, `E` the whole file); `/`+`n`/`N` searches within

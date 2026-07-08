@@ -58,6 +58,7 @@ public static class HelpText
         [AppCommand.SearchNext] = "next match",
         [AppCommand.SearchPrev] = "previous match",
         [AppCommand.MarkViewed] = "mark file viewed",
+        [AppCommand.MarkUnviewed] = "mark file unviewed",
         [AppCommand.ToggleThreadFilter] = "filter to unresolved threads",
         [AppCommand.ExpandContext] = "expand context",
         [AppCommand.ExpandAllContext] = "expand whole file",

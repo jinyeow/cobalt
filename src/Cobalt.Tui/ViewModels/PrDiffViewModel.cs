@@ -65,6 +65,8 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 
     public void MarkViewed(string path) => _viewed.Add(path);
 
+    public void MarkUnviewed(string path) => _viewed.Remove(path);
+
     public bool IsViewed(string path) => _viewed.Contains(path);
 
     /// <summary>Additions/deletions for a file whose diff has already been computed; null otherwise.</summary>

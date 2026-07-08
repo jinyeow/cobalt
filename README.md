@@ -79,8 +79,8 @@ branch in the browser · `x` resolve thread · `u` reactivate · `C` complete ·
 In diff review (vim `]`/`[` bracket motions, all count-aware): `Tab` switches file list /
 diff pane · `]f`/`[f` next/prev file · `]c`/`[c` next/prev **change hunk** · `]t`/`[t`
 next/prev **comment thread** · `]v`/`[v` next/prev **unviewed** file. `z` collapses/expands
-the folder under the cursor (`Enter` on a folder also toggles) · `m` marks the current file
-**viewed** (a `[✓]`/`[ ]` column in the tree). `s` switches the diff between **unified** and
+the folder under the cursor (`Enter` on a folder also toggles) · `m`/`M` mark the current file
+**viewed**/**unviewed** (a `[✓]`/`[ ]` column in the tree). `s` switches the diff between **unified** and
 **side-by-side**; unchanged context is **folded** by default — `e` expands a fold, `E` the
 whole file. `/` opens an **inline search** of the current file (type, `Enter` to search,
 `n`/`N` jump between matches, `Esc` cancels). `h`/`l` (or `←`/`→`) **scroll horizontally** for

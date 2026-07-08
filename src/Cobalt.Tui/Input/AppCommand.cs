@@ -64,6 +64,7 @@ public enum AppCommand
     SearchNext,
     SearchPrev,
     MarkViewed,
+    MarkUnviewed,
     ToggleThreadFilter,
     ExpandContext,
     ExpandAllContext,
