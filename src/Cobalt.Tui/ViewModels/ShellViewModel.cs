@@ -13,7 +13,11 @@ public enum AppSection
 /// Top-level app state: active section, active context, status line, and palette
 /// dispatch. No Terminal.Gui types (ADR 0004) — the shell view binds to this.
 /// </summary>
-public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string initialContext, PrScope initialScope = PrScope.Org)
+public sealed class ShellViewModel(
+    IReadOnlyList<string> contextNames,
+    string initialContext,
+    PrScope initialScope = PrScope.Org,
+    ThemeChoice initialTheme = ThemeChoice.Dark)
 {
     public MessageLog Messages { get; } = new();
 
@@ -30,6 +34,9 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
 
     /// <summary>Active single-project narrowing for both lists, or null for all projects (<c>:project</c>).</summary>
     public string? ProjectFilter { get; private set; }
+
+    /// <summary>The active colour theme, shown in messages and flipped by <c>:theme</c>.</summary>
+    public ThemeChoice CurrentTheme { get; private set; } = initialTheme;
 
     public event Action? SectionChanged;
     public event Action? QuitRequested;
@@ -48,6 +55,9 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
 
     /// <summary>Raised with the new project narrowing (null clears it); the shell reloads both lists.</summary>
     public event Action<string?>? ProjectFilterChanged;
+
+    /// <summary>Raised with the new theme; the shell re-resolves the preset and repaints.</summary>
+    public event Action<ThemeChoice>? ThemeChangeRequested;
 
     public string StatusLine =>
         $" context:{ContextName}  scope:{ScopeName(Scope)}" + (UserName is null ? "" : $"  {UserName}");
@@ -123,6 +133,9 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
             case PaletteActionKind.SetProjectFilter:
                 SetProjectFilter(action.Argument);
                 break;
+            case PaletteActionKind.SetTheme:
+                SetTheme(action.Argument);
+                break;
             case PaletteActionKind.Unknown:
                 Messages.Error(action.Argument);
                 break;
@@ -159,6 +172,37 @@ public sealed class ShellViewModel(IReadOnlyList<string> contextNames, string in
                 break;
         }
     }
+
+    private void SetTheme(string argument)
+    {
+        // Bare `:theme` just reports the current value.
+        if (argument.Length == 0)
+        {
+            Messages.Info($"theme: {ThemeName(CurrentTheme)} (switch with :theme dark|light|system)");
+            return;
+        }
+        switch (argument.ToLowerInvariant())
+        {
+            case "dark":
+            case "light":
+            case "system":
+                var next = Enum.Parse<ThemeChoice>(argument, ignoreCase: true);
+                if (next == CurrentTheme)
+                {
+                    Messages.Info($"theme already {ThemeName(CurrentTheme)}");
+                    return;
+                }
+                CurrentTheme = next;
+                Messages.Info($"theme: {ThemeName(CurrentTheme)}");
+                ThemeChangeRequested?.Invoke(CurrentTheme);
+                break;
+            default:
+                Messages.Error($"unknown theme '{argument}' (use: dark, light, or system)");
+                break;
+        }
+    }
+
+    private static string ThemeName(ThemeChoice theme) => theme.ToString().ToLowerInvariant();
 
     private static string DoneStateName(bool includeCompleted) => includeCompleted ? "showing done" : "hiding done";
 

@@ -99,4 +99,22 @@ public class PaletteCommandParserTests
         Assert.Equal(PaletteActionKind.SetProjectFilter, action.Kind);
         Assert.Equal("", action.Argument);
     }
+
+    [Fact]
+    public void Theme_With_Value_Sets_Theme()
+    {
+        var action = PaletteCommandParser.Parse("theme light");
+
+        Assert.Equal(PaletteActionKind.SetTheme, action.Kind);
+        Assert.Equal("light", action.Argument);
+    }
+
+    [Fact]
+    public void Bare_Theme_Sets_Theme_With_Empty_Argument()
+    {
+        var action = PaletteCommandParser.Parse("theme");
+
+        Assert.Equal(PaletteActionKind.SetTheme, action.Kind);
+        Assert.Equal("", action.Argument);
+    }
 }
