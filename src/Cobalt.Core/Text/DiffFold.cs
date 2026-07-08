@@ -1,5 +1,3 @@
-using System.Linq;
-
 namespace Cobalt.Core.Text;
 
 /// <summary>
