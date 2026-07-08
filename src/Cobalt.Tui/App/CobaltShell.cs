@@ -59,9 +59,9 @@ public sealed class CobaltShell : Window
         _themeMonitor = themeMonitor;
         _editor = editor ?? new EditorService(new ProcessEditorLauncher(
             Environment.GetEnvironmentVariable, TerminalGuiSuspender.For(app)));
-        // Placeholder ITextInput: still $EDITOR-backed. The integrator swaps this one
-        // construction for the in-TUI TuiTextInput once the widget lane lands (ADR 0020).
-        _textInput = new EditorTextInput(_editor);
+        // In-TUI text entry for comments/replies (ADR 0020) — no $EDITOR handoff. It holds
+        // _editor for its Ctrl-E escape hatch; descriptions and tags still use _editor directly.
+        _textInput = new TuiTextInput(_app, _editor);
         _router = new KeymapRouter(_bindings);
 
         Title = "cobalt";
@@ -374,7 +374,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new WorkItemDetailViewModel(_workItems, id, project);
-        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info).Show();
+        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _textInput).Show();
         _workItemList?.OnRefresh(); // reflect any edits back into the list
     }
 
