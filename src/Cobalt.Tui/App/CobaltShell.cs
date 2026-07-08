@@ -403,17 +403,21 @@ public sealed class CobaltShell : Window
     /// (<c>theme = system</c>). Raised from the monitor's watcher thread, so marshal onto the UI
     /// thread before touching Terminal.Gui.
     /// </summary>
-    private void OnOsThemeChanged(OsTheme os)
+    private void OnOsThemeChanged(OsTheme os) => _app.Invoke(() => ApplyOsFollow(os));
+
+    /// <summary>
+    /// Apply the OS-follow decision synchronously: when following the system, re-resolve for
+    /// <paramref name="os"/> and repaint; otherwise no-op. Split from <see cref="OnOsThemeChanged"/>
+    /// (which only marshals it onto the UI thread) so the follow behaviour is testable headlessly.
+    /// </summary>
+    internal void ApplyOsFollow(OsTheme os)
     {
         if (OsFollowPreset(_vm.CurrentTheme, os) is not { } preset)
         {
             return;
         }
-        _app.Invoke(() =>
-        {
-            ThemeService.Apply(preset);
-            _app.LayoutAndDraw(true);
-        });
+        ThemeService.Apply(preset);
+        _app.LayoutAndDraw(true);
     }
 
     /// <summary>
