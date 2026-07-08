@@ -27,6 +27,7 @@ public sealed class ThreadViewDialog(
     private readonly IReadOnlyList<int> _threadIds = threads.Select(t => t.Id).ToList();
     private bool _closed;
     private Dialog? _dialog;
+    private string _lastBody = "";
 #pragma warning disable CS0618 // read-only scrollable pane; see WorkItemDetailDialog
     private TextView? _body;
 
@@ -72,6 +73,7 @@ public sealed class ThreadViewDialog(
     internal Dialog Build()
     {
         var first = threads[0];
+        _lastBody = FormatThreads(threads);
         var extra = threads.Count > 1 ? $" (of {threads.Count}, acting on #{first.Id})" : "";
         var dialog = new Dialog
         {
@@ -91,7 +93,7 @@ public sealed class ThreadViewDialog(
             ReadOnly = true,
             WordWrap = true,
             ScrollBars = true, // position indicator; content is scrolled pager-style (VimScroll)
-            Text = FormatThreads(threads),
+            Text = _lastBody,
         };
 #pragma warning restore CS0618
         _body = body;
@@ -133,10 +135,18 @@ public sealed class ThreadViewDialog(
             .Select(id => vm.Threads.FirstOrDefault(t => t.Id == id))
             .OfType<PrThread>()
             .ToList();
-        if (current.Count > 0)
+        if (current.Count == 0)
         {
-            _body.Text = FormatThreads(current);
+            return; // retain the last-good body when the threads have (transiently) vanished
         }
+        var text = FormatThreads(current);
+        if (text == _lastBody)
+        {
+            return; // unrelated tick: identical text; skip the reassign that would reset scroll
+        }
+        _lastBody = text;
+        _body.Text = text;
+        _dialog?.SetNeedsDraw();
     }
 
     private void HandleKey(object? sender, Terminal.Gui.Input.Key key)

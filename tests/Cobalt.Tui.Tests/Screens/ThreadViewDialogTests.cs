@@ -163,6 +163,35 @@ public class ThreadViewDialogTests
     }
 
     [Fact]
+    public async Task RefreshBody_Preserves_Scroll_When_The_Thread_Is_Unchanged()
+    {
+        // A background prefetch raises vm.Changed while the overlay is open; the thread this
+        // overlay shows is byte-identical, so RefreshBody must be a no-op that leaves the
+        // reader's scroll position where it was. Guards the "unrelated tick snaps to top" bug.
+        var comments = Enumerable.Range(1, 40)
+            .Select(i => new PrComment(i, "Sam", $"comment {i}", false))
+            .ToArray();
+        var longThread = new PrThread(7, PrThreadStatus.Active, comments, "/a.cs", RightLine: 2, LeftLine: null);
+        var vm = new PrDiffViewModel(new ThreadsSource([longThread]), Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var view = new ThreadViewDialog(App, vm, NoopEditor(), _ => { }, [longThread]);
+        var dialog = view.Build();
+        dialog.Layout(new Size(80, 10)); // short pane so the 40-comment thread scrolls
+        view.Body.SetFocus();
+        for (var i = 0; i < 5; i++)
+        {
+            view.Body.InvokeCommand(Command.Down);
+        }
+        var scrolled = view.Body.CurrentRow;
+        Assert.True(scrolled > 0); // reader has scrolled down
+
+        view.RefreshBody(); // same thread => FormatThreads equals the cached body => no re-render
+
+        Assert.Equal(scrolled, view.Body.CurrentRow); // scroll position preserved
+    }
+
+    [Fact]
     public void Multiple_Threads_Act_On_The_First()
     {
         var (view, _) = Built(Thread(7), Thread(9));
