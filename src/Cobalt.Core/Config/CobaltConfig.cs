@@ -2,14 +2,21 @@ namespace Cobalt.Core.Config;
 
 public sealed class CobaltConfig
 {
-    public CobaltConfig(string? defaultContext, IReadOnlyDictionary<string, AdoContext> contexts)
+    public CobaltConfig(
+        string? defaultContext,
+        IReadOnlyDictionary<string, AdoContext> contexts,
+        ThemeChoice theme = ThemeChoice.Dark)
     {
         DefaultContext = defaultContext;
         Contexts = contexts;
+        Theme = theme;
     }
 
     public string? DefaultContext { get; }
     public IReadOnlyDictionary<string, AdoContext> Contexts { get; }
+
+    /// <summary>The colour theme from <c>theme = …</c>; defaults to <see cref="ThemeChoice.Dark"/>.</summary>
+    public ThemeChoice Theme { get; }
 
     /// <summary>Picks the active context: CLI override, then default_context, then a sole context.</summary>
     public AdoContext Resolve(string? nameOverride)

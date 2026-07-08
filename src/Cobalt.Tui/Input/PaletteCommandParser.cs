@@ -11,6 +11,7 @@ public enum PaletteActionKind
     SetScope,
     ToggleDone,
     SetProjectFilter,
+    SetTheme,
     Unknown,
 }
 
