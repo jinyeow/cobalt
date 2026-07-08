@@ -17,12 +17,13 @@ public class DriverResolutionTests
         EnvVars(cobaltDriver: value);
 
     private static Func<string, string?> EnvVars(
-        string? cobaltDriver = null, string? zellij = null, string? tmux = null) =>
+        string? cobaltDriver = null, string? zellij = null, string? tmux = null, string? wtSession = null) =>
         name => name switch
         {
             "COBALT_DRIVER" => cobaltDriver,
             "ZELLIJ" => zellij,
             "TMUX" => tmux,
+            "WT_SESSION" => wtSession,
             _ => null,
         };
 
@@ -69,6 +70,20 @@ public class DriverResolutionTests
     public void Tmux_Selects_The_Dotnet_Driver()
     {
         Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(EnvVars(tmux: "/tmp/tmux-1000/default,1234,0"), Known));
+    }
+
+    [Fact]
+    public void Windows_Terminal_Selects_The_Dotnet_Driver()
+    {
+        // WT_SESSION is set by Windows Terminal; the Win32-console driver mishandles the editor
+        // handoff + console restore there, so auto-select the ANSI 'dotnet' driver.
+        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(EnvVars(wtSession: "abc-123"), Known));
+    }
+
+    [Fact]
+    public void Explicit_Value_Overrides_Windows_Terminal_Detection()
+    {
+        Assert.Equal("windows", CobaltTuiApp.ResolveDriver(EnvVars(cobaltDriver: "windows", wtSession: "abc-123"), Known));
     }
 
     [Fact]
