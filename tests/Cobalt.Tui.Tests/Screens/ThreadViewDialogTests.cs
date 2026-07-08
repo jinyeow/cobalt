@@ -25,7 +25,9 @@ public class ThreadViewDialogTests
 
     private static EditorService NoopEditor() => new(new FakeLauncher());
 
-    private sealed class FakeDiffSource : IPrDiffSource
+    /// <summary>Diff source whose thread refetch returns <paramref name="threads"/> (default none),
+    /// so a mutation (resolve/reactivate) can flip the VM's <see cref="PrDiffViewModel.Threads"/>.</summary>
+    private sealed class FakeDiffSource(IReadOnlyList<PrThread>? threads = null) : IPrDiffSource
     {
         public Task<PrIteration?> GetLatestIterationAsync(string project, string repo, int prId, CancellationToken ct) =>
             Task.FromResult<PrIteration?>(new(1, "src", "tgt", "base"));
@@ -34,29 +36,7 @@ public class ThreadViewDialogTests
         public Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct) =>
             Task.FromResult("");
         public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<PrThread>>([]);
-        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
-            Task.CompletedTask;
-        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
-            Task.CompletedTask;
-        public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
-            Task.CompletedTask;
-        public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
-            Task.CompletedTask;
-    }
-
-    /// <summary>A diff source whose thread refetch returns a preset list, so a mutation
-    /// (resolve/reactivate) can flip the VM's <see cref="PrDiffViewModel.Threads"/> status.</summary>
-    private sealed class ThreadsSource(IReadOnlyList<PrThread> afterRefetch) : IPrDiffSource
-    {
-        public Task<PrIteration?> GetLatestIterationAsync(string project, string repo, int prId, CancellationToken ct) =>
-            Task.FromResult<PrIteration?>(new(1, "src", "tgt", "base"));
-        public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repo, int prId, int iterationId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<FileChange>>([]);
-        public Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct) =>
-            Task.FromResult("");
-        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
-            Task.FromResult(afterRefetch);
+            Task.FromResult(threads ?? []);
         public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
             Task.CompletedTask;
         public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
@@ -148,7 +128,7 @@ public class ThreadViewDialogTests
         // on the stale Active snapshot. RefreshBody must re-render from vm.Threads, not the
         // constructor snapshot. Guards the "status doesn't update the open thread" UAT bug.
         // (LoadAsync runs before Build so the pre-subscription Changed doesn't hit app.Invoke.)
-        var vm = new PrDiffViewModel(new ThreadsSource([Thread(7, PrThreadStatus.Fixed)]), Pr());
+        var vm = new PrDiffViewModel(new FakeDiffSource([Thread(7, PrThreadStatus.Fixed)]), Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         var view = new ThreadViewDialog(App, vm, NoopEditor(), _ => { }, [Thread(7, PrThreadStatus.Active)]);
@@ -163,6 +143,24 @@ public class ThreadViewDialogTests
     }
 
     [Fact]
+    public async Task RefreshBody_Retains_The_Snapshot_When_The_Opened_Threads_Vanish()
+    {
+        // If a refetch no longer returns the opened thread (e.g. deleted server-side), RefreshBody
+        // keeps the last-good body rather than blanking the open overlay. Guards that guard branch.
+        var vm = new PrDiffViewModel(new FakeDiffSource([]), Pr()); // refetch returns no threads
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var view = new ThreadViewDialog(App, vm, NoopEditor(), _ => { }, [Thread(7, PrThreadStatus.Active)]);
+        var dialog = view.Build();
+        dialog.Layout(new Size(80, 24));
+
+        view.RefreshBody();
+
+        Assert.Contains("#7", view.Body.Text); // snapshot retained, not blanked
+        Assert.Contains("[Active]", view.Body.Text);
+    }
+
+    [Fact]
     public async Task RefreshBody_Preserves_Scroll_When_The_Thread_Is_Unchanged()
     {
         // A background prefetch raises vm.Changed while the overlay is open; the thread this
@@ -172,7 +170,7 @@ public class ThreadViewDialogTests
             .Select(i => new PrComment(i, "Sam", $"comment {i}", false))
             .ToArray();
         var longThread = new PrThread(7, PrThreadStatus.Active, comments, "/a.cs", RightLine: 2, LeftLine: null);
-        var vm = new PrDiffViewModel(new ThreadsSource([longThread]), Pr());
+        var vm = new PrDiffViewModel(new FakeDiffSource([longThread]), Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         var view = new ThreadViewDialog(App, vm, NoopEditor(), _ => { }, [longThread]);
