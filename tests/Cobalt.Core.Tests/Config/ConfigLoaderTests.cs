@@ -173,4 +173,48 @@ public class ConfigLoaderTests
             """));
         Assert.Contains("pr_scope", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Theme_Defaults_To_Dark_When_Absent()
+    {
+        var config = ConfigLoader.Parse(ValidToml);
+
+        Assert.Equal(ThemeChoice.Dark, config.Theme);
+    }
+
+    [Theory]
+    [InlineData("dark", ThemeChoice.Dark)]
+    [InlineData("light", ThemeChoice.Light)]
+    [InlineData("system", ThemeChoice.System)]
+    [InlineData("Light", ThemeChoice.Light)]
+    public void Theme_Is_Parsed_Case_Insensitively(string rawTheme, ThemeChoice expected)
+    {
+        var config = ConfigLoader.Parse(
+            $"""
+            theme = "{rawTheme}"
+
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            """);
+
+        Assert.Equal(expected, config.Theme);
+    }
+
+    [Fact]
+    public void Theme_Invalid_Value_Is_An_Error()
+    {
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            """
+            theme = "blue"
+
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            """));
+        Assert.Contains("theme", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("dark", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("light", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("system", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }

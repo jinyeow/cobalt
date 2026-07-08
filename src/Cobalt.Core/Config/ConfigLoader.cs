@@ -66,7 +66,24 @@ public static class ConfigLoader
                 $"default_context '{defaultContext}' has no matching [contexts.{defaultContext}] section");
         }
 
-        return new CobaltConfig(defaultContext, contexts);
+        return new CobaltConfig(defaultContext, contexts, ParseTheme(root));
+    }
+
+    private static ThemeChoice ParseTheme(TomlTable table)
+    {
+        // Absent => Dark (the product default), so an old/empty config is unchanged.
+        if (!table.TryGetValue("theme", out var raw))
+        {
+            return ThemeChoice.Dark;
+        }
+        return (raw as string)?.ToLowerInvariant() switch
+        {
+            "dark" => ThemeChoice.Dark,
+            "light" => ThemeChoice.Light,
+            "system" => ThemeChoice.System,
+            _ => throw new ConfigException(
+                $"theme must be \"dark\", \"light\", or \"system\", got '{raw}'"),
+        };
     }
 
     private static AdoContext ParseContext(string name, TomlTable table)
