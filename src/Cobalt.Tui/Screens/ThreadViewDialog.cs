@@ -131,10 +131,7 @@ public sealed class ThreadViewDialog(
         {
             return;
         }
-        var current = _threadIds
-            .Select(id => vm.Threads.FirstOrDefault(t => t.Id == id))
-            .OfType<PrThread>()
-            .ToList();
+        var current = vm.ThreadsByIds(_threadIds);
         if (current.Count == 0)
         {
             return; // retain the last-good body when the threads have (transiently) vanished

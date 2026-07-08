@@ -169,6 +169,10 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         ];
     }
 
+    /// <summary>The current threads matching the given ids, in id order, skipping any not present.</summary>
+    public IReadOnlyList<PrThread> ThreadsByIds(IReadOnlyList<int> ids) =>
+        [.. ids.Select(id => Threads.FirstOrDefault(t => t.Id == id)).OfType<PrThread>()];
+
     public async Task AddCommentAtLineAsync(int diffLineIndex, string text, CancellationToken ct)
     {
         if (CurrentDiff is null || SelectedFile is null ||

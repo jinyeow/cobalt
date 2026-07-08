@@ -154,6 +154,28 @@ public class PrDiffViewModelTests
     }
 
     [Fact]
+    public async Task ThreadsByIds_Returns_Matches_In_Requested_Order_Skipping_Absent()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads =
+            [
+                new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "one", false)], "/a.cs", 2, null),
+                new PrThread(2, PrThreadStatus.Fixed, [new PrComment(1, "Sam", "two", false)], "/a.cs", 3, null),
+            ],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\ny\nz\n";
+        source.Blobs[("/a.cs", "src")] = "x\ny\nz\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var picked = vm.ThreadsByIds([2, 1, 99]); // 99 is not a current thread
+
+        Assert.Equal([2, 1], picked.Select(t => t.Id).ToArray()); // requested order kept, absent id dropped
+    }
+
+    [Fact]
     public async Task Left_Side_Threads_Map_To_Removed_Lines()
     {
         var source = new FakeDiffSource
