@@ -1,3 +1,5 @@
+using System.Linq;
+
 namespace Cobalt.Core.Text;
 
 /// <summary>
@@ -49,12 +51,11 @@ public sealed class DiffFoldState
     /// </summary>
     public DiffFoldState ExpandContaining(int lineIndex)
     {
-        foreach (var block in _blocks)
+        foreach (var fb in _blocks
+            .OfType<FoldBlock>()
+            .Where(fb => lineIndex >= fb.StartIndex && lineIndex < fb.EndIndex))
         {
-            if (block is FoldBlock fb && lineIndex >= fb.StartIndex && lineIndex < fb.EndIndex)
-            {
-                return Expand(fb.FoldId);
-            }
+            return Expand(fb.FoldId);
         }
         return this;
     }
