@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Fixed
+- **A slow or broken `az` no longer blocks sign-in.** The credential chain now tries cobalt's
+  own persisted browser sign-in first and reuses an `az login` session only as a fallback —
+  previously `az` was tried first, and because Azure CLI's process *timeout* is a hard failure
+  that halts the chain (not a fall-through), a slow/locked-down `az` made even a successful
+  `cobalt auth login` report "NOT signed in". Az's process timeout is also raised so a
+  slow-but-working CLI doesn't time out.
 - **Diff-review UAT polish.** `Enter` on the diff pane now opens the line's comment thread
   (it was being swallowed by the dialog's default-accept and closing the review). Searching
   the diff (`/`) uses an **inline search bar** instead of launching `$EDITOR`. The

@@ -4,9 +4,10 @@ using Azure.Identity;
 namespace Cobalt.Core.Auth;
 
 /// <summary>
-/// Entra ID tokens for Azure DevOps (ADR 0003): reuse `az login` when possible,
-/// fall back to interactive browser sign-in with a persistent MSAL cache, and keep
-/// the resulting <see cref="AuthenticationRecord"/> on disk so later runs stay silent.
+/// Entra ID tokens for Azure DevOps (ADR 0003): prefer cobalt's own persisted browser
+/// sign-in (silent from the saved <see cref="AuthenticationRecord"/>), then fall back to
+/// reusing an `az login` session. A slow or broken `az` therefore can't block a working
+/// sign-in, and later runs stay silent.
 /// </summary>
 public sealed class AzureTokenProvider : ITokenProvider
 {
@@ -65,9 +66,17 @@ public sealed class AzureTokenProvider : ITokenProvider
 
     private static TokenCredential BuildChain(string authRecordPath)
     {
+        // Try cobalt's own persisted sign-in FIRST (silent from the saved auth record — the
+        // browser credential has DisableAutomaticAuthentication, so it never prompts here), then
+        // fall back to reusing an `az login` session. This ordering makes `cobalt auth login`
+        // self-sufficient: an `az` that is slow or broken can no longer block a working sign-in,
+        // because AzureCliCredential's *timeout* is a hard failure that HALTS ChainedTokenCredential
+        // (it only falls through on CredentialUnavailableException). Users without a cobalt record
+        // still get `az` reuse via the fall-through, and az's process timeout is raised so a
+        // slow-but-working CLI on a locked-down/corporate machine doesn't time out.
         return new ChainedTokenCredential(
-            new AzureCliCredential(),
-            new InteractiveBrowserCredential(BrowserOptions(authRecordPath)));
+            new InteractiveBrowserCredential(BrowserOptions(authRecordPath)),
+            new AzureCliCredential(new AzureCliCredentialOptions { ProcessTimeout = TimeSpan.FromSeconds(30) }));
     }
 
     private static InteractiveBrowserCredentialOptions BrowserOptions(string authRecordPath)
