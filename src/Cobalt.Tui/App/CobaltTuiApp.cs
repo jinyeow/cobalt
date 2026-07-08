@@ -2,6 +2,7 @@ using Cobalt.Core.Ado;
 using Cobalt.Core.Auth;
 using Cobalt.Core.Config;
 using Cobalt.Core.Models;
+using Cobalt.Tui.Theming;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
 using Terminal.Gui.Drivers;
@@ -34,7 +35,7 @@ public static class CobaltTuiApp
     {
         var context = config.Resolve(contextOverride);
         var vm = new ShellViewModel(
-            [.. config.Contexts.Keys.Order(StringComparer.Ordinal)], context.Name, context.PrScope);
+            [.. config.Contexts.Keys.Order(StringComparer.Ordinal)], context.Name, context.PrScope, config.Theme);
 
         using var connection = AdoConnection.Create(context, tokens);
         var workItems = new WorkItemStoreAdapter(new WorkItemsApi(connection.Http, context), context.PrScope);
@@ -51,11 +52,19 @@ public static class CobaltTuiApp
             new PolicyApi(connection.Http));
 
         var driverName = ResolveDriver(Environment.GetEnvironmentVariable, DriverRegistry.GetDriverNames().ToArray());
+        // Enable Terminal.Gui's theming (scoped to its embedded config) before Init so the driver
+        // starts on the resolved theme; the initial preset is applied just below.
+        ThemeService.Enable();
         using var app = Application.Create().Init(driverName);
         // Lower input latency: the default 25 iterations/sec adds up to ~40ms per
         // keystroke; 60 halves that to ~16ms for a snappier vim feel.
         Application.MaximumIterationsPerSecond = 60;
-        using var shell = new CobaltShell(app, vm, workItems, pullRequests, editor: null, context: context);
+        // Declared before the shell so disposal runs shell→monitor: the shell unsubscribes its
+        // Changed handler before the monitor (whose watcher thread raises it) is disposed.
+        using var monitor = OsThemeMonitor.Create();
+        ThemeService.Apply(ThemeResolver.Resolve(config.Theme, monitor.Current));
+        using var shell = new CobaltShell(
+            app, vm, workItems, pullRequests, editor: null, context: context, themeMonitor: monitor);
 
         ResolveIdentityInBackground(app, vm, identity);
 

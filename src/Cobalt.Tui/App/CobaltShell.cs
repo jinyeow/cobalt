@@ -3,6 +3,7 @@ using Cobalt.Tui.Editor;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.Screens;
 using Cobalt.Tui.Tasks;
+using Cobalt.Tui.Theming;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
 using Terminal.Gui.ViewBase;
@@ -38,6 +39,7 @@ public sealed class CobaltShell : Window
     private View? _activeScreen;
 
     private readonly AdoContext? _context;
+    private readonly IOsThemeMonitor? _themeMonitor;
 
     public CobaltShell(
         IApplication app,
@@ -45,13 +47,15 @@ public sealed class CobaltShell : Window
         WorkItemStoreAdapter? workItems = null,
         PullRequestStoreAdapter? pullRequests = null,
         EditorService? editor = null,
-        AdoContext? context = null)
+        AdoContext? context = null,
+        IOsThemeMonitor? themeMonitor = null)
     {
         _app = app;
         _vm = vm;
         _workItems = workItems;
         _pullRequests = pullRequests;
         _context = context;
+        _themeMonitor = themeMonitor;
         _editor = editor ?? new EditorService(new ProcessEditorLauncher(
             Environment.GetEnvironmentVariable, TerminalGuiSuspender.For(app)));
         _router = new KeymapRouter(_bindings);
@@ -71,6 +75,7 @@ public sealed class CobaltShell : Window
         WireViewModel();
         WireKeys();
         WirePalette();
+        WireTheme();
         ShowSection();
         RefreshChrome();
     }
@@ -369,6 +374,56 @@ public sealed class CobaltShell : Window
         _workItemList?.OnRefresh(); // reflect any edits back into the list
     }
 
+    /// <summary>
+    /// Wires live theming: <c>:theme</c> re-resolves the preset and repaints, and (when following
+    /// the system) an OS light/dark flip does the same. The palette/scheme swap needs no view
+    /// recreation — a forced repaint re-resolves every view's SchemeName and the diff's ambient
+    /// palette.
+    /// </summary>
+    private void WireTheme()
+    {
+        _vm.ThemeChangeRequested += OnThemeChangeRequested;
+        if (_themeMonitor is not null)
+        {
+            _themeMonitor.Changed += OnOsThemeChanged;
+            _themeMonitor.Start();
+        }
+    }
+
+    /// <summary>:theme dark|light|system — apply the resolved preset (following the OS for System) and repaint.</summary>
+    private void OnThemeChangeRequested(ThemeChoice choice)
+    {
+        var os = _themeMonitor?.Current ?? OsTheme.Unknown;
+        ThemeService.Apply(ThemeResolver.Resolve(choice, os));
+        _app.LayoutAndDraw(true);
+    }
+
+    /// <summary>
+    /// The OS light/dark setting changed. Only acts while following the system
+    /// (<c>theme = system</c>). Raised from the monitor's watcher thread, so marshal onto the UI
+    /// thread before touching Terminal.Gui.
+    /// </summary>
+    private void OnOsThemeChanged(OsTheme os)
+    {
+        if (OsFollowPreset(_vm.CurrentTheme, os) is not { } preset)
+        {
+            return;
+        }
+        _app.Invoke(() =>
+        {
+            ThemeService.Apply(preset);
+            _app.LayoutAndDraw(true);
+        });
+    }
+
+    /// <summary>
+    /// The preset to apply when the OS theme flips to <paramref name="os"/>, or
+    /// <see langword="null"/> when the user isn't following the system — a fixed <c>dark</c>/
+    /// <c>light</c> choice ignores OS changes. Pure so the follow decision is testable headlessly.
+    /// </summary>
+    internal static ThemePreset? OsFollowPreset(ThemeChoice current, OsTheme os) =>
+        current == ThemeChoice.System ? ThemeResolver.Resolve(ThemeChoice.System, os) : null;
+
     private void WirePalette()
     {
         _palette.KeyDown += (_, key) =>
@@ -479,5 +534,24 @@ public sealed class CobaltShell : Window
         var lines = _vm.Messages.History
             .Select(m => $"{m.At:HH:mm:ss} {(m.Level == MessageLevel.Error ? "E" : "I")} {m.Text}");
         TextDialog.Show(_app, "messages", string.Join("\n", lines));
+    }
+
+    /// <summary>
+    /// Unsubscribe the theme handlers before teardown. The monitor's watcher thread can raise
+    /// <see cref="IOsThemeMonitor.Changed"/> late, so detaching here (before the monitor is
+    /// disposed by the caller) stops it marshalling onto an app that is shutting down. The
+    /// monitor itself is owned and disposed by <c>CobaltTuiApp</c>, not here.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _vm.ThemeChangeRequested -= OnThemeChangeRequested;
+            if (_themeMonitor is not null)
+            {
+                _themeMonitor.Changed -= OnOsThemeChanged;
+            }
+        }
+        base.Dispose(disposing);
     }
 }
