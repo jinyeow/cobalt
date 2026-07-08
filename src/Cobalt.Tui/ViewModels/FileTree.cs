@@ -1,4 +1,5 @@
 using Cobalt.Core.Models;
+using System.Text;
 
 namespace Cobalt.Tui.ViewModels;
 
@@ -95,19 +96,19 @@ public static class FileTree
         {
             // Compress a single-child directory chain into one row (src/Web/Api),
             // so the tree doesn't waste a line per intermediate directory.
-            var label = segment;
+            var label = new StringBuilder(segment);
             var nodePath = path + "/" + segment;
             var current = child;
             while (current.Subdirs.Count == 1 && current.Files.Count == 0)
             {
                 var (onlyName, onlyChild) = current.Subdirs.First();
-                label += "/" + onlyName;
+                label.Append('/').Append(onlyName);
                 nodePath += "/" + onlyName;
                 current = onlyChild;
             }
 
             var isCollapsed = collapsed.Contains(nodePath);
-            rows.Add(new FileTreeRow(FileTreeRowKind.Directory, depth, label, null, null, nodePath, isCollapsed));
+            rows.Add(new FileTreeRow(FileTreeRowKind.Directory, depth, label.ToString(), null, null, nodePath, isCollapsed));
             if (!isCollapsed)
             {
                 Emit(current, nodePath, depth + 1, collapsed, rows, annotations);
