@@ -16,23 +16,29 @@ namespace Cobalt.Tui.Screens;
 public sealed class WorkItemActions
 {
     private readonly EditorService _editor;
+    private readonly ITextInput _textInput;
     private readonly Action<string> _log;
     private readonly Func<string, IReadOnlyList<string>, int?> _choose;
     private readonly Action<Action> _post;
 
     /// <param name="app">Host application; supplies the default state chooser and UI-thread marshaling.</param>
-    /// <param name="editor">Editor used for comment/assign/tags/description text entry.</param>
+    /// <param name="editor">Editor used for tags/description text entry (ADR 0020: stays $EDITOR).</param>
     /// <param name="log">Message sink for success/failure lines.</param>
+    /// <param name="textInput">In-TUI text entry used for comment/assign (ADR 0020). Defaults to an
+    /// <see cref="EditorTextInput"/> wrapping <paramref name="editor"/> — a behaviour-preserving
+    /// compatibility shim for callers not yet wired to the in-TUI editor, not the intended injection point.</param>
     /// <param name="choose">Option picker (title, options) → chosen index, or null/-1 when dismissed; defaults to a <see cref="MessageBox"/> query. Injectable for tests.</param>
     /// <param name="post">Marshals a callback onto the UI thread; defaults to <c>IApplication.Invoke</c>. Injectable for tests.</param>
     public WorkItemActions(
         IApplication app,
         EditorService editor,
         Action<string> log,
+        ITextInput? textInput = null,
         Func<string, IReadOnlyList<string>, int?>? choose = null,
         Action<Action>? post = null)
     {
         _editor = editor;
+        _textInput = textInput ?? new EditorTextInput(editor);
         _log = log;
         _choose = choose ?? new Func<string, IReadOnlyList<string>, int?>(
             (title, options) => MessageBox.Query(app, title, "", [.. options]));
@@ -80,7 +86,7 @@ public sealed class WorkItemActions
 
     public async Task CommentAsync(WorkItemDetailViewModel vm, CancellationToken ct)
     {
-        var text = await EditAsync("", ".md", ct).ConfigureAwait(false);
+        var text = await ReadTextAsync(new TextInputRequest("comment", SingleLine: false), ct).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(text))
         {
             await RunAndLog(vm, vm.AddCommentAsync(text.Trim(), ct), "comment added").ConfigureAwait(false);
@@ -89,7 +95,7 @@ public sealed class WorkItemActions
 
     public async Task AssignAsync(WorkItemDetailViewModel vm, CancellationToken ct)
     {
-        var value = await EditAsync("", ".txt", ct).ConfigureAwait(false);
+        var value = await ReadTextAsync(new TextInputRequest("assign to", SingleLine: true), ct).ConfigureAwait(false);
         if (value is not null)
         {
             await RunAndLog(vm, vm.AssignAsync(value.Trim(), ct), "assigned").ConfigureAwait(false);
@@ -129,6 +135,19 @@ public sealed class WorkItemActions
         try
         {
             return await _editor.EditAsync(initial, extension, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
+        {
+            _post(() => _log($"editor failed: {ex.Message}"));
+            return null;
+        }
+    }
+
+    private async Task<string?> ReadTextAsync(TextInputRequest request, CancellationToken ct)
+    {
+        try
+        {
+            return await _textInput.ReadAsync(request, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {

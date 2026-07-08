@@ -71,25 +71,43 @@ public class WorkItemActionsTests
         }
     }
 
-    private static WorkItemActions Actions(EditorService editor, Action<string> log, int? choice = null) =>
-        new(App, editor, log, choose: (_, _) => choice, post: a => a());
+    /// <summary>Fake ITextInput for the migrated comment/assign flows (ADR 0020); records every request.</summary>
+    private sealed class FakeTextInput(string? textToReturn) : ITextInput
+    {
+        public List<TextInputRequest> Requests { get; } = [];
+
+        public Task<string?> ReadAsync(TextInputRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(textToReturn);
+        }
+    }
+
+    private static WorkItemActions Actions(
+        EditorService editor, Action<string> log, int? choice = null, ITextInput? textInput = null) =>
+        new(App, editor, log, textInput: textInput, choose: (_, _) => choice, post: a => a());
 
     [Fact]
-    public async Task RunComment_Posts_The_Edited_Text()
+    public async Task RunComment_Reads_Via_TextInput_And_Posts_The_Text()
     {
         var store = new FakeStore();
-        var actions = Actions(EditorReturning("looks good"), _ => { });
+        var textInput = new FakeTextInput("looks good");
+        var actions = Actions(EditorReturning(null), _ => { }, textInput: textInput);
 
         await actions.RunCommentAsync(store, 1, null, TestContext.Current.CancellationToken);
 
         Assert.Equal("looks good", store.LastComment);
+        var request = Assert.Single(textInput.Requests);
+        Assert.Equal("comment", request.Title);
+        Assert.False(request.SingleLine);
     }
 
     [Fact]
-    public async Task RunComment_Empty_Editor_Posts_Nothing()
+    public async Task RunComment_Cancelled_TextInput_Posts_Nothing()
     {
         var store = new FakeStore();
-        var actions = Actions(EditorReturning(null), _ => { });
+        var textInput = new FakeTextInput(null);
+        var actions = Actions(EditorReturning(null), _ => { }, textInput: textInput);
 
         await actions.RunCommentAsync(store, 1, null, TestContext.Current.CancellationToken);
 
@@ -122,16 +140,20 @@ public class WorkItemActionsTests
     }
 
     [Fact]
-    public async Task RunAssign_Sends_AssignedTo_Patch()
+    public async Task RunAssign_Reads_Via_TextInput_And_Sends_AssignedTo_Patch()
     {
         var store = new FakeStore();
-        var actions = Actions(EditorReturning("jin@example.com"), _ => { });
+        var textInput = new FakeTextInput("jin@example.com");
+        var actions = Actions(EditorReturning(null), _ => { }, textInput: textInput);
 
         await actions.RunAssignAsync(store, 1, null, TestContext.Current.CancellationToken);
 
         Assert.NotNull(store.LastPatch);
         Assert.Contains("/fields/System.AssignedTo", store.LastPatch!.ToJson());
         Assert.Contains("jin@example.com", store.LastPatch.ToJson());
+        var request = Assert.Single(textInput.Requests);
+        Assert.Equal("assign to", request.Title);
+        Assert.True(request.SingleLine);
     }
 
     private sealed class FailingLoadStore : IWorkItemStore
