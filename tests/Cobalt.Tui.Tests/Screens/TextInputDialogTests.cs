@@ -157,4 +157,46 @@ public class TextInputDialogTests
 
         Assert.IsType<TextField>(view.Field);
     }
+
+    [Fact]
+    public void CtrlE_Launch_Failure_Surfaces_In_The_Hint()
+    {
+        var (view, dialog, resolved) = Built(
+            new TextInputRequest("comment", Initial: "keep"),
+            editor: (_, _) => throw new EditorLaunchException("could not start editor 'nvim'"));
+
+        dialog.NewKeyDownEvent(new Key('e').WithCtrl);
+
+        Assert.Contains("couldn't open $EDITOR", view.Hint); // the failure is not swallowed
+        Assert.Contains("could not start editor", view.Hint);
+        Assert.Equal("keep", view.Text); // buffer preserved
+        Assert.Empty(resolved);          // not submitted
+    }
+
+    [Fact]
+    public void Enter_Submits_Only_Once_Even_On_A_Repeat()
+    {
+        var (_, dialog, resolved) = Built(new TextInputRequest("comment"));
+        Type(dialog, "x");
+
+        dialog.NewKeyDownEvent(new Key(KeyCode.Enter));
+        dialog.NewKeyDownEvent(new Key(KeyCode.Enter)); // a queued/repeat key after close
+
+        Assert.Equal(["x"], resolved); // resolved exactly once
+    }
+
+    [Fact]
+    public void Keys_After_Close_Are_Ignored()
+    {
+        string? seen = null;
+        var (_, dialog, resolved) = Built(
+            new TextInputRequest("comment", Initial: "keep"),
+            editor: (b, _) => { seen = b; return Task.FromResult<string?>("edited"); });
+
+        dialog.NewKeyDownEvent(new Key(KeyCode.Esc));  // cancel/close
+        dialog.NewKeyDownEvent(new Key('e').WithCtrl); // Ctrl+E after close must be ignored
+
+        Assert.Null(seen);              // the editor hatch was not invoked after close
+        Assert.Equal([null], resolved); // still just the single cancel
+    }
 }

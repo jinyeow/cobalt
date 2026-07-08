@@ -156,6 +156,18 @@ public class WorkItemActionsTests
         Assert.True(request.SingleLine);
     }
 
+    [Fact]
+    public async Task RunAssign_Empty_Submit_Does_Not_Unassign()
+    {
+        var store = new FakeStore();
+        var textInput = new FakeTextInput(""); // Enter on a blank field — a dismiss gesture
+        var actions = Actions(EditorReturning(null), _ => { }, textInput: textInput);
+
+        await actions.RunAssignAsync(store, 1, null, TestContext.Current.CancellationToken);
+
+        Assert.Null(store.LastPatch); // no System.AssignedTo PATCH: the item is NOT unassigned
+    }
+
     private sealed class FailingLoadStore : IWorkItemStore
     {
         public JsonPatchBuilder? LastPatch { get; private set; }

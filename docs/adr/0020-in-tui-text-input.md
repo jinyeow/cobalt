@@ -50,3 +50,7 @@ editor to type *a number*) that cost is absurd.
   on demand (Ctrl-E).
 - The exact newline chord is environment-dependent; the widget documents what it resolved, and
   the hint line shows the active keys.
+- **Known limitation:** on the Win32 `windows` driver (legacy conhost, no bracketed paste),
+  pasting multi-line text into the field arrives as synthesized key events, so an embedded newline
+  submits early. Use **Ctrl-E** to bring pasted/multi-line content into `$EDITOR`. Terminals on
+  the ANSI/VT path (bracketed paste) are unaffected.

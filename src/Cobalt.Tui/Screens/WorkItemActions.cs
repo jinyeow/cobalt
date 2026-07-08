@@ -96,7 +96,10 @@ public sealed class WorkItemActions
     public async Task AssignAsync(WorkItemDetailViewModel vm, CancellationToken ct)
     {
         var value = await ReadTextAsync(new TextInputRequest("assign to", SingleLine: true), ct).ConfigureAwait(false);
-        if (value is not null)
+        // Empty submit (Enter on a blank field) is a dismiss gesture, like Esc — never PATCH an
+        // empty System.AssignedTo, which would silently unassign the item (matches the old $EDITOR
+        // path, where an unchanged empty buffer returned null).
+        if (!string.IsNullOrWhiteSpace(value))
         {
             await RunAndLog(vm, vm.AssignAsync(value.Trim(), ct), "assigned").ConfigureAwait(false);
         }

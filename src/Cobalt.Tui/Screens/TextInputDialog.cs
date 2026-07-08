@@ -16,17 +16,13 @@ namespace Cobalt.Tui.Screens;
 /// <c>NewKeyDownEvent</c>. <c>TuiTextInput</c> is the production <c>ITextInput</c> wrapper.
 /// </summary>
 /// <remarks>
-/// Newline-chord probe (Terminal.Gui 2.4.16): Ctrl+Enter / Shift+Enter cannot be represented
-/// distinctly on the wire — there is no CSI-u / kitty keyboard protocol in the package, and the
-/// ANSI encoder documents that Ctrl+modifier combinations on Enter collapse to the same code as
-/// plain Enter. The fallback is <b>Ctrl+J</b> (literal line-feed, always delivered). A decoder
-/// probe of <c>AnsiKeyConverter.ToKey</c> shows the dotnet/ansi driver maps a physical Ctrl+J
+/// Newline-chord probe (Terminal.Gui 2.4.16): the dotnet/ansi driver maps a physical Ctrl+J
 /// (byte 0x0A) to <c>KeyCode.Enter | CtrlMask</c> (base <see cref="KeyCode.Enter"/>, Ctrl set) —
 /// NOT <c>KeyCode.J | CtrlMask</c> — while plain Enter (CR, 0x0D) is <see cref="KeyCode.Enter"/>
 /// with no modifier. So the newline chord is detected as "Enter with a Ctrl/Shift modifier"
-/// (covering Ctrl+J and any terminal that does deliver Ctrl/Shift+Enter distinctly), plus a
-/// defensive <c>KeyCode.J | CtrlMask</c> clause for the Win32 <c>windows</c> driver. Plain,
-/// unmodified Enter submits.
+/// (covering Ctrl+J and any terminal that delivers Ctrl/Shift+Enter distinctly, e.g. under the
+/// kitty keyboard protocol), plus a defensive <c>KeyCode.J | CtrlMask</c> clause for the Win32
+/// <c>windows</c> driver. Plain, unmodified Enter submits.
 /// </remarks>
 internal sealed class TextInputDialog
 {
@@ -34,8 +30,16 @@ internal sealed class TextInputDialog
     private readonly Func<string, CancellationToken, Task<string?>> _openInEditor;
     private readonly Action<string?> _resolve;
     private readonly Action<Action> _post;
-    private readonly CancellationToken _ct;
+    // Linked to the flow's token; cancelled on close so a Ctrl+E editor call that is still queued
+    // when the dialog closes (e.g. Ctrl+E then Esc) is skipped rather than launching over the
+    // shell. Intentionally NOT disposed: the in-flight editor call still observes the token, and
+    // GC reclaims the linked registration — disposing here would risk an ObjectDisposedException.
+    private readonly CancellationTokenSource _dialogCts;
     private View? _field;
+    private Label? _hint;
+    // Set once, on the UI thread, at the first submit/cancel. Guards against a double-resolve from
+    // queued keys and against Ctrl+E post-backs touching the disposed field after the dialog closed.
+    private bool _closed;
 
     /// <param name="app">The running application (for the default UI-thread marshal).</param>
     /// <param name="request">What to ask for (title, initial text, single- vs multi-line).</param>
@@ -57,7 +61,7 @@ internal sealed class TextInputDialog
         _request = request;
         _openInEditor = openInEditor;
         _resolve = resolve;
-        _ct = ct;
+        _dialogCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _post = post ?? app.Invoke;
     }
 
@@ -66,6 +70,9 @@ internal sealed class TextInputDialog
 
     /// <summary>Test seam: the current buffer text.</summary>
     internal string Text => _field?.Text ?? "";
+
+    /// <summary>Test seam: the key hint / status line (carries a Ctrl+E launch-failure message).</summary>
+    internal string Hint => _hint?.Text ?? "";
 
     /// <summary>
     /// Builds and wires the overlay (editable field, key hint, key handlers) without starting the
@@ -119,6 +126,7 @@ internal sealed class TextInputDialog
                 ? "Enter submit · Ctrl+J newline · Ctrl+E $EDITOR · Esc cancel"
                 : "Enter submit · Ctrl+E $EDITOR · Esc cancel",
         };
+        _hint = hint;
 
         // The focused field eats keys first, so subscribe the handler there too (mirrors
         // TextDialog / ThreadViewDialog). Suppress the Dialog's default-accept so Enter is ours.
@@ -133,12 +141,17 @@ internal sealed class TextInputDialog
 
     private void HandleKey(object? sender, Key key)
     {
+        if (_closed)
+        {
+            return; // already submitted/cancelled; ignore queued keys
+        }
+
         var baseCode = key.NoShift.NoAlt.NoCtrl.KeyCode;
 
         if (baseCode == KeyCode.Esc)
         {
             key.Handled = true;
-            _resolve(null);
+            Close(null);
             return;
         }
 
@@ -160,7 +173,7 @@ internal sealed class TextInputDialog
                 return;
             }
             key.Handled = true;
-            _resolve(Text);
+            Close(Text);
             return;
         }
 
@@ -173,6 +186,18 @@ internal sealed class TextInputDialog
         }
 
         // Any other key (printable runes, backspace, arrows) falls through to the field.
+    }
+
+    /// <summary>Resolve exactly once (submit or cancel); cancels any in-flight Ctrl+E editor call.</summary>
+    private void Close(string? result)
+    {
+        if (_closed)
+        {
+            return;
+        }
+        _closed = true;
+        _dialogCts.Cancel();
+        _resolve(result);
     }
 
     private void InsertNewline()
@@ -193,23 +218,59 @@ internal sealed class TextInputDialog
         string? edited;
         try
         {
-            edited = await _openInEditor(current, _ct).ConfigureAwait(false);
+            edited = await _openInEditor(current, _dialogCts.Token).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is EditorLaunchException or IOException or OperationCanceledException)
+        catch (OperationCanceledException)
         {
-            // The $EDITOR hatch failed/was cancelled; keep the buffer and return to the field.
-            _post(() => _field?.SetFocus());
+            // The dialog closed (or the user cancelled the editor) — nothing to surface.
+            _post(RefocusIfOpen);
+            return;
+        }
+        catch (Exception ex)
+        {
+            // Broad by design: this is a fire-and-forget UI task, so any launch/IO failure must be
+            // caught (never left unobserved) AND surfaced — a silent no-op hatch violates ADR 0009.
+            _post(() =>
+            {
+                if (_closed)
+                {
+                    return;
+                }
+                if (_hint is not null)
+                {
+                    _hint.Text = $"couldn't open $EDITOR: {FirstLine(ex.Message)}";
+                }
+                _field?.SetFocus();
+            });
             return;
         }
 
         // null → leave the buffer unchanged (do NOT submit); non-null → replace and return to field.
         _post(() =>
         {
+            if (_closed)
+            {
+                return; // dialog closed while the editor was open; discard and don't touch the field
+            }
             if (edited is not null && _field is not null)
             {
                 _field.Text = edited;
             }
             _field?.SetFocus();
         });
+    }
+
+    private void RefocusIfOpen()
+    {
+        if (!_closed)
+        {
+            _field?.SetFocus();
+        }
+    }
+
+    private static string FirstLine(string message)
+    {
+        var newline = message.IndexOf('\n');
+        return newline < 0 ? message : message[..newline].TrimEnd('\r');
     }
 }
