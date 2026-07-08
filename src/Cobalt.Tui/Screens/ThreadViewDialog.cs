@@ -58,12 +58,17 @@ public sealed class ThreadViewDialog(
     public void Show()
     {
         using var dialog = Build();
-        app.Run(dialog);
-
-        _closed = true;
-        vm.Changed -= OnChanged;
-        _cts.Cancel();
-        _cts.Dispose();
+        try
+        {
+            app.Run(dialog);
+        }
+        finally
+        {
+            _closed = true;
+            vm.Changed -= OnChanged;
+            _cts.Cancel();
+            _cts.Dispose();
+        }
     }
 
     /// <summary>

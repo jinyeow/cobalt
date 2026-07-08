@@ -111,13 +111,18 @@ public sealed class DiffReviewDialog(
     {
         using var dialog = Build();
         _ = LoadAsync();
-        app.Run(dialog);
-
-        _closed = true;
-        vm.Changed -= OnChanged;
-        dialog.ViewportChanged -= OnViewportChanged;
-        _cts.Cancel();
-        _cts.Dispose();
+        try
+        {
+            app.Run(dialog);
+        }
+        finally
+        {
+            _closed = true;
+            vm.Changed -= OnChanged;
+            dialog.ViewportChanged -= OnViewportChanged;
+            _cts.Cancel();
+            _cts.Dispose();
+        }
     }
 
     /// <summary>
