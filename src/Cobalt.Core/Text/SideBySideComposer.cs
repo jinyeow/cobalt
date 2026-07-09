@@ -51,21 +51,33 @@ public static class SideBySideComposer
             }
             var addedCount = i - addedStart;
 
-            var pairs = Math.Min(removedCount, addedCount);
-            for (var k = 0; k < pairs; k++)
-            {
-                rows.Add(new SideBySideRow(removedStart + k, addedStart + k));
-            }
-            for (var k = pairs; k < removedCount; k++)
-            {
-                rows.Add(new SideBySideRow(removedStart + k, null));
-            }
-            for (var k = pairs; k < addedCount; k++)
-            {
-                rows.Add(new SideBySideRow(null, addedStart + k));
-            }
+            EmitRunPairing(rows, removedStart, removedCount, addedStart, addedCount);
         }
         return rows;
+    }
+
+    // Emit the aligned rows for one removed-run/added-run pairing: k-th↔k-th up to the
+    // shorter run, then any surplus on either side rendered blank on the other.
+    private static void EmitRunPairing(
+        List<SideBySideRow> rows,
+        int removedStart,
+        int removedCount,
+        int addedStart,
+        int addedCount)
+    {
+        var pairs = Math.Min(removedCount, addedCount);
+        for (var k = 0; k < pairs; k++)
+        {
+            rows.Add(new SideBySideRow(removedStart + k, addedStart + k));
+        }
+        for (var k = pairs; k < removedCount; k++)
+        {
+            rows.Add(new SideBySideRow(removedStart + k, null));
+        }
+        for (var k = pairs; k < addedCount; k++)
+        {
+            rows.Add(new SideBySideRow(null, addedStart + k));
+        }
     }
 
     /// <summary>The separator drawn between the two columns.</summary>
