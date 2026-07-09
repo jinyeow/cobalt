@@ -117,4 +117,73 @@ public class DiffLineStylerTests
             styled.DisplayText.Substring(r.Start, r.Length) == "var" && r.Style.Token == TokenKind.Keyword);
         Assert.False(varRun.Style.Emphasis);
     }
+
+    [Fact]
+    public void WithSearchHits_No_Hits_Leaves_Output_Unchanged()
+    {
+        var line = new DiffLine(DiffLineKind.Context, 1, 1, "var total = price;");
+        var styled = Compose(line, hasThread: false);
+        var gutterLen = styled.DisplayText.Length - line.Text.Length;
+
+        var result = DiffLineStyler.WithSearchHits(styled, [], gutterLen);
+
+        Assert.Equal(styled.DisplayText, result.DisplayText);
+        Assert.Equal(styled.Runs, result.Runs);
+        Assert.All(result.Runs, r => Assert.False(r.Style.SearchHit));
+    }
+
+    [Fact]
+    public void WithSearchHits_Splits_The_Overlapping_Run_And_Flags_It()
+    {
+        // "total" is a plain identifier token; the hit lands inside it.
+        const string text = "var total = price;";
+        var totalStart = text.IndexOf("total", StringComparison.Ordinal);
+        var line = new DiffLine(DiffLineKind.Context, 1, 1, text);
+        var styled = Compose(line, hasThread: false);
+        var gutterLen = styled.DisplayText.Length - text.Length;
+
+        var result = DiffLineStyler.WithSearchHits(styled, [new LineSpan(totalStart, 5)], gutterLen);
+        AssertPartitions(result);
+
+        Assert.Equal(styled.DisplayText, result.DisplayText);
+
+        var hits = result.Runs.Where(r => r.Style.SearchHit).ToList();
+        Assert.NotEmpty(hits);
+        foreach (var r in hits)
+        {
+            Assert.True(r.Start >= gutterLen + totalStart);
+            Assert.True(r.Start + r.Length <= gutterLen + totalStart + 5);
+        }
+        var spelled = string.Concat(hits.Select(r => result.DisplayText.Substring(r.Start, r.Length)));
+        Assert.Equal("total", spelled);
+
+        // Non-hit runs keep SearchHit false and the same styling as before.
+        Assert.Contains(result.Runs, r => !r.Style.SearchHit);
+        var varRun = result.Runs.First(r =>
+            result.DisplayText.Substring(r.Start, r.Length) == "var" && r.Style.Token == TokenKind.Keyword);
+        Assert.False(varRun.Style.SearchHit);
+    }
+
+    [Fact]
+    public void WithSearchHits_Does_Not_Change_Existing_Style_Fields()
+    {
+        var line = new DiffLine(DiffLineKind.Added, null, 4, "var x = 1;");
+        var styled = Compose(line, hasThread: false);
+        var gutterLen = styled.DisplayText.Length - line.Text.Length;
+
+        var result = DiffLineStyler.WithSearchHits(styled, [new LineSpan(0, gutterLen)], gutterLen);
+
+        for (var i = 0; i < styled.Runs.Count; i++)
+        {
+            var before = styled.Runs[i];
+            var matching = result.Runs.Where(r => r.Start >= before.Start && r.Start < before.Start + before.Length);
+            foreach (var after in matching)
+            {
+                Assert.Equal(before.Style.Token, after.Style.Token);
+                Assert.Equal(before.Style.LineKind, after.Style.LineKind);
+                Assert.Equal(before.Style.Emphasis, after.Style.Emphasis);
+                Assert.Equal(before.Style.IsGutter, after.Style.IsGutter);
+            }
+        }
+    }
 }

@@ -8,7 +8,7 @@ public class PrDetailViewModelTests
     private static PullRequest Pr() =>
         new(10, "Add feature", "the description", "active", false, "feature", "main", "succeeded",
             "Jin", "repo-1", "web", [new PrReviewer("r1", "Sam", PrVote.NoVote, true)], [101], "abc123",
-            "Contoso.Web");
+            "Contoso.Web", ProjectId: "proj-guid-1");
 
     private sealed class FakeStore : IPullRequestStore
     {
@@ -20,6 +20,10 @@ public class PrDetailViewModelTests
         public bool Abandoned { get; private set; }
         public bool Completed { get; private set; }
         public string? LastProject { get; private set; }
+        public string? Commented { get; private set; }
+        public string? PolicyProjectId { get; private set; }
+        public List<PolicyEvaluation> Policies { get; set; } = [];
+        public Exception? PolicyException { get; set; }
 
         public Task<PullRequest> GetPullRequestAsync(int id, CancellationToken ct) => Task.FromResult(Pr);
         public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int id, CancellationToken ct)
@@ -61,6 +65,21 @@ public class PrDetailViewModelTests
             LastProject = project;
             Completed = true;
             return Task.CompletedTask;
+        }
+
+        public Task AddPrCommentAsync(string project, string repo, int id, string text, CancellationToken ct)
+        {
+            LastProject = project;
+            Commented = text;
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<PolicyEvaluation>> GetPolicyEvaluationsAsync(string projectId, int id, CancellationToken ct)
+        {
+            PolicyProjectId = projectId;
+            return PolicyException is not null
+                ? Task.FromException<IReadOnlyList<PolicyEvaluation>>(PolicyException)
+                : Task.FromResult<IReadOnlyList<PolicyEvaluation>>(Policies);
         }
     }
 
@@ -170,6 +189,59 @@ public class PrDetailViewModelTests
     }
 
     [Fact]
+    public async Task AddPrComment_Posts_Text()
+    {
+        var store = new FakeStore();
+        var vm = new PrDetailViewModel(store, 10);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        await vm.AddPrCommentAsync("looks good overall", TestContext.Current.CancellationToken);
+
+        Assert.Equal("looks good overall", store.Commented);
+    }
+
+    [Fact]
+    public async Task Load_Populates_Policies()
+    {
+        var store = new FakeStore
+        {
+            Policies = [new PolicyEvaluation("Build validation", "approved", true)],
+        };
+        var vm = new PrDetailViewModel(store, 10);
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Single(vm.Policies);
+        Assert.Equal("Build validation", vm.Policies[0].DisplayName);
+    }
+
+    [Fact]
+    public async Task Load_Threads_Project_Guid_To_Policy_Fetch()
+    {
+        var store = new FakeStore();
+        var vm = new PrDetailViewModel(store, 10);
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // The artifactId needs the project GUID, not the name.
+        Assert.Equal("proj-guid-1", store.PolicyProjectId);
+    }
+
+    [Fact]
+    public async Task Load_Policy_Failure_Is_Nonfatal_But_Surfaces_Expected_Error()
+    {
+        var store = new FakeStore { PolicyException = new HttpRequestException("policy down") };
+        var vm = new PrDetailViewModel(store, 10);
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // The PR itself still loaded; the expected policy failure surfaces via Error.
+        Assert.NotNull(vm.PullRequest);
+        Assert.NotNull(vm.Error);
+        Assert.Contains("policy down", vm.Error);
+    }
+
+    [Fact]
     public async Task Actions_Thread_The_Prs_Own_Project_Through()
     {
         var store = new FakeStore();
@@ -192,6 +264,9 @@ public class PrDetailViewModelTests
         public Task SetThreadStatusAsync(string project, string repo, int id, int threadId, PrThreadStatus status, CancellationToken ct) => Task.CompletedTask;
         public Task AbandonAsync(string project, string repo, int id, CancellationToken ct) => Task.CompletedTask;
         public Task CompleteAsync(string project, string repo, int id, string mergeStrategy, bool deleteSource, CancellationToken ct) => Task.CompletedTask;
+        public Task AddPrCommentAsync(string project, string repo, int id, string text, CancellationToken ct) => Task.CompletedTask;
+        public Task<IReadOnlyList<PolicyEvaluation>> GetPolicyEvaluationsAsync(string project, int id, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PolicyEvaluation>>([]);
     }
 
     [Fact]

@@ -92,6 +92,7 @@ public sealed class WorkItemDetailDialog
             Height = Dim.Fill(),
             ReadOnly = true,
             WordWrap = true,
+            ScrollBars = true, // position indicator; content is scrolled pager-style (VimScroll)
         };
 #pragma warning restore CS0618
         _body = body;

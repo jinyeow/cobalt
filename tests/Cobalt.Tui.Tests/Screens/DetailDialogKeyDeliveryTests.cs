@@ -1,5 +1,6 @@
 using System.Drawing;
 using Cobalt.Core.Ado;
+using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 using Cobalt.Tui.Editor;
 using Cobalt.Tui.Screens;
@@ -43,6 +44,9 @@ public class DetailDialogKeyDeliveryTests
         public Task SetThreadStatusAsync(string project, string repositoryId, int id, int threadId, PrThreadStatus status, CancellationToken ct) => Task.CompletedTask;
         public Task AbandonAsync(string project, string repositoryId, int id, CancellationToken ct) => Task.CompletedTask;
         public Task CompleteAsync(string project, string repositoryId, int id, string mergeStrategy, bool deleteSource, CancellationToken ct) => Task.CompletedTask;
+        public Task AddPrCommentAsync(string project, string repositoryId, int id, string text, CancellationToken ct) => Task.CompletedTask;
+        public Task<IReadOnlyList<PolicyEvaluation>> GetPolicyEvaluationsAsync(string project, int id, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PolicyEvaluation>>([]);
     }
 
     private static PrDetailDialog NewPrDialog()
@@ -108,6 +112,22 @@ public class DetailDialogKeyDeliveryTests
     }
 
     [Fact]
+    public void PrDialog_Gc_Reaches_The_Add_Comment_Seam()
+    {
+        var detail = NewPrDialog();
+        var commented = false;
+        detail.AddCommentAction = () => commented = true;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('g'));
+        dialog.NewKeyDownEvent(new Key('c'));
+
+        Assert.True(commented);
+    }
+
+    [Fact]
     public void PrDialog_PageDown_Still_Scrolls_The_Body()
     {
         var detail = NewPrDialog();
@@ -158,12 +178,13 @@ public class DetailDialogKeyDeliveryTests
     }
 
     [Fact]
-    public void PrDialog_G_Jumps_To_Last_Row_And_gg_Back_To_Top()
+    public void PrDialog_G_Scrolls_Last_Page_And_gg_Back_To_Top()
     {
         var detail = LaidOutPrDialog(out var dialog);
+        var maxTop = detail.Body.Lines - detail.Body.Viewport.Height; // pager: top of the last page
 
         dialog.NewKeyDownEvent(new Key('G'));
-        Assert.Equal(199, detail.Body.CurrentRow);
+        Assert.Equal(maxTop, detail.Body.CurrentRow);
 
         dialog.NewKeyDownEvent(new Key('g'));
         dialog.NewKeyDownEvent(new Key('g'));
@@ -213,6 +234,94 @@ public class DetailDialogKeyDeliveryTests
 
         Assert.True(completed);
         Assert.True(abandoned);
+    }
+
+    private sealed class PolicyRenderStore : IPullRequestStore
+    {
+        public Task<PullRequest> GetPullRequestAsync(int id, CancellationToken ct) =>
+            Task.FromResult(new PullRequest(42, "Title", null, "active", false, "feature", "main", "succeeded",
+                "Jin", "repo-1", "web", [], [], "abc", "Proj", ProjectId: "guid"));
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repositoryId, int id, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PrThread>>([]);
+        public Task VoteAsync(string project, string repositoryId, int id, PrVote vote, CancellationToken ct) => Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repositoryId, int id, int threadId, string text, CancellationToken ct) => Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repositoryId, int id, int threadId, PrThreadStatus status, CancellationToken ct) => Task.CompletedTask;
+        public Task AbandonAsync(string project, string repositoryId, int id, CancellationToken ct) => Task.CompletedTask;
+        public Task CompleteAsync(string project, string repositoryId, int id, string mergeStrategy, bool deleteSource, CancellationToken ct) => Task.CompletedTask;
+        public Task AddPrCommentAsync(string project, string repositoryId, int id, string text, CancellationToken ct) => Task.CompletedTask;
+        public Task<IReadOnlyList<PolicyEvaluation>> GetPolicyEvaluationsAsync(string projectId, int id, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PolicyEvaluation>>(
+            [
+                new PolicyEvaluation("Build validation", "approved", true),
+                new PolicyEvaluation("Minimum reviewers", "rejected", true),
+                new PolicyEvaluation("Comment resolution", "queued", false),
+            ]);
+    }
+
+    [Fact]
+    public async Task PrDialog_Renders_Policies_Section_With_Pass_Fail_Pending_Glyphs()
+    {
+        var vm = new PrDetailViewModel(new PolicyRenderStore(), 42);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new PrDetailDialog(App, vm, NoopEditor(), _ => { });
+        detail.Build();
+
+        var text = detail.Body.Text;
+        Assert.Contains("Policies:", text);
+        Assert.Contains("✓ Build validation (blocking)", text);
+        Assert.Contains("✗ Minimum reviewers (blocking)", text);
+        Assert.Contains("⧗ Comment resolution", text);
+        // A non-blocking policy carries no blocking marker.
+        Assert.DoesNotContain("Comment resolution (blocking)", text);
+    }
+
+    private static readonly AdoContext Context = new()
+    {
+        Name = "work",
+        OrganizationUrl = new Uri("https://dev.azure.com/contoso"),
+        Project = "My Project",
+    };
+
+    [Fact]
+    public async Task PrDialog_Gb_Opens_The_Branch_Url()
+    {
+        var vm = new PrDetailViewModel(new PolicyRenderStore(), 42);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new PrDetailDialog(App, vm, NoopEditor(), _ => { }, context: Context);
+        string? captured = null;
+        detail.OpenUrlAction = url => captured = url;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('g'));
+        dialog.NewKeyDownEvent(new Key('b'));
+
+        Assert.NotNull(captured);
+        Assert.Contains("_git/", captured);
+        Assert.Contains("version=GB", captured);
+    }
+
+    [Fact]
+    public async Task PrDialog_Gb_Without_Context_Does_Not_Throw_Or_Open()
+    {
+        var vm = new PrDetailViewModel(new PolicyRenderStore(), 42);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new PrDetailDialog(App, vm, NoopEditor(), _ => { }); // no context
+        var opened = false;
+        detail.OpenUrlAction = _ => opened = true;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        var ex = Record.Exception(() =>
+        {
+            dialog.NewKeyDownEvent(new Key('g'));
+            dialog.NewKeyDownEvent(new Key('b'));
+        });
+
+        Assert.Null(ex);
+        Assert.False(opened);
     }
 
     // ---- Work-item detail ----
@@ -339,9 +448,10 @@ public class DetailDialogKeyDeliveryTests
     public void WorkItemDialog_G_And_gg_Jump_To_Ends()
     {
         var detail = LaidOutWorkItemDialog(out var dialog);
+        var maxTop = detail.Body.Lines - detail.Body.Viewport.Height; // pager: top of the last page
 
         dialog.NewKeyDownEvent(new Key('G'));
-        Assert.Equal(199, detail.Body.CurrentRow);
+        Assert.Equal(maxTop, detail.Body.CurrentRow);
 
         dialog.NewKeyDownEvent(new Key('g'));
         dialog.NewKeyDownEvent(new Key('g'));

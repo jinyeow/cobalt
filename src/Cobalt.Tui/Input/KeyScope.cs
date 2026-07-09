@@ -9,4 +9,5 @@ public enum KeyScope
     PullRequestList,
     PullRequestDetail,
     DiffReview,
+    ThreadView,
 }
