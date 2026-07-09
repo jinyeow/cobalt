@@ -101,16 +101,17 @@ public static class FileTree
             labelBuilder.Clear();
             labelBuilder.Append(segment);
 
-            var nodePath = path + "/" + segment;
+            var nodePathBuilder = new StringBuilder(path).Append('/').Append(segment);
             var current = child;
             while (current.Subdirs.Count == 1 && current.Files.Count == 0)
             {
                 var (onlyName, onlyChild) = current.Subdirs.First();
                 labelBuilder.Append('/').Append(onlyName);
-                nodePath += "/" + onlyName;
+                nodePathBuilder.Append('/').Append(onlyName);
                 current = onlyChild;
             }
 
+            var nodePath = nodePathBuilder.ToString();
             var isCollapsed = collapsed.Contains(nodePath);
             rows.Add(new FileTreeRow(FileTreeRowKind.Directory, depth, labelBuilder.ToString(), null, null, nodePath, isCollapsed));
             if (!isCollapsed)
