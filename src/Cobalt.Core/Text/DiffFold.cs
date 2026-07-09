@@ -62,12 +62,9 @@ public sealed class DiffFoldState
     public DiffFoldState ExpandAll()
     {
         var expanded = new HashSet<int>(_expanded);
-        foreach (var block in _blocks)
+        foreach (var fb in _blocks.OfType<FoldBlock>())
         {
-            if (block is FoldBlock fb)
-            {
-                expanded.Add(fb.FoldId);
-            }
+            expanded.Add(fb.FoldId);
         }
         return new DiffFoldState(_lines, _blocks, expanded);
     }
