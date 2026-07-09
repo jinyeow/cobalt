@@ -93,6 +93,7 @@ public static class FileTree
         IReadOnlyDictionary<string, FileAnnotation>? annotations)
     {
         var labelBuilder = new StringBuilder();
+        var nodePathBuilder = new StringBuilder();
 
         foreach (var (segment, child) in node.Subdirs)
         {
@@ -101,7 +102,8 @@ public static class FileTree
             labelBuilder.Clear();
             labelBuilder.Append(segment);
 
-            var nodePathBuilder = new StringBuilder(path).Append('/').Append(segment);
+            nodePathBuilder.Clear();
+            nodePathBuilder.Append(path).Append('/').Append(segment);
             var current = child;
             while (current.Subdirs.Count == 1 && current.Files.Count == 0)
             {
