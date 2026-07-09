@@ -1,5 +1,6 @@
 using Cobalt.Tui.App;
 using Cobalt.Tui.Editor;
+using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.Tasks;
@@ -19,7 +20,8 @@ public sealed class PrDetailDialog(
     PrDetailViewModel vm,
     EditorService editor,
     Action<string> log,
-    IPrDiffSource? diffSource = null)
+    IPrDiffSource? diffSource = null,
+    AdoContext? context = null)
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly PrActions _actions = new(app, log);
@@ -44,6 +46,9 @@ public sealed class PrDetailDialog(
     /// <summary>Test seam: replaces the real reply path (needs the editor) so a test can observe the 'c' key.</summary>
     internal Action? ReplyAction { get; set; }
 
+    /// <summary>Test seam: replaces the real PR-comment path (needs the editor) so a test can observe the 'g c' chord.</summary>
+    internal Action? AddCommentAction { get; set; }
+
     /// <summary>Test seam: replaces the real complete flow (needs MessageBox/run loop) so a test can observe 'C'.</summary>
     internal Action? CompleteAction { get; set; }
 
@@ -52,6 +57,9 @@ public sealed class PrDetailDialog(
 
     /// <summary>Test seam: replaces the real help overlay (needs a run loop) so a test can observe '?'.</summary>
     internal Action? HelpAction { get; set; }
+
+    /// <summary>Test seam: replaces the real browser-open path (needs a process launch) so a test can observe 'g b'.</summary>
+    internal Action<string>? OpenUrlAction { get; set; }
 
     public void Show()
     {
@@ -74,7 +82,7 @@ public sealed class PrDetailDialog(
     {
         var dialog = new Dialog
         {
-            Title = $"PR !{vm.Id} — q close · d diff · v vote · c reply · x resolve · u reactivate · C complete · A abandon",
+            Title = $"PR !{vm.Id} — q close · d diff · v vote · c reply · gc comment · gb branch · x resolve · u reactivate · C complete · A abandon",
             Width = Dim.Percent(92),
             Height = Dim.Percent(92),
         };
@@ -89,6 +97,7 @@ public sealed class PrDetailDialog(
             Height = Dim.Fill(),
             ReadOnly = true,
             WordWrap = true,
+            ScrollBars = true, // show a position indicator; content is scrolled pager-style (VimScroll)
         };
 #pragma warning restore CS0618
         _body = body;
@@ -187,6 +196,16 @@ public sealed class PrDetailDialog(
                     _ = FireAndForget.Observe(ReplyAsync(), app, log);
                 }
                 return true;
+            case AppCommand.AddPrComment:
+                if (AddCommentAction is not null)
+                {
+                    AddCommentAction();
+                }
+                else
+                {
+                    _ = FireAndForget.Observe(AddCommentAsync(), app, log);
+                }
+                return true;
             case AppCommand.ResolveThread:
                 _ = FireAndForget.Observe(ThreadStatusAsync(resolve: true), app, log);
                 return true;
@@ -201,6 +220,9 @@ public sealed class PrDetailDialog(
                 return true;
             case AppCommand.OpenDiff:
                 (DiffAction ?? OpenDiff)();
+                return true;
+            case AppCommand.OpenBranch:
+                OpenBranch();
                 return true;
             default:
                 return false;
@@ -245,6 +267,14 @@ public sealed class PrDetailDialog(
         lines.AddRange(pr.Reviewers.Count == 0
             ? ["  (none)"]
             : pr.Reviewers.Select(r => $"  {VoteGlyph(r.Vote)} {r.DisplayName}{(r.IsRequired ? " (required)" : "")}"));
+
+        if (vm.Policies.Count > 0)
+        {
+            lines.Add("");
+            lines.Add("Policies:");
+            lines.AddRange(vm.Policies.Select(p =>
+                $"  {PolicyGlyph(p.Status)} {p.DisplayName}{(p.IsBlocking ? " (blocking)" : "")}"));
+        }
 
         if (pr.LinkedWorkItemIds.Count > 0)
         {
@@ -296,6 +326,24 @@ public sealed class PrDetailDialog(
         if (!string.IsNullOrWhiteSpace(text))
         {
             await RunAndLog(vm.ReplyAsync(thread.Value, text.Trim(), Token), "reply posted").ConfigureAwait(false);
+        }
+    }
+
+    private async Task AddCommentAsync()
+    {
+        string? text;
+        try
+        {
+            text = await editor.EditAsync("", ".md", Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
+        {
+            app.Invoke(() => log($"editor failed: {ex.Message}"));
+            return;
+        }
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            await RunAndLog(vm.AddPrCommentAsync(text.Trim(), Token), "comment posted").ConfigureAwait(false);
         }
     }
 
@@ -358,7 +406,30 @@ public sealed class PrDetailDialog(
             return;
         }
         var diffVm = new PrDiffViewModel(diffSource, vm.PullRequest);
-        new DiffReviewDialog(app, diffVm, editor, log).Show();
+        new DiffReviewDialog(app, diffVm, editor, log, context).Show();
+    }
+
+    private void OpenBranch()
+    {
+        if (context is null || vm.PullRequest is null)
+        {
+            log("open branch needs an Azure DevOps context and a loaded PR");
+            return;
+        }
+        var pr = vm.PullRequest;
+        var url = AdoUrls.Branch(context, pr.ProjectName, pr.RepositoryName, pr.SourceBranch);
+        if (OpenUrlAction is not null)
+        {
+            OpenUrlAction(url);
+        }
+        else if (BrowserLauncher.TryOpen(url, out var error))
+        {
+            log($"opened {url}");
+        }
+        else
+        {
+            log($"could not open browser: {error}");
+        }
     }
 
     private async Task RunAndLog(Task work, string success)
@@ -381,5 +452,12 @@ public sealed class PrDetailDialog(
         PrVote.WaitingForAuthor => "⧗",
         PrVote.Rejected => "✗",
         _ => "·",
+    };
+
+    private static string PolicyGlyph(string status) => status.ToLowerInvariant() switch
+    {
+        "approved" => "✓",
+        "rejected" => "✗",
+        _ => "⧗", // queued / running / notApplicable / etc.
     };
 }

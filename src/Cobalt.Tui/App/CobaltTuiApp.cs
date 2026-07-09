@@ -47,7 +47,8 @@ public static class CobaltTuiApp
             async ct => (await identity.Value.WaitAsync(ct).ConfigureAwait(false)).Id,
             ct => BuildTeamDirectoryAsync(connection.Teams, ct),
             context.Project,
-            context.PrScope);
+            context.PrScope,
+            new PolicyApi(connection.Http));
 
         var driverName = ResolveDriver(Environment.GetEnvironmentVariable, DriverRegistry.GetDriverNames().ToArray());
         using var app = Application.Create().Init(driverName);

@@ -354,7 +354,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new PrDetailViewModel(_pullRequests, id);
-        new PrDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _pullRequests).Show();
+        new PrDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _pullRequests, _context).Show();
         _prList?.Load(); // reflect any votes/edits back into the list
     }
 
@@ -463,8 +463,8 @@ public sealed class CobaltShell : Window
 
     private void RefreshChrome()
     {
-        var wi = _vm.ActiveSection == AppSection.WorkItems ? "[g1:Work Items]" : " g1:Work Items ";
-        var pr = _vm.ActiveSection == AppSection.PullRequests ? "[g2:Pull Requests]" : " g2:Pull Requests ";
+        var wi = _vm.ActiveSection == AppSection.WorkItems ? "[Work Items]" : " Work Items ";
+        var pr = _vm.ActiveSection == AppSection.PullRequests ? "[Pull Requests]" : " Pull Requests ";
         _tabs.Text = $" {wi} {pr}";
         _status.Text = _vm.StatusLine;
         var current = _vm.Messages.Current;

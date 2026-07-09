@@ -73,14 +73,33 @@ Pull Requests · `Tab` next tab · `:` command palette
 `c` comment · `a` assign · `t` tags; the detail additionally has `e` edit
 description in `$EDITOR`. In the PR section: `Tab` cycles the review queue / team /
 mine / active sub-tabs; on a PR (the highlighted list row or its detail): `v` vote; the
-detail additionally has `c` reply · `x` resolve thread · `u` reactivate · `C`
-complete · `A` abandon · `d` open diff review.
-In diff review: `Tab` switches file list / diff pane · `[`/`]` prev/next file ·
-`c` comment on the selected line. Anywhere in a list: `yy` yanks the item's web
+detail additionally has `c` reply · `g c` add a PR-level comment · `g b` open the source
+branch in the browser · `x` resolve thread · `u` reactivate · `C` complete · `A` abandon ·
+`d` open diff review, and shows the PR's **branch-policy / build status** (pass/fail, blocking).
+In diff review (vim `]`/`[` bracket motions, all count-aware): `Tab` switches file list /
+diff pane · `]f`/`[f` next/prev file · `]c`/`[c` next/prev **change hunk** · `]t`/`[t`
+next/prev **comment thread** · `]v`/`[v` next/prev **unviewed** file. `z` collapses/expands
+the folder under the cursor (`Enter` on a folder also toggles) · `m`/`M` mark the current file
+**viewed**/**unviewed** (a `[✓]`/`[ ]` column in the tree). `s` switches the diff between **unified** and
+**side-by-side**; unchanged context is **folded** by default — `e` expands a fold, `E` the
+whole file. `/` opens an **inline search** of the current file (type, `Enter` to search,
+`n`/`N` jump between matches, `Esc` cancels). `h`/`l` (or `←`/`→`) **scroll horizontally** for
+long lines — so inside diff review those keys scroll rather than back/open, and you close the
+review with `q`/`Esc`. `c` comments on the selected line; `o`/`Enter` opens the existing
+comment **thread(s)** on that line, where `c` replies, `x` resolves, `u` reactivates. `v`
+votes on the PR; `g b` opens the PR's **source branch** in the browser; `T` filters the file
+list to files with **unresolved threads** (the header shows the unresolved count). Each file
+row shows its `+added −deleted` count (with a PR total in the header) as diffs load in the
+background.
+The changed-file list is a **directory tree** — files group under their folder and the
+distinguishing filename always shows in full, instead of a flat, left-truncated path.
+The layout is **responsive**: on a narrow terminal the file list hides so the diff keeps the
+full width, and side-by-side falls back to unified when there isn't room for two columns.
+Anywhere in a list: `yy` yanks the item's web
 URL to the clipboard · `gx` opens it in your browser.
 
 **Count prefixes.** Motions take a numeric count, vim-style: `5j` moves down five
-rows, `10G` jumps to line 10, `3]` advances three files in diff review, and a count
+rows, `10G` jumps to line 10, `3]f` advances three files in diff review, and a count
 multiplies `Ctrl-d`/`Ctrl-u`. Digits are reserved for counts, which is why sections
 moved off `1`/`2` and onto the `gt`/`gT`/`g1`/`g2` chords.
 
@@ -181,4 +200,44 @@ or `%LOCALAPPDATA%\cobalt\crash.log` on Windows. See
 dotnet test Cobalt.slnx      # unit + fuzz + integration tests
 dotnet build Cobalt.slnx
 dotnet run --project src/Cobalt -- --help
+```
+
+### Testing local changes
+
+**Run straight from source (recommended).** This always compiles the current code — no
+packaging, no tool cache, no version confusion, so it's the surest way to test a change:
+
+```sh
+dotnet run --project src/Cobalt -c Release -- auth login
+dotnet run --project src/Cobalt -c Release -- auth status
+dotnet run --project src/Cobalt -c Release            # launch the TUI
+```
+
+**Or install your build as the `cobalt` global tool.** **Watch the cache:** the package
+version is fixed (`0.2.0`) and NuGet caches packages *by version*, so `dotnet tool
+update`/`install --add-source` can silently reuse a **stale** cached build — which looks
+exactly like "my change didn't take". Give each build a unique version so the install
+can't hit the cache:
+
+```sh
+dotnet tool uninstall -g cobalt-tui
+dotnet pack src/Cobalt/Cobalt.csproj -c Release -o ./artifacts \
+  -p:PackageVersion=0.2.0-local1 -p:PublishRepositoryUrl=false -p:EmbedUntrackedSources=false
+dotnet tool install -g cobalt-tui --add-source ./artifacts --version 0.2.0-local1
+```
+
+Bump `local1` → `local2` … on each rebuild. To keep the same version instead, delete the
+cached package first: `rm -rf ~/.nuget/packages/cobalt-tui` (Windows:
+`rmdir /s /q "%USERPROFILE%\.nuget\packages\cobalt-tui"`). Note `cobalt --version` prints
+only `0.2.0` — it can't tell you which commit you're on; use `git log --oneline -1` for that.
+
+### Before pushing
+
+Run the clean, CI-style build — analyzer errors (e.g. unused `using`s) fire only on a
+*clean* build, so an incremental `dotnet build` can pass while CI fails:
+
+```sh
+dotnet clean Cobalt.slnx -c Release
+dotnet build Cobalt.slnx -c Release -p:ContinuousIntegrationBuild=true --no-incremental  # 0 warnings
+dotnet test Cobalt.slnx
 ```

@@ -62,15 +62,45 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.PullRequestDetail, "d", AppCommand.OpenDiff);
         table.Bind(KeyScope.PullRequestDetail, "C", AppCommand.CompletePr);
         table.Bind(KeyScope.PullRequestDetail, "A", AppCommand.AbandonPr);
+        table.Bind(KeyScope.PullRequestDetail, "g c", AppCommand.AddPrComment);
+        table.Bind(KeyScope.PullRequestDetail, "g b", AppCommand.OpenBranch);
 
         table.Bind(KeyScope.DiffReview, "c", AppCommand.Comment);
-        // Note: x/u/v (resolve/reactivate/vote) belong to PR detail, NOT diff review —
-        // DiffReviewDialog.Dispatch implements none of them, so they are intentionally
+        // Note: x/u (resolve/reactivate) belong to PR detail, NOT diff review —
+        // DiffReviewDialog.Dispatch implements neither, so they are intentionally
         // unbound here (they would otherwise be advertised-but-dead keys, M3).
-        table.Bind(KeyScope.DiffReview, "]", AppCommand.NextFile);
-        table.Bind(KeyScope.DiffReview, "[", AppCommand.PrevFile);
+        table.Bind(KeyScope.DiffReview, "] f", AppCommand.NextFile);
+        table.Bind(KeyScope.DiffReview, "[ f", AppCommand.PrevFile);
+        table.Bind(KeyScope.DiffReview, "] c", AppCommand.NextHunk);
+        table.Bind(KeyScope.DiffReview, "[ c", AppCommand.PrevHunk);
+        table.Bind(KeyScope.DiffReview, "] t", AppCommand.NextThread);
+        table.Bind(KeyScope.DiffReview, "[ t", AppCommand.PrevThread);
+        table.Bind(KeyScope.DiffReview, "] v", AppCommand.NextUnviewedFile);
+        table.Bind(KeyScope.DiffReview, "[ v", AppCommand.PrevUnviewedFile);
+        table.Bind(KeyScope.DiffReview, "v", AppCommand.Vote);
+        table.Bind(KeyScope.DiffReview, "/", AppCommand.SearchDiff);
+        table.Bind(KeyScope.DiffReview, "n", AppCommand.SearchNext);
+        table.Bind(KeyScope.DiffReview, "N", AppCommand.SearchPrev);
+        table.Bind(KeyScope.DiffReview, "m", AppCommand.MarkViewed);
+        table.Bind(KeyScope.DiffReview, "M", AppCommand.MarkUnviewed);
+        table.Bind(KeyScope.DiffReview, "T", AppCommand.ToggleThreadFilter);
+        table.Bind(KeyScope.DiffReview, "e", AppCommand.ExpandContext);
+        table.Bind(KeyScope.DiffReview, "E", AppCommand.ExpandAllContext);
+        // z collapses/expands the directory under the cursor in the file tree.
+        table.Bind(KeyScope.DiffReview, "z", AppCommand.ToggleFold);
+        // s toggles the diff pane between unified and side-by-side.
+        table.Bind(KeyScope.DiffReview, "s", AppCommand.ToggleDiffMode);
         // Scoped Tab shadows the global NextTab: in diff review Tab cycles the two panes.
         table.Bind(KeyScope.DiffReview, "Tab", AppCommand.CyclePane);
+        // Scoped h/l shadow the global Back/Open (same mechanism as scoped Tab above):
+        // in diff review they scroll the focused pane horizontally instead.
+        table.Bind(KeyScope.DiffReview, "h", AppCommand.ScrollLeft);
+        table.Bind(KeyScope.DiffReview, "l", AppCommand.ScrollRight);
+        table.Bind(KeyScope.DiffReview, "g b", AppCommand.OpenBranch);
+
+        table.Bind(KeyScope.ThreadView, "c", AppCommand.Comment);
+        table.Bind(KeyScope.ThreadView, "x", AppCommand.ResolveThread);
+        table.Bind(KeyScope.ThreadView, "u", AppCommand.ReactivateThread);
 
         table.Validate();
         return table;

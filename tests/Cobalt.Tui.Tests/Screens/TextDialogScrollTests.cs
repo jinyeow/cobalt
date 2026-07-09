@@ -36,12 +36,13 @@ public class TextDialogScrollTests
     }
 
     [Fact]
-    public void G_Jumps_To_The_Last_Row_And_gg_Back_To_Top()
+    public void G_Scrolls_Last_Page_And_gg_Back_To_Top()
     {
         var view = LaidOut(out var dialog);
+        var maxTop = view.Lines - view.Viewport.Height; // pager: top of the last page
 
         dialog.NewKeyDownEvent(new Key('G'));
-        Assert.Equal(199, view.CurrentRow);
+        Assert.Equal(maxTop, view.CurrentRow);
 
         dialog.NewKeyDownEvent(new Key('g'));
         dialog.NewKeyDownEvent(new Key('g'));
