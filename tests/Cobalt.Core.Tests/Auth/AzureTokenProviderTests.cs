@@ -1,4 +1,5 @@
 using Azure.Core;
+using Azure.Identity;
 using Cobalt.Core.Auth;
 using Microsoft.Extensions.Time.Testing;
 
@@ -6,6 +7,27 @@ namespace Cobalt.Core.Tests.Auth;
 
 public class AzureTokenProviderTests
 {
+    // ---- guards for the credential-chain fix (interactive-record first, az second) ----
+
+    [Fact]
+    public void Interactive_NeedsInteraction_Is_A_CredentialUnavailable_So_The_Chain_Falls_Through()
+    {
+        // With the browser credential first and `DisableAutomaticAuthentication`, a request that
+        // can't be satisfied silently throws AuthenticationRequiredException. ChainedTokenCredential
+        // only continues to the next credential (az) on CredentialUnavailableException — so this MUST
+        // be one, or the chain would halt before ever trying az.
+        Assert.True(typeof(CredentialUnavailableException)
+            .IsAssignableFrom(typeof(AuthenticationRequiredException)));
+    }
+
+    [Fact]
+    public void AzureCli_Process_Timeout_Is_Configurable()
+    {
+        // The fix raises az's process timeout so a slow-but-working `az` doesn't hard-time-out
+        // (a non-CredentialUnavailable failure that halts the chain). Guard the option exists.
+        Assert.NotNull(typeof(AzureCliCredentialOptions).GetProperty(nameof(AzureCliCredentialOptions.ProcessTimeout)));
+    }
+
     private sealed class CountingCredential : TokenCredential
     {
         private readonly SemaphoreSlim _block = new(0);

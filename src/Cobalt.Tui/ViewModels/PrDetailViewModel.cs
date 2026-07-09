@@ -12,6 +12,8 @@ public interface IPullRequestStore
     Task SetThreadStatusAsync(string project, string repositoryId, int id, int threadId, PrThreadStatus status, CancellationToken ct);
     Task AbandonAsync(string project, string repositoryId, int id, CancellationToken ct);
     Task CompleteAsync(string project, string repositoryId, int id, string mergeStrategy, bool deleteSource, CancellationToken ct);
+    Task AddPrCommentAsync(string project, string repositoryId, int id, string text, CancellationToken ct);
+    Task<IReadOnlyList<PolicyEvaluation>> GetPolicyEvaluationsAsync(string project, int id, CancellationToken ct);
 }
 
 /// <summary>
@@ -27,6 +29,7 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
 
     public PullRequest? PullRequest { get; private set; }
     public IReadOnlyList<PrThread> Threads { get; private set; } = [];
+    public IReadOnlyList<PolicyEvaluation> Policies { get; private set; } = [];
 
     public int UnresolvedThreadCount =>
         Threads.Count(t => t.Status == PrThreadStatus.Active && !t.IsSystemOnly);
@@ -43,6 +46,9 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
             PullRequest = await store.GetPullRequestAsync(id, ct).ConfigureAwait(false);
             Threads = await store.GetThreadsAsync(
                 PullRequest.ProjectName, PullRequest.RepositoryId, id, ct).ConfigureAwait(false);
+            // Branch policies are secondary: an expected ADO failure here surfaces via Error
+            // (below) but leaves the already-loaded PR/threads intact rather than blanking the pane.
+            Policies = await store.GetPolicyEvaluationsAsync(PullRequest.ProjectId, id, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {
@@ -66,6 +72,9 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
 
     public Task ReplyAsync(int threadId, string text, CancellationToken ct) =>
         RunAsync((project, repo) => store.ReplyToThreadAsync(project, repo, id, threadId, text, ct), ct);
+
+    public Task AddPrCommentAsync(string text, CancellationToken ct) =>
+        RunAsync((project, repo) => store.AddPrCommentAsync(project, repo, id, text, ct), ct);
 
     public Task ResolveThreadAsync(int threadId, CancellationToken ct) =>
         RunAsync((project, repo) => store.SetThreadStatusAsync(project, repo, id, threadId, PrThreadStatus.Fixed, ct), ct);

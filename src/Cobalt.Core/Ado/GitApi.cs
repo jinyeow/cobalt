@@ -68,7 +68,9 @@ public sealed class GitApi(AdoHttp http, AdoContext context)
             $"_apis/git/pullrequests/{id}?{PrApiVersion}",
             GitJsonContext.Default.PullRequestDto,
             cancellationToken).ConfigureAwait(false);
-        return PullRequest.From(dto);
+        // Fall back to the context project if the by-id payload omits repository.project, matching
+        // the list path — so URL builders (gx/gb) don't drop to a blank project segment.
+        return PullRequest.From(dto, context.Project);
     }
 
     public async Task<IReadOnlyList<PrThread>> GetThreadsAsync(

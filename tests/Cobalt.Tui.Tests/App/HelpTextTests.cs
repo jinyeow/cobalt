@@ -12,14 +12,17 @@ public class HelpTextTests
     private static readonly KeyBindingTable Table = KeyBindingTable.Default();
 
     [Fact]
-    public void DiffReview_Help_Omits_Resolve_Reactivate_And_Vote()
+    public void DiffReview_Help_Omits_Resolve_Reactivate_But_Includes_Vote()
     {
         var help = HelpText.ForDialog(Table, KeyScope.DiffReview);
 
-        // These belong to PR detail, not diff review — the dialog dispatches none of them.
-        Assert.DoesNotContain("resolve", help);
+        // Resolve/reactivate belong to PR detail, not diff review — the dialog
+        // dispatches neither. Vote, however, is now bound in diff review too.
+        // ("resolve thread", not the bare substring, to avoid a false match against
+        // ToggleThreadFilter's "unresolved threads" description.)
+        Assert.DoesNotContain("resolve thread", help);
         Assert.DoesNotContain("reactivate", help);
-        Assert.DoesNotContain("vote", help);
+        Assert.Contains("vote", help);
         // Its real verbs are present.
         Assert.Contains("comment", help);
         Assert.Contains("next file", help);

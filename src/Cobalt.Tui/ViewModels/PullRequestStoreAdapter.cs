@@ -19,7 +19,8 @@ public sealed class PullRequestStoreAdapter(
     Func<CancellationToken, Task<Guid>> resolveMe,
     Func<CancellationToken, Task<TeamDirectory>>? resolveTeams = null,
     string project = "",
-    PrScope initialScope = PrScope.Org)
+    PrScope initialScope = PrScope.Org,
+    PolicyApi? policy = null)
     : IPullRequestSource, IPullRequestStore, IPrDiffSource
 {
     private Guid? _me;
@@ -129,6 +130,20 @@ public sealed class PullRequestStoreAdapter(
         await api.CompleteAsync(repositoryId, id, pr.LastMergeSourceCommitId, mergeStrategy, deleteSource, project, ct)
             .ConfigureAwait(false);
     }
+
+    // A PR-level comment is a new thread with NO threadContext (contrast AddLineCommentAsync,
+    // which anchors the thread to a file/line via ThreadContext).
+    public Task AddPrCommentAsync(string project, string repositoryId, int id, string text, CancellationToken ct) =>
+        api.AddThreadAsync(repositoryId, id, new NewThreadRequest
+        {
+            Comments = [new NewCommentRequest { Content = text }],
+            Status = 1, // active
+        }, project, ct);
+
+    // The project GUID (PullRequest.ProjectId) is threaded as the route + artifactId project
+    // component; the CodeReviewId artifactId requires the GUID specifically.
+    public Task<IReadOnlyList<PolicyEvaluation>> GetPolicyEvaluationsAsync(string projectId, int id, CancellationToken ct) =>
+        (policy ?? throw new InvalidOperationException("no policy api configured")).GetEvaluationsAsync(projectId, id, ct);
 
     // ---- IPrDiffSource ----
 

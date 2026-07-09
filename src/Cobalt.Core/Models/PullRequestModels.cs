@@ -260,7 +260,8 @@ public sealed record PullRequest(
     string? LastMergeSourceCommitId,
     string ProjectName = "",
     DateTimeOffset? CreationDate = null,
-    string AuthorId = "")
+    string AuthorId = "",
+    string ProjectId = "")
 {
     /// <summary>
     /// Projects a wire DTO. <paramref name="fallbackProject"/> supplies the project
@@ -285,7 +286,8 @@ public sealed record PullRequest(
         dto.LastMergeSourceCommit?.CommitId,
         dto.Repository?.Project?.Name ?? fallbackProject ?? "",
         dto.CreationDate,
-        dto.CreatedBy?.Id ?? "");
+        dto.CreatedBy?.Id ?? "",
+        dto.Repository?.Project?.Id ?? "");
 
     private static string ShortBranch(string refName) =>
         refName.StartsWith("refs/heads/", StringComparison.Ordinal) ? refName["refs/heads/".Length..] : refName;

@@ -2,6 +2,70 @@
 
 ## Unreleased
 
+### Fixed
+- **A slow or broken `az` no longer blocks sign-in.** The credential chain now tries cobalt's
+  own persisted browser sign-in first and reuses an `az login` session only as a fallback —
+  previously `az` was tried first, and because Azure CLI's process *timeout* is a hard failure
+  that halts the chain (not a fall-through), a slow/locked-down `az` made even a successful
+  `cobalt auth login` report "NOT signed in". Az's process timeout is also raised so a
+  slow-but-working CLI doesn't time out.
+- **Diff-review UAT polish.** `Enter` on the diff pane now opens the line's comment thread
+  (it was being swallowed by the dialog's default-accept and closing the review). Searching
+  the diff (`/`) uses an **inline search bar** instead of launching `$EDITOR`. The
+  viewed/unviewed marker is now a clear leading `[✓]`/`[ ]` column.
+- **A resolved/reactivated thread updates in the open overlay.** `x`/`u` (and a posted reply)
+  in the thread overlay now re-render its body from the refreshed thread state in place —
+  previously the overlay kept showing the status/comments it opened with until you closed and
+  reopened it.
+- **Detail/overlay windows now scroll a line at a time with visible feedback.** The
+  read-only text panes (PR detail, work-item detail, and the `?`/`:messages`/key-reference
+  overlays) moved an invisible caret that only scrolled the viewport once it reached the
+  bottom edge, so `j`/`k`/`Ctrl-d` looked inert until then. They now scroll like a pager —
+  every key advances the view immediately — and show a scroll-bar position indicator. `G`
+  scrolls the last page into view (last line at the bottom).
+
+### Added
+- **Horizontal scroll and open-branch in diff review.** `h`/`l` (or `←`/`→`) scroll the focused
+  pane horizontally for long lines (so those keys scroll rather than back/open inside diff
+  review — close it with `q`/`Esc`); `g b` opens the PR's source branch in the browser (also
+  from PR detail).
+- **The diff review is now a complete review surface.** In diff review you can read a line's
+  comment thread(s) with `o`/`Enter` and **reply (`c`) / resolve (`x`) / reactivate (`u`)**
+  right there; **vote** on the PR with `v`; and **mark a file viewed** with `m` / **unviewed** with
+  `M` (a ✓ in the tree). Navigation gained vim bracket motions (count-aware): `]c`/`[c` between **change
+  hunks**, `]t`/`[t` between **comment threads**, `]v`/`[v` between **unviewed** files
+  (`]`/`[` file nav moved to `]f`/`[f` to free the vim-standard `]c`). Unchanged context is
+  **folded** by default (`e` expands a fold, `E` the whole file); `/`+`n`/`N` searches within
+  the file; `T` filters the file list to files with **unresolved threads** (with a header
+  count); and each file row shows its `+added −deleted` stat (PR total in the header) as
+  diffs load in the background.
+- **Branch-policy / build status and PR-level comments in PR detail.** The PR detail view
+  shows the pull request's policy evaluations (build, required reviewers, comment resolution)
+  with pass/fail and a blocking marker; `g c` posts a PR-level (non-line) comment.
+- **View existing comments on a diff line.** In diff review, `o`/`Enter` on the diff pane
+  opens the comment thread(s) anchored to the selected line (the ones flagged by the `●`
+  marker) in a scrollable overlay — previously the marker showed a thread existed but its
+  comments could not be read from the diff.
+- **Responsive diff-review layout.** The two panes now degrade gracefully as the terminal
+  shrinks: below a width threshold the changed-file list hides so the diff pane spans the
+  whole row, and side-by-side automatically falls back to unified when the diff pane is too
+  narrow for two columns. The file-list width scales with the terminal (clamped) and the
+  layout re-applies on resize. The threshold decision is a pure, unit-tested view model.
+- **Side-by-side diff toggle.** `s` switches the diff pane between the unified view and a
+  two-column side-by-side view (old on the left, new on the right). Rows pair the k-th
+  removed line with the k-th added line — the same rule `DiffService` uses for intra-line
+  emphasis — so a modified line's before/after sit on one row, with surplus lines shown
+  one-sided. The composer is pure and unit-tested; comment anchoring maps the selected
+  side-by-side row back to the correct original line and side (new-side preferred, old side
+  for a deletion-only row). The cursor keeps its line across a toggle.
+- **Directory-tree file list in diff review.** The changed-file list is now a
+  collapsible directory tree instead of a flat, left-truncated path list: files group
+  under their folder, single-child directory chains compress (`src/Web/Api`), and the
+  distinguishing filename always shows in full. `z` collapses/expands the folder under
+  the cursor (`Enter` on a folder row also toggles); `[`/`]` and `Enter` still step
+  through files, skipping folder headers. The tree projection is a pure, unit-tested
+  view model (ADR 0004).
+
 ## 0.2.0 — 2026-07-07
 
 ### Added

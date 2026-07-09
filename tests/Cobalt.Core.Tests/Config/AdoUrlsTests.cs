@@ -68,4 +68,28 @@ public class AdoUrlsTests
 
         Assert.Equal("https://dev.azure.com/contoso/My%20Project/_git/web/pullrequest/10", url);
     }
+
+    [Fact]
+    public void Branch_Url_Includes_Repo_And_Branch()
+    {
+        var url = AdoUrls.Branch(Context, "My Project", "web", "main");
+
+        Assert.Equal("https://dev.azure.com/contoso/My%20Project/_git/web?version=GBmain", url);
+    }
+
+    [Fact]
+    public void Branch_Url_Encodes_Repo_And_Branch_With_Slashes_And_Spaces()
+    {
+        var url = AdoUrls.Branch(Context, "My Project", "My Repo", "feature/my branch");
+
+        Assert.Contains("_git/My%20Repo?version=GBfeature%2Fmy%20branch", url);
+    }
+
+    [Fact]
+    public void Branch_Url_Falls_Back_To_Context_Project_When_Blank()
+    {
+        var url = AdoUrls.Branch(Context, "", "web", "main");
+
+        Assert.Equal("https://dev.azure.com/contoso/My%20Project/_git/web?version=GBmain", url);
+    }
 }

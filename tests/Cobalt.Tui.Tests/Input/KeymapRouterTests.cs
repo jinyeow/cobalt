@@ -287,11 +287,18 @@ public class KeymapRouterTests
     [Fact]
     public void DiffReview_Adds_File_Nav_And_Pane_Cycle()
     {
-        Assert.Equal(AppCommand.NextFile, Router().Feed("]", KeyScope.DiffReview).Command);
-        Assert.Equal(AppCommand.PrevFile, Router().Feed("[", KeyScope.DiffReview).Command);
+        Assert.Equal(AppCommand.NextFile, Feed2Scoped(KeyScope.DiffReview, "]", "f"));
+        Assert.Equal(AppCommand.PrevFile, Feed2Scoped(KeyScope.DiffReview, "[", "f"));
         // Scoped Tab shadows the global NextTab (scoped bindings enumerate first).
         Assert.Equal(AppCommand.CyclePane, Router().Feed("Tab", KeyScope.DiffReview).Command);
         Assert.Equal(AppCommand.NextTab, Router().Feed("Tab", KeyScope.Global).Command);
+    }
+
+    private static AppCommand Feed2Scoped(KeyScope scope, string a, string b)
+    {
+        var router = Router();
+        router.Feed(a, scope);
+        return router.Feed(b, scope).Command;
     }
 
     [Fact]
@@ -299,7 +306,8 @@ public class KeymapRouterTests
     {
         var router = Router();
         router.Feed("3", KeyScope.DiffReview);
-        var next = router.Feed("]", KeyScope.DiffReview);
+        router.Feed("]", KeyScope.DiffReview);
+        var next = router.Feed("f", KeyScope.DiffReview);
 
         Assert.Equal(AppCommand.NextFile, next.Command);
         Assert.Equal(3, next.Count);
