@@ -202,6 +202,24 @@ public class ConfigLoaderTests
     }
 
     [Fact]
+    public void Theme_Key_Under_A_Context_Section_Is_An_Error()
+    {
+        // A `theme` line appended after a [contexts.*] header binds to that context in TOML;
+        // it must fail loudly rather than be silently ignored (which would leave the app dark).
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            """
+            default_context = "work"
+
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            theme = "light"
+            """));
+        Assert.Contains("theme", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("top-level", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Theme_Invalid_Value_Is_An_Error()
     {
         var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(

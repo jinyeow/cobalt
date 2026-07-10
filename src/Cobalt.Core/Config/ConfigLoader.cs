@@ -88,6 +88,17 @@ public static class ConfigLoader
 
     private static AdoContext ParseContext(string name, TomlTable table)
     {
+        // `theme` is a root-level setting. In TOML a key written after a `[contexts.*]` header
+        // binds to that table, so a `theme = ...` line appended to the end of a config (the
+        // natural place to add it) lands here and would otherwise be silently ignored — leaving
+        // the app on the default theme with no hint why. Fail loudly and point to the fix.
+        if (table.ContainsKey("theme"))
+        {
+            throw new ConfigException(
+                $"[contexts.{name}] has a 'theme' key, but theme is a top-level setting; "
+                + "move it above the [contexts.*] sections");
+        }
+
         var organization = table.TryGetValue("organization", out var o) ? o as string : null;
         var project = table.TryGetValue("project", out var p) ? p as string : null;
 
