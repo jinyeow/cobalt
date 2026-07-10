@@ -76,7 +76,7 @@ public static class ConfigLoader
         {
             return ThemeChoice.Dark;
         }
-        return (raw as string)?.ToLowerInvariant() switch
+        return (raw as string)?.Trim().ToLowerInvariant() switch
         {
             "dark" => ThemeChoice.Dark,
             "light" => ThemeChoice.Light,

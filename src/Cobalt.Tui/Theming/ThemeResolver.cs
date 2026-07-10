@@ -25,8 +25,10 @@ public static class ThemeResolver
 
     public static ThemePreset Resolve(ThemeChoice choice, OsTheme os) => choice switch
     {
+        ThemeChoice.Dark => DarkPreset,
         ThemeChoice.Light => LightPreset,
+        // System follows the OS; anything but a known light signal falls back to dark.
         ThemeChoice.System => os == OsTheme.Light ? LightPreset : DarkPreset,
-        _ => DarkPreset,
+        _ => throw new ArgumentOutOfRangeException(nameof(choice), choice, "unknown theme choice"),
     };
 }

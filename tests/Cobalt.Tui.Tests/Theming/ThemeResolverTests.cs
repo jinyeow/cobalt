@@ -49,4 +49,11 @@ public class ThemeResolverTests
         Assert.Equal("Default", preset.TgThemeName);
         Assert.Equal(DiffPalette.Dark, preset.Diff);
     }
+
+    [Fact]
+    public void Unknown_Choice_Throws_Rather_Than_Silently_Defaulting()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => ThemeResolver.Resolve((ThemeChoice)999, OsTheme.Dark));
+    }
 }

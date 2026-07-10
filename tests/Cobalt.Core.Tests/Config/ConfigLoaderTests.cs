@@ -202,6 +202,21 @@ public class ConfigLoaderTests
     }
 
     [Fact]
+    public void Theme_Value_Is_Trimmed()
+    {
+        var config = ConfigLoader.Parse(
+            """
+            theme = "  light  "
+
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            """);
+
+        Assert.Equal(ThemeChoice.Light, config.Theme);
+    }
+
+    [Fact]
     public void Theme_Key_Under_A_Context_Section_Is_An_Error()
     {
         // A `theme` line appended after a [contexts.*] header binds to that context in TOML;

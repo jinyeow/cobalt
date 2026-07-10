@@ -342,4 +342,32 @@ public class ShellViewModelTests
         Assert.Equal(MessageLevel.Error, vm.Messages.Current?.Level);
         Assert.Equal(ThemeChoice.Dark, vm.CurrentTheme);
     }
+
+    [Fact]
+    public void Palette_Theme_System_Reissued_Resyncs_And_Raises_Again()
+    {
+        var vm = Vm();
+        var raised = 0;
+        vm.ThemeChangeRequested += _ => raised++;
+
+        vm.HandlePaletteInput("theme system");
+        vm.HandlePaletteInput("theme system");
+
+        // `system` re-resolves against the live OS each time, so a repeat is a real refresh.
+        Assert.Equal(2, raised);
+        Assert.Equal(ThemeChoice.System, vm.CurrentTheme);
+    }
+
+    [Fact]
+    public void Palette_Theme_Fixed_Reissued_Is_A_NoOp()
+    {
+        var vm = Vm();
+        var raised = 0;
+        vm.ThemeChangeRequested += _ => raised++;
+
+        vm.HandlePaletteInput("theme light");
+        vm.HandlePaletteInput("theme light");
+
+        Assert.Equal(1, raised);
+    }
 }

@@ -187,13 +187,18 @@ public sealed class ShellViewModel(
             case "light":
             case "system":
                 var next = Enum.Parse<ThemeChoice>(argument, ignoreCase: true);
-                if (next == CurrentTheme)
+                // `system` re-resolves against the live OS setting, so re-issuing it is a
+                // meaningful refresh (e.g. to recover if the OS-follow watcher stopped);
+                // re-issuing a fixed theme is a genuine no-op.
+                if (next == CurrentTheme && next != ThemeChoice.System)
                 {
                     Messages.Info($"theme already {ThemeName(CurrentTheme)}");
                     return;
                 }
                 CurrentTheme = next;
-                Messages.Info($"theme: {ThemeName(CurrentTheme)}");
+                Messages.Info(next == ThemeChoice.System
+                    ? "theme: system (re-synced to OS)"
+                    : $"theme: {ThemeName(CurrentTheme)}");
                 ThemeChangeRequested?.Invoke(CurrentTheme);
                 break;
             default:
