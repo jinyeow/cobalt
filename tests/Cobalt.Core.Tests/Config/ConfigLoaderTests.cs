@@ -173,4 +173,81 @@ public class ConfigLoaderTests
             """));
         Assert.Contains("pr_scope", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Theme_Defaults_To_Dark_When_Absent()
+    {
+        var config = ConfigLoader.Parse(ValidToml);
+
+        Assert.Equal(ThemeChoice.Dark, config.Theme);
+    }
+
+    [Theory]
+    [InlineData("dark", ThemeChoice.Dark)]
+    [InlineData("light", ThemeChoice.Light)]
+    [InlineData("system", ThemeChoice.System)]
+    [InlineData("Light", ThemeChoice.Light)]
+    public void Theme_Is_Parsed_Case_Insensitively(string rawTheme, ThemeChoice expected)
+    {
+        var config = ConfigLoader.Parse(
+            $"""
+            theme = "{rawTheme}"
+
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            """);
+
+        Assert.Equal(expected, config.Theme);
+    }
+
+    [Fact]
+    public void Theme_Value_Is_Trimmed()
+    {
+        var config = ConfigLoader.Parse(
+            """
+            theme = "  light  "
+
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            """);
+
+        Assert.Equal(ThemeChoice.Light, config.Theme);
+    }
+
+    [Fact]
+    public void Theme_Key_Under_A_Context_Section_Is_An_Error()
+    {
+        // A `theme` line appended after a [contexts.*] header binds to that context in TOML;
+        // it must fail loudly rather than be silently ignored (which would leave the app dark).
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            """
+            default_context = "work"
+
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            theme = "light"
+            """));
+        Assert.Contains("theme", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("top-level", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Theme_Invalid_Value_Is_An_Error()
+    {
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            """
+            theme = "blue"
+
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            """));
+        Assert.Contains("theme", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("dark", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("light", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("system", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }

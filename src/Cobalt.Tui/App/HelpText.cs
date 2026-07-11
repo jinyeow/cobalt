@@ -20,7 +20,8 @@ public static class HelpText
         [AppCommand.Back] = "quit (also :q)",
         [AppCommand.Refresh] = "refresh",
         [AppCommand.Help] = "this help",
-        [AppCommand.CommandPalette] = "command palette (:q, :context NAME, :scope, :done, :project NAME)",
+        [AppCommand.CommandPalette] =
+            "command palette (:q, :context NAME, :scope, :done, :project NAME, :theme dark|light|system)",
         [AppCommand.FilterStart] = "filter list",
         [AppCommand.NextTab] = "next tab",
         [AppCommand.PrevTab] = "previous tab",

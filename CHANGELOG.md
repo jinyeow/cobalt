@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- **Themes.** `theme = "dark" | "light" | "system"` in `config.toml` (default `dark`, the
+  original look), switchable live with `:theme`. Terminal.Gui's built-in themes colour the app
+  chrome + syntax highlighting; a cobalt `DiffPalette` colours the diff tints, so both recolour
+  together. `system` follows the OS light/dark setting live on Windows (registry watch), falling
+  back to `dark` on other platforms for now. See [ADR 0019](docs/adr/0019-hybrid-theming.md).
+
 ### Fixed
 - **A slow or broken `az` no longer blocks sign-in.** The credential chain now tries cobalt's
   own persisted browser sign-in first and reuses an `az login` session only as a fallback —

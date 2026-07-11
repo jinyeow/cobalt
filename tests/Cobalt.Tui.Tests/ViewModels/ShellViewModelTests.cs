@@ -277,4 +277,101 @@ public class ShellViewModelTests
         Assert.Null(vm.ProjectFilter);
         Assert.NotNull(vm.Messages.Current);
     }
+
+    [Fact]
+    public void Default_Theme_Is_Dark()
+    {
+        var vm = Vm();
+
+        Assert.Equal(ThemeChoice.Dark, vm.CurrentTheme);
+    }
+
+    [Fact]
+    public void Ctor_Accepts_Initial_Theme()
+    {
+        var vm = new ShellViewModel(["work"], "work", PrScope.Org, ThemeChoice.Light);
+
+        Assert.Equal(ThemeChoice.Light, vm.CurrentTheme);
+    }
+
+    [Fact]
+    public void Bare_Palette_Theme_Reports_Current_Without_Changing_Or_Raising()
+    {
+        var vm = Vm();
+        var raised = false;
+        vm.ThemeChangeRequested += _ => raised = true;
+
+        vm.HandlePaletteInput("theme");
+
+        Assert.False(raised);
+        Assert.Equal(ThemeChoice.Dark, vm.CurrentTheme);
+        Assert.NotNull(vm.Messages.Current);
+        Assert.Contains("dark", vm.Messages.Current!.Text);
+    }
+
+    [Fact]
+    public void Palette_Theme_Light_Switches_Theme_And_Raises_Event()
+    {
+        var vm = Vm();
+        ThemeChoice? requested = null;
+        vm.ThemeChangeRequested += choice => requested = choice;
+
+        vm.HandlePaletteInput("theme light");
+
+        Assert.Equal(ThemeChoice.Light, vm.CurrentTheme);
+        Assert.Equal(ThemeChoice.Light, requested);
+    }
+
+    [Fact]
+    public void Palette_Theme_Is_Case_Insensitive()
+    {
+        var vm = Vm();
+
+        vm.HandlePaletteInput("theme SYSTEM");
+
+        Assert.Equal(ThemeChoice.System, vm.CurrentTheme);
+    }
+
+    [Fact]
+    public void Palette_Theme_Invalid_Value_Logs_Error_Without_Throwing()
+    {
+        var vm = Vm();
+
+        vm.HandlePaletteInput("theme rainbow");
+
+        Assert.Equal(MessageLevel.Error, vm.Messages.Current?.Level);
+        Assert.Contains("unknown theme", vm.Messages.Current?.Text);
+        Assert.Equal(ThemeChoice.Dark, vm.CurrentTheme);
+    }
+
+    [Fact]
+    public void Palette_Theme_System_Reissued_Resyncs_And_Raises_Again()
+    {
+        var vm = Vm();
+        var raised = 0;
+        vm.ThemeChangeRequested += _ => raised++;
+
+        vm.HandlePaletteInput("theme system");
+        vm.HandlePaletteInput("theme system");
+
+        // `system` re-resolves against the live OS each time, so a repeat is a real refresh.
+        Assert.Equal(2, raised);
+        Assert.Equal(ThemeChoice.System, vm.CurrentTheme);
+        Assert.NotNull(vm.Messages.Current);
+        Assert.Contains("re-synced", vm.Messages.Current!.Text);
+    }
+
+    [Fact]
+    public void Palette_Theme_Fixed_Reissued_Is_A_NoOp()
+    {
+        var vm = Vm();
+        var raised = 0;
+        vm.ThemeChangeRequested += _ => raised++;
+
+        vm.HandlePaletteInput("theme light");
+        vm.HandlePaletteInput("theme light");
+
+        Assert.Equal(1, raised);
+        Assert.Contains("already", vm.Messages.Current!.Text);
+    }
 }

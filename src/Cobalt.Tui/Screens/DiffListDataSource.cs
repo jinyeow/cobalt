@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Specialized;
 using Cobalt.Core.Text;
 using Cobalt.Core.Text.Syntax;
+using Cobalt.Tui.Theming;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Views;
 using Attribute = Terminal.Gui.Drawing.Attribute;
@@ -17,10 +18,17 @@ namespace Cobalt.Tui.Screens;
 /// <see cref="RunStyle"/> to a Terminal.Gui <see cref="Attribute"/> and blits it.
 /// The selected row renders in the theme's Focus attribute so the cursor bar is
 /// unmistakable. Only PTY-verifiable code lives here.
+///
+/// <para>The diff-state colours come from a <see cref="DiffPalette"/> (the diff pane lives
+/// outside TG's fixed scheme roles, ADR 0010). <paramref name="palette"/> is read on every
+/// mapped run, defaulting to <see cref="ThemeService.CurrentPalette"/>, so switching the theme
+/// recolours the diff live without recreating the source.</para>
 /// </summary>
-public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines) : IListDataSource
+public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<DiffPalette>? palette = null)
+    : IListDataSource
 {
     private readonly IReadOnlyList<StyledLine> _lines = lines;
+    private readonly Func<DiffPalette> _palette = palette ?? (() => ThemeService.CurrentPalette);
 
     public int Count => _lines.Count;
 
@@ -66,6 +74,7 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines) : IListD
             return;
         }
 
+        var normal = listView.GetAttributeForRole(VisualRole.Normal);
         var drawn = 0;
         foreach (var runItem in styled.Runs)
         {
@@ -75,14 +84,18 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines) : IListD
             {
                 continue;
             }
-            listView.SetAttribute(Map(listView, runItem.Style));
+            // The token foreground comes from the theme's Code* role (gutter runs ignore it);
+            // resolve it here so Map stays a pure palette mapping.
+            var roleForeground = runItem.Style.IsGutter
+                ? normal.Foreground
+                : listView.GetAttributeForRole(RoleFor(runItem.Style.Token)).Foreground;
+            listView.SetAttribute(Map(runItem.Style, normal, roleForeground));
             listView.AddStr(styled.DisplayText.Substring(start, end - start));
             drawn += end - start;
         }
 
         // Full-width diff tint: pad the rest of the row in the line-kind background.
-        var normal = listView.GetAttributeForRole(VisualRole.Normal);
-        listView.SetAttribute(new Attribute(normal.Foreground, BackgroundFor(listView, lineKind, emphasis: false)));
+        listView.SetAttribute(new Attribute(normal.Foreground, BackgroundFor(lineKind, emphasis: false, normal.Background)));
         Pad(listView, width - drawn);
     }
 
@@ -109,21 +122,29 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines) : IListD
         }
     }
 
-    private static Attribute Map(ListView listView, RunStyle style)
+    /// <summary>
+    /// Maps a <see cref="RunStyle"/> to its <see cref="Attribute"/> using the active
+    /// <see cref="DiffPalette"/>. The theme-role parts are supplied by the caller:
+    /// <paramref name="normal"/> is <see cref="VisualRole.Normal"/> (context foreground/background)
+    /// and <paramref name="roleForeground"/> is the token's Code* foreground — so this stays a
+    /// pure, headless-testable palette mapping.
+    /// </summary>
+    internal Attribute Map(RunStyle style, Attribute normal, Color roleForeground)
     {
+        var palette = _palette();
         var foreground = style.IsGutter
             ? style.LineKind switch
             {
-                DiffLineKind.Added => new Color(ColorName16.BrightGreen),
-                DiffLineKind.Removed => new Color(ColorName16.BrightRed),
-                _ => listView.GetAttributeForRole(VisualRole.Normal).Foreground,
+                DiffLineKind.Added => palette.AddedGutterForeground,
+                DiffLineKind.Removed => palette.RemovedGutterForeground,
+                _ => normal.Foreground,
             }
-            : listView.GetAttributeForRole(RoleFor(style.Token)).Foreground;
+            : roleForeground;
 
         // A search hit wins the background so matches stand out over the diff tint.
         var background = style.SearchHit
-            ? new Color("#6b5a00")
-            : BackgroundFor(listView, style.LineKind, style.Emphasis);
+            ? palette.SearchHitBackground
+            : BackgroundFor(style.LineKind, style.Emphasis, normal.Background);
         return new Attribute(foreground, background);
     }
 
@@ -139,10 +160,14 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines) : IListD
         _ => VisualRole.Normal,
     };
 
-    private static Color BackgroundFor(ListView listView, DiffLineKind kind, bool emphasis) => kind switch
+    private Color BackgroundFor(DiffLineKind kind, bool emphasis, Color contextBackground)
     {
-        DiffLineKind.Added => new Color(emphasis ? "#1e6b1e" : "#123a12"),
-        DiffLineKind.Removed => new Color(emphasis ? "#6b2020" : "#3a1212"),
-        _ => listView.GetAttributeForRole(VisualRole.Normal).Background,
-    };
+        var palette = _palette();
+        return kind switch
+        {
+            DiffLineKind.Added => emphasis ? palette.AddedEmphasisBackground : palette.AddedBackground,
+            DiffLineKind.Removed => emphasis ? palette.RemovedEmphasisBackground : palette.RemovedBackground,
+            _ => contextBackground,
+        };
+    }
 }

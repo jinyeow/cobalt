@@ -11,6 +11,7 @@ public enum PaletteActionKind
     SetScope,
     ToggleDone,
     SetProjectFilter,
+    SetTheme,
     Unknown,
 }
 
@@ -41,6 +42,8 @@ public static class PaletteCommandParser
             ("done", var value) => new PaletteAction(PaletteActionKind.ToggleDone, value),
             ("project", null) => new PaletteAction(PaletteActionKind.SetProjectFilter, ""),
             ("project", var name) => new PaletteAction(PaletteActionKind.SetProjectFilter, name),
+            ("theme", null) => new PaletteAction(PaletteActionKind.SetTheme, ""),
+            ("theme", var value) => new PaletteAction(PaletteActionKind.SetTheme, value),
             _ => new PaletteAction(PaletteActionKind.Unknown, $"unknown command: {trimmed}"),
         };
     }
