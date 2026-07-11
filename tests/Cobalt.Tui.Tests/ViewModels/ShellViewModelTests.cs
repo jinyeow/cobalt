@@ -356,6 +356,8 @@ public class ShellViewModelTests
         // `system` re-resolves against the live OS each time, so a repeat is a real refresh.
         Assert.Equal(2, raised);
         Assert.Equal(ThemeChoice.System, vm.CurrentTheme);
+        Assert.NotNull(vm.Messages.Current);
+        Assert.Contains("re-synced", vm.Messages.Current!.Text);
     }
 
     [Fact]

@@ -64,6 +64,22 @@ public class ShellThemeFollowTests
     }
 
     [Fact]
+    public void Theme_Command_Through_The_Shell_Applies_The_Resolved_Preset()
+    {
+        ThemeService.Enable();
+        ThemeService.Apply(ThemeResolver.Resolve(ThemeChoice.Dark, OsTheme.Unknown)); // baseline: dark
+        var monitor = new FakeOsThemeMonitor { Current = OsTheme.Dark };
+        var vm = Vm(ThemeChoice.Dark);
+        using var shell = new CobaltShell(App, vm, themeMonitor: monitor);
+
+        // Drives the `:theme` command end-to-end through the shell (OnThemeChangeRequested), the
+        // path ShellViewModelTests (VM-only) and the OsFollow tests never exercise.
+        vm.HandlePaletteInput("theme light");
+
+        Assert.Equal(ThemeResolver.Resolve(ThemeChoice.Light, OsTheme.Unknown).Diff, ThemeService.CurrentPalette);
+    }
+
+    [Fact]
     public void Os_Change_With_A_Fixed_Theme_Leaves_The_Palette_Untouched()
     {
         ThemeService.Enable();
