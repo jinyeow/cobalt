@@ -12,9 +12,10 @@ namespace Cobalt.Tui.Theming;
 ///
 /// <para>The value → <see cref="OsTheme"/> mapping is unit-tested: the raw DWORD read is injected
 /// behind a <see cref="Func{T}"/> so a test can drive it without touching the real registry or
-/// starting the watch thread. The registry open + <c>RegNotifyChangeKeyValue</c> glue in
-/// <see cref="WatchLoop"/> is a thin, un-unit-tested OS seam (as with the repo's other native
-/// glue).</para>
+/// starting the watch thread. The watch loop's ordering (arm-before-read) and retry-on-failure
+/// policy live in <see cref="ThemeWatchLoop"/> and are unit-tested through <see cref="IThemeWatchOps"/>;
+/// only the thin <c>RegNotifyChangeKeyValue</c> glue in <see cref="RegistryWatchOps"/> is an
+/// un-unit-tested OS seam (as with the repo's other native glue).</para>
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class WindowsOsThemeMonitor : IOsThemeMonitor
@@ -43,7 +44,7 @@ public sealed class WindowsOsThemeMonitor : IOsThemeMonitor
 
     public void Start()
     {
-        if (_watcher is not null)
+        if (_disposed || _watcher is not null)
         {
             return;
         }
@@ -69,6 +70,12 @@ public sealed class WindowsOsThemeMonitor : IOsThemeMonitor
         _stop.Dispose();
     }
 
+    private void WatchLoop()
+    {
+        using var ops = new RegistryWatchOps(_read, _stop);
+        ThemeWatchLoop.Run(ops, () => _stop.IsSet, os => Changed?.Invoke(os));
+    }
+
     private static OsTheme Map(int? appsUseLightTheme) => appsUseLightTheme switch
     {
         0 => OsTheme.Dark,
@@ -82,42 +89,6 @@ public sealed class WindowsOsThemeMonitor : IOsThemeMonitor
         return key?.GetValue(ValueName) as int?;
     }
 
-    // Un-unit-tested OS seam: open the key, block on the kernel change notification, re-read and
-    // raise Changed. Loops until Dispose signals _stop.
-    private void WatchLoop()
-    {
-        while (!_stop.IsSet)
-        {
-            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(KeyPath);
-            if (key is null)
-            {
-                _stop.Wait();
-                return;
-            }
-
-            using var changed = new ManualResetEvent(initialState: false);
-            int rc = RegNotifyChangeKeyValue(
-                key.Handle,
-                watchSubtree: false,
-                RegNotifyChangeLastSet,
-                changed.SafeWaitHandle,
-                asynchronous: true);
-            if (rc != 0)
-            {
-                _stop.Wait();
-                return;
-            }
-
-            int signalled = WaitHandle.WaitAny([_stop.WaitHandle, changed]);
-            if (signalled == 0)
-            {
-                return;
-            }
-
-            Changed?.Invoke(Current);
-        }
-    }
-
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern int RegNotifyChangeKeyValue(
         SafeRegistryHandle hKey,
@@ -125,4 +96,75 @@ public sealed class WindowsOsThemeMonitor : IOsThemeMonitor
         int notifyFilter,
         SafeWaitHandle hEvent,
         [MarshalAs(UnmanagedType.Bool)] bool asynchronous);
+
+    /// <summary>
+    /// The native side of the watch: open the Personalize key, arm a one-shot
+    /// <c>RegNotifyChangeKeyValue</c>, and block on it (or the stop signal). Backoff after a
+    /// failure is capped exponential and resets once arming succeeds again. All of the ordering
+    /// and retry decisions are made by <see cref="ThemeWatchLoop"/>; this type only performs them.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private sealed class RegistryWatchOps(Func<int?> read, ManualResetEventSlim stop) : IThemeWatchOps
+    {
+        private const int BackoffBaseMs = 1000;
+        private const int BackoffCapMs = 30_000;
+
+        private RegistryKey? _key;
+        private ManualResetEvent? _changed;
+        private int _backoffMs;
+
+        public OsTheme ReadTheme() => Map(read());
+
+        public bool TryArm()
+        {
+            // Release the previous iteration's handles before re-arming (the notification is
+            // one-shot, so each arm needs a fresh key handle and event).
+            _changed?.Dispose();
+            _changed = null;
+            _key?.Dispose();
+
+            _key = Registry.CurrentUser.OpenSubKey(KeyPath);
+            if (_key is null)
+            {
+                return false;
+            }
+
+            _changed = new ManualResetEvent(initialState: false);
+            int rc = RegNotifyChangeKeyValue(
+                _key.Handle,
+                watchSubtree: false,
+                RegNotifyChangeLastSet,
+                _changed.SafeWaitHandle,
+                asynchronous: true);
+            if (rc != 0)
+            {
+                return false;
+            }
+
+            _backoffMs = 0;
+            return true;
+        }
+
+        public bool WaitForChangeOrStop()
+        {
+            if (_changed is null)
+            {
+                stop.Wait();
+                return true;
+            }
+            return WaitHandle.WaitAny([stop.WaitHandle, _changed]) == 0;
+        }
+
+        public bool BackoffOrStop()
+        {
+            _backoffMs = _backoffMs == 0 ? BackoffBaseMs : Math.Min(_backoffMs * 2, BackoffCapMs);
+            return stop.Wait(_backoffMs);
+        }
+
+        public void Dispose()
+        {
+            _changed?.Dispose();
+            _key?.Dispose();
+        }
+    }
 }
