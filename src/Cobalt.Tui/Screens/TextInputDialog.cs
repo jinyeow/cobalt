@@ -40,6 +40,11 @@ internal sealed class TextInputDialog
     // Set once, on the UI thread, at the first submit/cancel. Guards against a double-resolve from
     // queued keys and against Ctrl+E post-backs touching the disposed field after the dialog closed.
     private bool _closed;
+    // In-flight guard for the Ctrl+E hatch: set on the UI thread when an $EDITOR call starts, cleared
+    // when it completes. The suspend/resume handoff is deferred (queued via the UI-thread marshal), so
+    // between the key press and the actual park the event loop is still live — a double-press would
+    // otherwise queue a second $EDITOR launch over the same buffer (last-write-wins clobber, ADR 0020).
+    private bool _editorOpen;
 
     /// <param name="app">The running application (for the default UI-thread marshal).</param>
     /// <param name="request">What to ask for (title, initial text, single- vs multi-line).</param>
@@ -162,26 +167,23 @@ internal sealed class TextInputDialog
             return;
         }
 
-        if (baseCode == KeyCode.Enter)
-        {
-            // Ctrl+J arrives here as Enter|CtrlMask under the dotnet/ansi driver (see remarks);
-            // a Ctrl/Shift modifier means "newline", plain Enter means "submit".
-            if (!_request.SingleLine && (key.IsCtrl || key.IsShift))
-            {
-                key.Handled = true;
-                InsertNewline();
-                return;
-            }
-            key.Handled = true;
-            Close(Text);
-            return;
-        }
-
-        // Defensive: the Win32 `windows` driver may deliver a physical Ctrl+J as KeyCode.J|CtrlMask.
-        if (!_request.SingleLine && key.IsCtrl && baseCode == KeyCode.J)
+        // The newline chord (multi-line only): a Ctrl/Shift modifier on Enter — which is also how the
+        // dotnet/ansi driver delivers a physical Ctrl+J (byte 0x0A), as Enter|CtrlMask (see remarks) —
+        // plus a defensive KeyCode.J|CtrlMask clause for the Win32 `windows` driver. Plain, unmodified
+        // Enter falls through to submit.
+        if (!_request.SingleLine &&
+            ((baseCode == KeyCode.Enter && (key.IsCtrl || key.IsShift)) ||
+             (baseCode == KeyCode.J && key.IsCtrl)))
         {
             key.Handled = true;
             InsertNewline();
+            return;
+        }
+
+        if (baseCode == KeyCode.Enter)
+        {
+            key.Handled = true;
+            Close(Text);
             return;
         }
 
@@ -209,6 +211,11 @@ internal sealed class TextInputDialog
 
     private void OpenInEditor()
     {
+        if (_editorOpen)
+        {
+            return; // an $EDITOR session is already in flight; ignore the re-press
+        }
+        _editorOpen = true;
         var current = Text;
         _ = RunEditorAsync(current);
     }
@@ -223,7 +230,11 @@ internal sealed class TextInputDialog
         catch (OperationCanceledException)
         {
             // The dialog closed (or the user cancelled the editor) — nothing to surface.
-            _post(RefocusIfOpen);
+            _post(() =>
+            {
+                _editorOpen = false;
+                RefocusIfOpen();
+            });
             return;
         }
         catch (Exception ex)
@@ -232,6 +243,7 @@ internal sealed class TextInputDialog
             // caught (never left unobserved) AND surfaced — a silent no-op hatch violates ADR 0009.
             _post(() =>
             {
+                _editorOpen = false;
                 if (_closed)
                 {
                     return;
@@ -248,6 +260,7 @@ internal sealed class TextInputDialog
         // null → leave the buffer unchanged (do NOT submit); non-null → replace and return to field.
         _post(() =>
         {
+            _editorOpen = false;
             if (_closed)
             {
                 return; // dialog closed while the editor was open; discard and don't touch the field

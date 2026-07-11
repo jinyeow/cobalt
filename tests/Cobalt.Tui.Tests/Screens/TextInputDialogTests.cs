@@ -97,6 +97,32 @@ public class TextInputDialogTests
     }
 
     [Fact]
+    public void Enter_On_An_Empty_Buffer_Submits_The_Empty_String_Not_Null()
+    {
+        var (_, dialog, resolved) = Built(new TextInputRequest("comment"));
+
+        dialog.NewKeyDownEvent(new Key(KeyCode.Enter)); // no typing first
+
+        // Distinct from Esc's [null]: WorkItemActions.AssignAsync's empty-submit guard depends on
+        // empty-Enter producing "" (a submit of nothing), not null (a cancel).
+        Assert.Equal([""], resolved);
+    }
+
+    [Fact]
+    public void Shift_Enter_Chord_Inserts_A_Newline_And_Does_Not_Submit()
+    {
+        var (view, dialog, resolved) = Built(new TextInputRequest("comment"));
+        Type(dialog, "a");
+
+        // The kitty-keyboard-protocol path: a terminal that delivers Shift+Enter distinctly.
+        dialog.NewKeyDownEvent(new Key(KeyCode.Enter).WithShift);
+        Type(dialog, "b");
+
+        Assert.Equal("a\nb", view.Text.ReplaceLineEndings("\n"));
+        Assert.Empty(resolved);
+    }
+
+    [Fact]
     public void Esc_Cancels_With_Null()
     {
         var (_, dialog, resolved) = Built(new TextInputRequest("comment"));
@@ -140,6 +166,46 @@ public class TextInputDialogTests
     }
 
     [Fact]
+    public void CtrlE_While_An_Editor_Is_Open_Ignores_A_Second_Press()
+    {
+        var launches = 0;
+        var gate = new TaskCompletionSource<string?>();
+        var (_, dialog, _) = Built(
+            new TextInputRequest("comment", Initial: "half"),
+            editor: (_, _) =>
+            {
+                launches++;
+                return gate.Task; // editor stays "open" until the test releases it
+            });
+
+        dialog.NewKeyDownEvent(new Key('e').WithCtrl); // opens $EDITOR (task pending)
+        dialog.NewKeyDownEvent(new Key('e').WithCtrl); // re-press while it's still open
+
+        Assert.Equal(1, launches); // the in-flight guard blocks the concurrent re-entry
+
+        gate.SetResult("done"); // release the first editor (cleanup)
+    }
+
+    [Fact]
+    public void CtrlE_After_The_First_Completes_Can_Launch_Again()
+    {
+        var launches = 0;
+        var (_, dialog, resolved) = Built(
+            new TextInputRequest("comment", Initial: "x"),
+            editor: (_, _) =>
+            {
+                launches++;
+                return Task.FromResult<string?>("edited");
+            });
+
+        dialog.NewKeyDownEvent(new Key('e').WithCtrl); // completes synchronously, returns to the field
+        dialog.NewKeyDownEvent(new Key('e').WithCtrl); // legitimate re-escalation (ADR 0020)
+
+        Assert.Equal(2, launches); // sequential re-escalation still works — the guard does not over-block
+        Assert.Empty(resolved);
+    }
+
+    [Fact]
     public void SingleLine_Enter_Submits()
     {
         var (_, dialog, resolved) = Built(new TextInputRequest("assignee", SingleLine: true));
@@ -148,6 +214,33 @@ public class TextInputDialogTests
         dialog.NewKeyDownEvent(new Key(KeyCode.Enter));
 
         Assert.Equal(["jin"], resolved);
+    }
+
+    [Fact]
+    public void SingleLine_CtrlEnter_Submits_The_Newline_Guard_Is_Skipped()
+    {
+        var (_, dialog, resolved) = Built(new TextInputRequest("assignee", SingleLine: true));
+        Type(dialog, "jin");
+
+        // The newline chord is gated on !SingleLine, so Ctrl+Enter is not a chord here — it falls
+        // through to submit, exactly like plain Enter.
+        dialog.NewKeyDownEvent(new Key(KeyCode.Enter).WithCtrl);
+
+        Assert.Equal(["jin"], resolved);
+    }
+
+    [Fact]
+    public void SingleLine_CtrlJ_Does_Not_Insert_A_Newline()
+    {
+        var (view, dialog, resolved) = Built(new TextInputRequest("assignee", SingleLine: true));
+        Type(dialog, "jin");
+
+        // Ctrl+J is a chord only for multi-line; on a single-line field the guard is skipped, so it
+        // must not reach InsertNewline (which casts to TextView) — no newline, no crash.
+        dialog.NewKeyDownEvent(new Key('j').WithCtrl);
+
+        Assert.DoesNotContain('\n', view.Text);
+        Assert.Empty(resolved);
     }
 
     [Fact]
