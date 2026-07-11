@@ -122,5 +122,9 @@ public class ThemeWatchLoopTests
             BackoffCount++;
             return _backoffs.Dequeue();
         }
+
+        public void Dispose()
+        {
+        }
     }
 }

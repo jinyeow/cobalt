@@ -4,7 +4,7 @@ namespace Cobalt.Tui.Theming;
 /// The native primitives the OS-theme watch loop drives, behind an interface so the loop's
 /// control flow is deterministically unit-testable without touching the real registry.
 /// </summary>
-internal interface IThemeWatchOps
+internal interface IThemeWatchOps : IDisposable
 {
     /// <summary>The current OS theme — sampled for the baseline and again after each arm.</summary>
     OsTheme ReadTheme();
