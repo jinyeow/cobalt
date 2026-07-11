@@ -64,17 +64,19 @@ public class ShellThemeFollowTests
     }
 
     [Fact]
-    public void Theme_Command_Through_The_Shell_Applies_The_Resolved_Preset()
+    public void Theme_System_Command_Through_The_Shell_Resolves_Against_The_Monitor()
     {
         ThemeService.Enable();
         ThemeService.Apply(ThemeResolver.Resolve(ThemeChoice.Dark, OsTheme.Unknown)); // baseline: dark
-        var monitor = new FakeOsThemeMonitor { Current = OsTheme.Dark };
+        var monitor = new FakeOsThemeMonitor { Current = OsTheme.Light };
         var vm = Vm(ThemeChoice.Dark);
         using var shell = new CobaltShell(App, vm, themeMonitor: monitor);
 
-        // Drives the `:theme` command end-to-end through the shell (OnThemeChangeRequested), the
-        // path ShellViewModelTests (VM-only) and the OsFollow tests never exercise.
-        vm.HandlePaletteInput("theme light");
+        // Drives `:theme system` end-to-end through the shell (OnThemeChangeRequested), which the
+        // VM-only and OS-follow tests never exercise. `system` resolves against _themeMonitor.Current,
+        // so a light monitor must yield the light palette — this pins the monitor read itself: if the
+        // `?? OsTheme.Unknown` fallback regressed to ignore Current, resolution would fall back to dark.
+        vm.HandlePaletteInput("theme system");
 
         Assert.Equal(ThemeResolver.Resolve(ThemeChoice.Light, OsTheme.Unknown).Diff, ThemeService.CurrentPalette);
     }
