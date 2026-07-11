@@ -340,6 +340,7 @@ public class ShellViewModelTests
         vm.HandlePaletteInput("theme rainbow");
 
         Assert.Equal(MessageLevel.Error, vm.Messages.Current?.Level);
+        Assert.Contains("unknown theme", vm.Messages.Current?.Text);
         Assert.Equal(ThemeChoice.Dark, vm.CurrentTheme);
     }
 
@@ -371,5 +372,6 @@ public class ShellViewModelTests
         vm.HandlePaletteInput("theme light");
 
         Assert.Equal(1, raised);
+        Assert.Contains("already", vm.Messages.Current!.Text);
     }
 }

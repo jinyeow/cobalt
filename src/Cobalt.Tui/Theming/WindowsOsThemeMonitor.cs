@@ -163,8 +163,11 @@ public sealed class WindowsOsThemeMonitor : IOsThemeMonitor
 
         public void Dispose()
         {
-            _changed?.Dispose();
+            // Close the key before the event: closing the key flushes any still-pending one-shot
+            // notification (which fires by signalling the event) before the event handle is freed,
+            // so the kernel never signals an already-released — and possibly reused — handle.
             _key?.Dispose();
+            _changed?.Dispose();
         }
     }
 }

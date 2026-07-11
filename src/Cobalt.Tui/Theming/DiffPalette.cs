@@ -26,4 +26,14 @@ public sealed record DiffPalette(
         AddedGutterForeground: new Color(ColorName16.BrightGreen),
         RemovedGutterForeground: new Color(ColorName16.BrightRed),
         SearchHitBackground: new Color("#6b5a00"));
+
+    /// <summary>The light preset — diff colours readable on a light background.</summary>
+    public static DiffPalette Light { get; } = new(
+        AddedBackground: new Color("#d6f5d6"),
+        AddedEmphasisBackground: new Color("#a6e0a6"),
+        RemovedBackground: new Color("#f8d6d6"),
+        RemovedEmphasisBackground: new Color("#e8a6a6"),
+        AddedGutterForeground: new Color("#1e6b1e"),
+        RemovedGutterForeground: new Color("#8a1f1f"),
+        SearchHitBackground: new Color("#fff2a8"));
 }

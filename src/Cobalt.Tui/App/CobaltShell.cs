@@ -394,7 +394,14 @@ public sealed class CobaltShell : Window
     private void OnThemeChangeRequested(ThemeChoice choice)
     {
         var os = _themeMonitor?.Current ?? OsTheme.Unknown;
-        ThemeService.Apply(ThemeResolver.Resolve(choice, os));
+        ApplyPreset(ThemeResolver.Resolve(choice, os));
+    }
+
+    /// <summary>Apply a theme preset and force a full repaint so every view re-resolves its scheme
+    /// and the diff its ambient palette. Shared by the <c>:theme</c> command and the OS-follow path.</summary>
+    private void ApplyPreset(ThemePreset preset)
+    {
+        ThemeService.Apply(preset);
         _app.LayoutAndDraw(true);
     }
 
@@ -416,8 +423,7 @@ public sealed class CobaltShell : Window
         {
             return;
         }
-        ThemeService.Apply(preset);
-        _app.LayoutAndDraw(true);
+        ApplyPreset(preset);
     }
 
     /// <summary>
