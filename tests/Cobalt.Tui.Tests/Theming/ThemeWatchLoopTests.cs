@@ -22,7 +22,7 @@ public class ThemeWatchLoopTests
         ThemeWatchLoop.Run(ops, stopped: () => false, onChanged: fired.Add);
 
         // C5: de-duped — only the two genuine transitions fire, not the spurious wake.
-        Assert.Equal([OsTheme.Light, OsTheme.Dark], fired);
+        Assert.Equal(new[] { OsTheme.Light, OsTheme.Dark }, fired);
 
         // C1: every notifying read (all but the baseline) is immediately preceded by an arm, so a
         // write racing the read is caught by the already-armed notification instead of being lost.
@@ -50,7 +50,7 @@ public class ThemeWatchLoopTests
 
         // C2: a transient arm failure does not park forever — it backs off, retries, and recovers.
         Assert.Equal(2, ops.BackoffCount);
-        Assert.Equal([OsTheme.Light], fired);
+        Assert.Equal(new[] { OsTheme.Light }, fired);
     }
 
     [Fact]
