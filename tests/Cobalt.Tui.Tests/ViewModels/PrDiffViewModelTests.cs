@@ -552,7 +552,7 @@ public class PrDiffViewModelTests
     }
 
     [Fact]
-    public async Task PrefetchAllDiffsAsync_Computes_Every_Files_Diff_And_Raises_Changed()
+    public async Task PrefetchAllDiffsAsync_Computes_Every_Files_Diff_And_Raises_StatsChanged()
     {
         var source = new FakeDiffSource
         {
@@ -565,7 +565,9 @@ public class PrDiffViewModelTests
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
+        var statsCount = 0;
         var changedCount = 0;
+        vm.StatsChanged += () => statsCount++;
         vm.Changed += () => changedCount++;
 
         await vm.PrefetchAllDiffsAsync(TestContext.Current.CancellationToken);
@@ -574,7 +576,10 @@ public class PrDiffViewModelTests
         Assert.Equal((2, 0), vm.StatsFor("/b.cs"));
         Assert.Equal(3, vm.TotalAdditions);
         Assert.Equal(0, vm.TotalDeletions);
-        Assert.True(changedCount >= 2);
+        Assert.True(statsCount >= 2);
+        // Prefetch never changes the selected file, so it must not raise the content-level
+        // Changed (which would re-tokenize the open diff once per file in the PR).
+        Assert.Equal(0, changedCount);
     }
 
     [Fact]
@@ -592,7 +597,9 @@ public class PrDiffViewModelTests
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         using var cts = new CancellationTokenSource();
-        vm.Changed += () => cts.Cancel();
+        // Prefetch signals each computed file via StatsChanged; cancel after the first so the
+        // loop must stop before /b.cs (whose blobs are omitted above).
+        vm.StatsChanged += () => cts.Cancel();
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => vm.PrefetchAllDiffsAsync(cts.Token));

@@ -119,6 +119,7 @@ public sealed class DiffReviewDialog(
         {
             _closed = true;
             vm.Changed -= OnChanged;
+            vm.StatsChanged -= OnStatsChanged;
             dialog.ViewportChanged -= OnViewportChanged;
             _cts.Cancel();
             _cts.Dispose();
@@ -226,6 +227,7 @@ public sealed class DiffReviewDialog(
         };
 
         vm.Changed += OnChanged;
+        vm.StatsChanged += OnStatsChanged;
         dialog.KeyDown += HandleKey;
         // Re-apply the responsive layout when the terminal (and so the dialog) is resized.
         dialog.ViewportChanged += OnViewportChanged;
@@ -240,6 +242,16 @@ public sealed class DiffReviewDialog(
         if (!_closed)
         {
             Render();
+        }
+    });
+
+    // Background stats prefetch: only the title totals and file-row stats changed, so refresh the
+    // chrome and skip the diff-pane rebuild — the displayed file's diff is unchanged.
+    private void OnStatsChanged() => app.Invoke(() =>
+    {
+        if (!_closed)
+        {
+            Render(includeDiffPane: false);
         }
     });
 
@@ -890,7 +902,15 @@ public sealed class DiffReviewDialog(
         "q close · Tab panes · h/l scroll · [f/]f file · [c/]c hunk · [t/]t thread · [v/]v unviewed · / search · n/N · " +
         "z fold · e/E context · s split · c comment · o thread · gb branch · v vote · m viewed · T filter · ? keys";
 
-    private void Render()
+    /// <summary>Test seam: refresh title totals and file-row stats without re-tokenizing the diff.</summary>
+    internal void RefreshStats() => Render(includeDiffPane: false);
+
+    /// <param name="includeDiffPane">
+    /// When <see langword="false"/>, refresh only the chrome (title totals, file-row stats) and
+    /// skip rebuilding the diff pane — used by the background stats prefetch, whose updates never
+    /// change the displayed diff content, so the open file is not re-tokenized on every file.
+    /// </param>
+    private void Render(bool includeDiffPane = true)
     {
         ApplyResponsiveLayout();
         if (_dialog is not null)
@@ -911,7 +931,7 @@ public sealed class DiffReviewDialog(
         RepointIfFilteredOut();
         RebuildFileList(SelectedFileNodePath());
 
-        if (vm.CurrentDiff is { } diff)
+        if (includeDiffPane && vm.CurrentDiff is { } diff)
         {
             var file = vm.SelectedFile;
             var mode = _sideBySide ? "  (side-by-side)" : "";
