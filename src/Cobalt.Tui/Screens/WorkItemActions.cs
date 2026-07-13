@@ -21,6 +21,7 @@ public sealed class WorkItemActions
     private readonly Func<string, IReadOnlyList<string>, int?> _choose;
     private readonly Action<Action> _post;
 
+    /// <summary>Wires the work-item verb flows to their host, editor, and injectable UI seams.</summary>
     /// <param name="app">Host application; supplies the default state chooser and UI-thread marshaling.</param>
     /// <param name="editor">Editor used for tags/description text entry (ADR 0020: stays $EDITOR).</param>
     /// <param name="log">Message sink for success/failure lines.</param>
