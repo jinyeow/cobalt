@@ -23,6 +23,7 @@ public sealed class CobaltShell : Window
     private readonly WorkItemStoreAdapter? _workItems;
     private readonly PullRequestStoreAdapter? _pullRequests;
     private readonly EditorService _editor;
+    private readonly ITextInput _textInput;
     private readonly KeyBindingTable _bindings = KeyBindingTable.Default();
     private readonly KeymapRouter _router;
 
@@ -58,6 +59,9 @@ public sealed class CobaltShell : Window
         _themeMonitor = themeMonitor;
         _editor = editor ?? new EditorService(new ProcessEditorLauncher(
             Environment.GetEnvironmentVariable, TerminalGuiSuspender.For(app)));
+        // In-TUI text entry for comments/replies (ADR 0020) — no $EDITOR handoff. It holds
+        // _editor for its Ctrl-E escape hatch; descriptions and tags still use _editor directly.
+        _textInput = new TuiTextInput(_app, _editor);
         _router = new KeymapRouter(_bindings);
 
         Title = "cobalt";
@@ -276,7 +280,7 @@ public sealed class CobaltShell : Window
         // The highlighted row's project (org scope may span projects); the detail/mutation
         // path targets it, not the context project (H1).
         var project = _workItemList.SelectedProject;
-        var actions = new WorkItemActions(_app, _editor, _vm.Messages.Info);
+        var actions = new WorkItemActions(_app, _editor, _vm.Messages.Info, _textInput);
         _ = RunThenRefreshAsync(run(actions, _workItems, id, project, CancellationToken.None), () => _workItemList?.OnRefresh());
     }
 
@@ -359,7 +363,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new PrDetailViewModel(_pullRequests, id);
-        new PrDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _pullRequests, _context).Show();
+        new PrDetailDialog(_app, detailVm, _textInput, _vm.Messages.Info, _pullRequests, _context).Show();
         _prList?.Load(); // reflect any votes/edits back into the list
     }
 
@@ -370,7 +374,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new WorkItemDetailViewModel(_workItems, id, project);
-        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info).Show();
+        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _textInput).Show();
         _workItemList?.OnRefresh(); // reflect any edits back into the list
     }
 

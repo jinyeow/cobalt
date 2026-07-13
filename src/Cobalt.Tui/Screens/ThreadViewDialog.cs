@@ -18,7 +18,7 @@ namespace Cobalt.Tui.Screens;
 public sealed class ThreadViewDialog(
     IApplication app,
     PrDiffViewModel vm,
-    EditorService editor,
+    ITextInput textInput,
     Action<string> log,
     IReadOnlyList<PrThread> threads)
 {
@@ -260,7 +260,7 @@ public sealed class ThreadViewDialog(
         string? text;
         try
         {
-            text = await editor.EditAsync("", ".md", Token).ConfigureAwait(false);
+            text = await textInput.ReadAsync(new TextInputRequest("reply", SingleLine: false), Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {

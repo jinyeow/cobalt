@@ -25,6 +25,7 @@ public sealed class PrActions
     private readonly Func<string, IReadOnlyList<string>, int?> _choose;
     private readonly Action<Action> _post;
 
+    /// <summary>Wires the pull-request vote flow to its host and injectable UI seams.</summary>
     /// <param name="app">Host application; supplies the default vote chooser and UI-thread marshaling.</param>
     /// <param name="log">Message sink for success/failure lines.</param>
     /// <param name="choose">Option picker (title, options) → chosen index, or null/-1 when dismissed; defaults to a <see cref="MessageBox"/> query. Injectable for tests.</param>

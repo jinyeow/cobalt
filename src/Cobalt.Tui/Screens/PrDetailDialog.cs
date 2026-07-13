@@ -18,7 +18,7 @@ namespace Cobalt.Tui.Screens;
 public sealed class PrDetailDialog(
     IApplication app,
     PrDetailViewModel vm,
-    EditorService editor,
+    ITextInput textInput,
     Action<string> log,
     IPrDiffSource? diffSource = null,
     AdoContext? context = null)
@@ -316,7 +316,7 @@ public sealed class PrDetailDialog(
         string? text;
         try
         {
-            text = await editor.EditAsync("", ".md", Token).ConfigureAwait(false);
+            text = await textInput.ReadAsync(new TextInputRequest("reply", SingleLine: false), Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
@@ -334,7 +334,7 @@ public sealed class PrDetailDialog(
         string? text;
         try
         {
-            text = await editor.EditAsync("", ".md", Token).ConfigureAwait(false);
+            text = await textInput.ReadAsync(new TextInputRequest("PR comment", SingleLine: false), Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
@@ -365,7 +365,7 @@ public sealed class PrDetailDialog(
         string? text;
         try
         {
-            text = await editor.EditAsync("", ".txt", Token).ConfigureAwait(false);
+            text = await textInput.ReadAsync(new TextInputRequest(prompt, SingleLine: true), Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
@@ -406,7 +406,7 @@ public sealed class PrDetailDialog(
             return;
         }
         var diffVm = new PrDiffViewModel(diffSource, vm.PullRequest);
-        new DiffReviewDialog(app, diffVm, editor, log, context).Show();
+        new DiffReviewDialog(app, diffVm, textInput, log, context).Show();
     }
 
     private void OpenBranch()
