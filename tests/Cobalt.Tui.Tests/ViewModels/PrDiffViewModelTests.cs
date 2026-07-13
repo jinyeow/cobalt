@@ -83,6 +83,35 @@ public class PrDiffViewModelTests
     }
 
     [Fact]
+    public async Task PrefetchAllDiffs_Raises_StatsChanged_Per_File_And_Not_Content_Changed()
+    {
+        // The background stats prefetch computes every file's diff into the cache but never
+        // changes the selected file / CurrentDiff, so the displayed diff content is unchanged.
+        // It must signal StatsChanged (title totals + file-row stats) rather than Changed (a
+        // full diff re-render), so the open file is not re-tokenized once per file in the PR.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        source.Blobs[("/b.cs", "base")] = "y\n";
+        source.Blobs[("/b.cs", "src")] = "y\nadded\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var changed = 0;
+        var stats = 0;
+        vm.Changed += () => changed++;
+        vm.StatsChanged += () => stats++;
+
+        await vm.PrefetchAllDiffsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(vm.Files.Count, stats);
+        Assert.Equal(0, changed);
+    }
+
+    [Fact]
     public async Task Added_File_Diffs_Empty_Base_Against_Source()
     {
         var source = new FakeDiffSource

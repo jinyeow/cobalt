@@ -538,7 +538,11 @@ public sealed class CobaltShell : Window
         _status.Text = _vm.StatusLine;
         var current = _vm.Messages.Current;
         _message.Text = current is null ? "" : $" {current.Text}";
-        _app.LayoutAndDraw(false);
+        // Only the fixed-layout chrome labels changed text — mark them dirty and let the run loop
+        // repaint them, instead of a whole-app LayoutAndDraw on every routine status/log message.
+        _tabs.SetNeedsDraw();
+        _status.SetNeedsDraw();
+        _message.SetNeedsDraw();
     }
 
     private void ShowHelp() => TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope));

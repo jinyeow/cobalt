@@ -160,14 +160,22 @@ public sealed class PrListView : View
         Render();
     }
 
+    // Coalesce a burst of per-PR comment-count arrivals into a single re-render. Each count
+    // used to trigger a full re-format of every row (O(rows) per count → O(rows²) for a load of
+    // 50–200 PRs). Now only the call that flips the flag schedules the invoke; counts landing
+    // before it runs are all reflected by the queued Render (it reads every cached count), then
+    // the flag resets so the next burst re-arms.
+    private int _countRenderQueued;
+
     private void OnCountAvailable(int prId)
     {
-        if (_disposed)
+        if (_disposed || Interlocked.Exchange(ref _countRenderQueued, 1) == 1)
         {
             return;
         }
         _app.Invoke(() =>
         {
+            Interlocked.Exchange(ref _countRenderQueued, 0);
             if (!_disposed)
             {
                 Render();

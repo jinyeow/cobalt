@@ -44,6 +44,13 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 
     public event Action? Changed;
 
+    /// <summary>
+    /// Raised when only per-file diff stats/totals change (the background prefetch), not the
+    /// displayed diff content. Lets the view refresh the title totals and file-row stats without
+    /// re-tokenizing the open file — see <see cref="PrefetchAllDiffsAsync"/>.
+    /// </summary>
+    public event Action? StatsChanged;
+
     public FileChange? SelectedFile =>
         Files.Count == 0 ? null : Files[Math.Clamp(_selectedFileIndex, 0, Files.Count - 1)];
 
@@ -78,7 +85,10 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 
     /// <summary>
     /// Computes every file's diff sequentially into the cache (so <see cref="StatsFor"/> and the
-    /// totals fill in), raising <see cref="Changed"/> after each so the UI can update lazily.
+    /// totals fill in), raising <see cref="StatsChanged"/> after each. This never changes the
+    /// selected file or <see cref="CurrentDiff"/>, so it deliberately does not raise
+    /// <see cref="Changed"/>: the view refreshes only the title totals and file-row stats, not the
+    /// (unchanged) displayed diff — otherwise an N-file PR re-tokenizes the open file N times.
     /// </summary>
     public async Task PrefetchAllDiffsAsync(CancellationToken ct)
     {
@@ -98,7 +108,7 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
                 // One file's blob fetch failed (e.g. a 404 on a rename/edge path). Skip its
                 // stats and keep prefetching the rest — background stats are best-effort.
             }
-            Changed?.Invoke();
+            StatsChanged?.Invoke();
         }
     }
 

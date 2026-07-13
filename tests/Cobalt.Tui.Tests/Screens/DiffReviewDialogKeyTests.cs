@@ -104,6 +104,20 @@ public class DiffReviewDialogKeyTests
     }
 
     [Fact]
+    public async Task Stats_Refresh_Does_Not_Rebuild_The_Diff_Pane()
+    {
+        // The background-prefetch stats path refreshes title totals + file-row stats but must
+        // not re-tokenize/rebuild the (unchanged) displayed diff. A full Render always assigns a
+        // new DiffListDataSource; the stats-only path must leave the existing instance in place.
+        var (detail, _) = await BuiltDialog();
+        var before = detail.DiffPane.Source;
+
+        detail.RefreshStats();
+
+        Assert.Same(before, detail.DiffPane.Source);
+    }
+
+    [Fact]
     public async Task Tab_Flips_Focus_Between_Panes()
     {
         var (detail, dialog) = await BuiltDialog();

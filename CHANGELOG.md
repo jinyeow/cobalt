@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Performance
+- **Snappier UI.** Cut redundant redraws and re-tokenization that made navigation feel laggy:
+  the diff-review pane no longer re-tokenizes the open file once per file in the PR while the
+  background stats prefetch runs (it now refreshes only the title totals and file-row stats);
+  a routine status/log message repaints just the chrome labels instead of relaying out the
+  whole app; and a burst of PR comment-count arrivals coalesces into a single list re-render
+  instead of re-formatting every row per count.
+
 ### Added
 - **Themes.** `theme = "dark" | "light" | "system"` in `config.toml` (default `dark`, the
   original look), switchable live with `:theme`. Terminal.Gui's built-in themes colour the app
