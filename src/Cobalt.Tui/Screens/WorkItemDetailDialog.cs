@@ -46,12 +46,13 @@ public sealed class WorkItemDetailDialog
     internal Action? HelpAction { get; set; }
 
     public WorkItemDetailDialog(
-        IApplication app, WorkItemDetailViewModel vm, EditorService editor, Action<string> log)
+        IApplication app, WorkItemDetailViewModel vm, EditorService editor, Action<string> log,
+        ITextInput? textInput = null)
     {
         _app = app;
         _vm = vm;
         _log = log;
-        _actions = new WorkItemActions(app, editor, log);
+        _actions = new WorkItemActions(app, editor, log, textInput);
         _router = new KeymapRouter(_bindings);
     }
 

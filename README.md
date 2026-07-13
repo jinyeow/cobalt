@@ -140,7 +140,13 @@ remaining terminal width (reflowing on resize), so there's no dead right gutter.
 
 ## Editor
 
-Commenting, editing a description, and similar text entry open your editor on a
+**Comments and replies** are typed in a fast **in-TUI editor** — no terminal handoff, so it's
+instant (see [ADR 0020](docs/adr/0020-in-tui-text-input.md)). **Enter** submits, **Esc** cancels,
+**Ctrl-J** (or Ctrl-Enter where your terminal delivers it) inserts a newline, and **Ctrl-E** hands
+the current text to your `$EDITOR` for heavier editing, then drops you back to review before you
+submit. Short prompts — a thread id, an assignee — are one-line fields where Enter submits.
+
+**Editing a work-item description**, and the `Ctrl-E` escape hatch, still open your editor on a
 temp file (the git-commit pattern). cobalt resolves it in this order:
 
 1. `$VISUAL`
@@ -159,7 +165,7 @@ Set it in the shell you launch cobalt from:
   Environment Variables.
 - **cmd**: `set EDITOR=nvim` for the session.
 
-If neither variable is set, `c`/`e`/comment actions fall back to `vi`; if that
+If neither variable is set, description editing and the `Ctrl-E` hatch fall back to `vi`; if that
 isn't installed you'll see *"could not start editor … set $VISUAL or $EDITOR"*.
 A full-screen editor gets a clean terminal (the TUI suspends while it runs).
 

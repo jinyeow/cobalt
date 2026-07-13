@@ -8,6 +8,13 @@
   chrome + syntax highlighting; a cobalt `DiffPalette` colours the diff tints, so both recolour
   together. `system` follows the OS light/dark setting live on Windows (registry watch), falling
   back to `dark` on other platforms for now. See [ADR 0019](docs/adr/0019-hybrid-theming.md).
+- **In-TUI editor for comments and replies.** Line comments, thread replies, PR replies, and
+  PR-level comments are now typed in a fast in-TUI field instead of handing the terminal to
+  `$EDITOR` — no suspend/resume, so no slow-editor start or driver quirks, and it's instant.
+  **Enter** submits, **Esc** cancels, **Ctrl-J** (or Ctrl-Enter where the terminal delivers it)
+  inserts a newline, **Ctrl-E** escalates to `$EDITOR` and returns for review. Thread-id and
+  assignee prompts are one-line fields. Descriptions and tags still use `$EDITOR`. See
+  [ADR 0020](docs/adr/0020-in-tui-text-input.md).
 
 ### Fixed
 - **A slow or broken `az` no longer blocks sign-in.** The credential chain now tries cobalt's

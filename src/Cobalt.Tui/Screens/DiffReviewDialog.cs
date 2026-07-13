@@ -20,7 +20,7 @@ namespace Cobalt.Tui.Screens;
 /// Tab cycles the panes, and j/k/gg/G/Ctrl-d/u scroll the focused pane.
 /// </summary>
 public sealed class DiffReviewDialog(
-    IApplication app, PrDiffViewModel vm, EditorService editor, Action<string> log, AdoContext? context = null)
+    IApplication app, PrDiffViewModel vm, ITextInput textInput, Action<string> log, AdoContext? context = null)
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly KeymapRouter _router = new(KeyBindingTable.Default());
@@ -484,7 +484,7 @@ public sealed class DiffReviewDialog(
         string? text;
         try
         {
-            text = await editor.EditAsync("", ".md", Token).ConfigureAwait(false);
+            text = await textInput.ReadAsync(new TextInputRequest("comment", SingleLine: false), Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
@@ -526,7 +526,7 @@ public sealed class DiffReviewDialog(
         }
         else
         {
-            new ThreadViewDialog(app, vm, editor, log, threads).Show();
+            new ThreadViewDialog(app, vm, textInput, log, threads).Show();
         }
     }
 

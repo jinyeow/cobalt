@@ -24,3 +24,4 @@ immutable once accepted; superseding decisions get a new number that links back.
 | [0017](0017-diff-review-ux-tree-sidebyside-responsive.md) | Diff-review UX: directory tree, side-by-side toggle, responsive panes | Accepted |
 | [0018](0018-diff-review-as-a-complete-review-surface.md) | Diff review as a complete review surface (threads, nav, search, fold, stats, policy) | Accepted |
 | [0019](0019-hybrid-theming.md) | Hybrid theming: Terminal.Gui themes for chrome, a cobalt palette for the diff | Accepted |
+| [0020](0020-in-tui-text-input.md) | In-TUI text input for short entry; `$EDITOR` for long-form | Accepted |
