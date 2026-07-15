@@ -59,6 +59,65 @@ public class PrDiffViewModelTests
         }
     }
 
+    /// <summary>
+    /// A diff source whose blob fetches block until <see cref="Release"/>, so a test can observe how
+    /// many blob requests are in flight at once rather than only the end result.
+    /// </summary>
+    private sealed class GatedBlobSource : IPrDiffSource
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly SemaphoreSlim _issued = new(0);
+
+        public PrIteration? Iteration { get; set; } = new(2, "src", "tgt", "base");
+        public IReadOnlyList<FileChange> Changes { get; set; } = [];
+        public Dictionary<(string path, string commit), string> Blobs { get; } = new();
+
+        public Task<PrIteration?> GetLatestIterationAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromResult(Iteration);
+
+        public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repo, int prId, int iterationId, CancellationToken ct) =>
+            Task.FromResult(Changes);
+
+        public async Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct)
+        {
+            _issued.Release();
+            await _release.Task.ConfigureAwait(false);
+            return Blobs.GetValueOrDefault((path, commit), "");
+        }
+
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PrThread>>([]);
+
+        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        /// <summary>True once <paramref name="count"/> blob requests have been issued; false on timeout.</summary>
+        public async Task<bool> WaitForBlobRequestsAsync(int count, TimeSpan timeout)
+        {
+            using var cts = new CancellationTokenSource(timeout);
+            try
+            {
+                for (var i = 0; i < count; i++)
+                {
+                    await _issued.WaitAsync(cts.Token).ConfigureAwait(false);
+                }
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+        }
+
+        public void Release() => _release.TrySetResult();
+    }
+
     private static PullRequest Pr() =>
         new(10, "t", null, "active", false, "f", "main", "succeeded", "Jin", "repo-1", "web", [], [], "src",
             "Contoso.Web");
@@ -80,6 +139,52 @@ public class PrDiffViewModelTests
         Assert.Equal("/a.cs", vm.SelectedFile?.Path);
         Assert.NotNull(vm.CurrentDiff);
         Assert.Equal(1, vm.CurrentDiff!.Additions);
+    }
+
+    [Fact]
+    public async Task Edited_File_Fetches_Base_And_Source_Blobs_Concurrently()
+    {
+        var source = new GatedBlobSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        var load = vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // The two blobs are independent: awaiting them in sequence leaves the source blob unissued
+        // until the base blob lands, costing a whole round-trip on every cache miss.
+        Assert.True(
+            await source.WaitForBlobRequestsAsync(2, TimeSpan.FromSeconds(5)),
+            "both blob requests must be in flight before either is released");
+
+        source.Release();
+        await load;
+
+        Assert.Equal(1, vm.CurrentDiff!.Additions);
+    }
+
+    [Fact]
+    public async Task Added_File_Fetches_Only_The_Source_Blob()
+    {
+        var source = new GatedBlobSource
+        {
+            Changes = [new FileChange("/new.cs", FileChangeKind.Add)],
+        };
+        source.Blobs[("/new.cs", "src")] = "a\nb\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        var load = vm.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.True(await source.WaitForBlobRequestsAsync(1, TimeSpan.FromSeconds(5)));
+        source.Release();
+        await load;
+
+        // An added file has no base version: the short-circuit must survive parallelising the pair,
+        // so a second request must never be issued.
+        Assert.False(await source.WaitForBlobRequestsAsync(1, TimeSpan.FromMilliseconds(200)));
+        Assert.Equal(2, vm.CurrentDiff!.Additions);
     }
 
     [Fact]

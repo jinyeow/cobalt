@@ -346,15 +346,21 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 
         // Added files have no base version; deleted files have no source version.
         // Renamed/moved files have their base blob at the old path.
+        // The two blobs are independent, so both requests are started before either is awaited:
+        // a cache miss costs one round-trip rather than two.
         var basePath = file.OriginalPath ?? file.Path;
-        var baseText = file.ChangeType == FileChangeKind.Add
-            ? ""
-            : await source.GetFileContentAsync(pr.ProjectName, pr.RepositoryId, basePath, _iteration.BaseCommitId ?? "", ct).ConfigureAwait(false);
-        var sourceText = file.ChangeType == FileChangeKind.Delete
-            ? ""
-            : await source.GetFileContentAsync(pr.ProjectName, pr.RepositoryId, file.Path, _iteration.SourceCommitId ?? "", ct).ConfigureAwait(false);
+        var baseTask = file.ChangeType == FileChangeKind.Add
+            ? Task.FromResult("")
+            : source.GetFileContentAsync(pr.ProjectName, pr.RepositoryId, basePath, _iteration.BaseCommitId ?? "", ct);
+        var sourceTask = file.ChangeType == FileChangeKind.Delete
+            ? Task.FromResult("")
+            : source.GetFileContentAsync(pr.ProjectName, pr.RepositoryId, file.Path, _iteration.SourceCommitId ?? "", ct);
 
-        var diff = DiffService.Unified(baseText, sourceText);
+        // WhenAll (rather than two sequential awaits) so a failure of the first blob still observes
+        // the second's exception; it rethrows the first fault, keeping the ADR 0013 filters intact.
+        var texts = await Task.WhenAll(baseTask, sourceTask).ConfigureAwait(false);
+
+        var diff = DiffService.Unified(texts[0], texts[1]);
         _diffCache[file.Path] = diff;
         return diff;
     }
