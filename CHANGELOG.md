@@ -9,6 +9,14 @@
   that isn't cached yet is one round-trip instead of two, and the background prefetch and your
   own navigation now share a single fetch when they land on the same file rather than each
   requesting it. See [ADR 0008](docs/adr/0008-client-side-diff-and-line-comments.md).
+- **No more stutter on large diffs.** The diff pane used to re-syntax-highlight the whole file
+  every time it redrew, so expanding a fold, searching, toggling side-by-side or landing a
+  comment stalled the UI for as long as the file was big — about 64ms on a 10,000-line file,
+  on every one of those keypresses. Each file's highlighting is now computed once and reused
+  (~0.31ms), and only the lines that actually changed are recomposed. Marking a file viewed no
+  longer rebuilds the pane at all, intra-line highlighting is capped on very long (e.g.
+  minified) lines, and the per-file stats arriving in the background now refresh the chrome
+  once per burst instead of once per file.
 - **Snappier UI.** Cut redundant redraws and re-tokenization that made navigation feel laggy:
   the diff-review pane no longer re-tokenizes the open file once per file in the PR while the
   background stats prefetch runs (it now refreshes only the title totals and file-row stats);
