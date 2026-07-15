@@ -259,19 +259,10 @@ public sealed class DiffReviewDialog(
     // into one queued refresh rather than one per file competing with the reviewer's keys.
     private void OnStatsChanged()
     {
-        if (!_statsRefresh.TryQueue())
+        if (_statsRefresh.TryQueue())
         {
-            return; // a refresh is already queued; it will pick this file's stats up too
+            app.Invoke(RunQueuedStatsRefresh);
         }
-        app.Invoke(() =>
-        {
-            // Reopened before rendering, so stats arriving during the render queue a fresh refresh.
-            _statsRefresh.Release();
-            if (!_closed)
-            {
-                Render(includeDiffPane: false);
-            }
-        });
     }
 
     private void OnViewportChanged(object? sender, Terminal.Gui.ViewBase.DrawEventArgs e)
@@ -936,8 +927,19 @@ public sealed class DiffReviewDialog(
         "q close · Tab panes · h/l scroll · [f/]f file · [c/]c hunk · [t/]t thread · [v/]v unviewed · / search · n/N · " +
         "z fold · e/E context · s split · c comment · o thread · gb branch · v vote · m viewed · T filter · ? keys";
 
-    /// <summary>Test seam: refresh title totals and file-row stats without re-tokenizing the diff.</summary>
-    internal void RefreshStats() => Render(includeDiffPane: false);
+    /// <summary>
+    /// The refresh <see cref="OnStatsChanged"/> queues: reopen the gate, then repaint the chrome
+    /// (title totals, file-row stats) without re-tokenizing the unchanged diff. Internal so tests
+    /// can run the queued work directly — a headless <c>Application</c> never drains Invoke.
+    /// </summary>
+    internal void RunQueuedStatsRefresh() =>
+        _statsRefresh.Run(() =>
+        {
+            if (!_closed)
+            {
+                Render(includeDiffPane: false);
+            }
+        });
 
     /// <summary>
     /// The header above the diff pane: which file is on screen and its stats. Keyed on the diff's
@@ -1253,10 +1255,9 @@ internal sealed record DiffRow(int? LineIndex, int? LeftIndex, int? RightIndex, 
 
 /// <summary>
 /// Collapses a burst of events into a single queued refresh: the first caller to
-/// <see cref="TryQueue"/> owns the refresh, every caller after it is told one is already coming.
-/// <see cref="Release"/> reopens the gate and must run *before* the refresh does its work, so an
-/// event raised while it runs still queues a later one rather than being swallowed. Interlocked
-/// because the raising thread and the releasing (UI) thread are not the same.
+/// <see cref="TryQueue"/> owns the refresh, every caller after it is told one is already coming,
+/// and <see cref="Run"/> reopens the gate before running it. Interlocked because the raising
+/// thread and the running (UI) thread are not the same.
 /// </summary>
 internal sealed class CoalescingGate
 {
@@ -1265,6 +1266,15 @@ internal sealed class CoalescingGate
     /// <summary>True if the caller should queue the refresh; false if one is already queued.</summary>
     public bool TryQueue() => Interlocked.CompareExchange(ref _queued, 1, 0) == 0;
 
-    /// <summary>Reopens the gate; call at the start of the queued refresh, not the end.</summary>
-    public void Release() => Interlocked.Exchange(ref _queued, 0);
+    /// <summary>
+    /// Runs the queued refresh, reopening the gate first so an event raised while
+    /// <paramref name="refresh"/> is running queues a new one instead of being dropped. The order
+    /// lives here rather than at the call site because it is the whole point of the gate and
+    /// nothing at the call site would reveal it being wrong.
+    /// </summary>
+    public void Run(Action refresh)
+    {
+        Interlocked.Exchange(ref _queued, 0);
+        refresh();
+    }
 }

@@ -143,7 +143,7 @@ public class DiffReviewDialogKeyTests
         var select = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
         await Assert.ThrowsAsync<NotInitializedException>(() => select);
         Assert.NotNull(vm.CurrentDiff); // a diff is now on screen — the masking condition
-        detail.RefreshStats();          // any later chrome refresh
+        detail.RunQueuedStatsRefresh(); // any later chrome refresh
 
         Assert.DoesNotContain("unresolved", detail.Title);
         Assert.Contains("comments unavailable", detail.Title);
@@ -179,7 +179,7 @@ public class DiffReviewDialogKeyTests
         var (detail, _) = await BuiltDialog();
         var before = detail.DiffPane.Source;
 
-        detail.RefreshStats();
+        detail.RunQueuedStatsRefresh();
 
         Assert.Same(before, detail.DiffPane.Source);
     }
