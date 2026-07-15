@@ -46,10 +46,21 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 
     public IReadOnlyList<FileChange> Files { get; private set; } = [];
     public IReadOnlyList<PrThread> Threads { get; private set; } = [];
-    public FileDiff? CurrentDiff { get; private set; }
+
+    /// <summary>
+    /// The displayed diff and the file it came from, held as one object so the pair is published by
+    /// a single (atomic) reference write. Two overlapping selects resuming on threadpool threads
+    /// could otherwise interleave between two separate field writes and leave one file's diff under
+    /// another file's path. Which select lands last is not defined here — only that the two agree.
+    /// </summary>
+    private sealed record DiffState(FileDiff Diff, string Path);
+
+    private DiffState? _current;
+
+    public FileDiff? CurrentDiff => _current?.Diff;
 
     /// <summary>The file path <see cref="CurrentDiff"/> belongs to; null when there is no diff.</summary>
-    public string? CurrentDiffPath { get; private set; }
+    public string? CurrentDiffPath => _current?.Path;
 
     public event Action? Changed;
 
@@ -359,10 +370,8 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     {
         var file = SelectedFile;
         var diff = file is null ? null : await ComputeDiffForFileAsync(file, ct).ConfigureAwait(false);
-        // Assigned together with no await between: the view pairs the path with the diff to render
-        // the header, so a drift would show one file's path against another file's stats.
-        CurrentDiff = diff;
-        CurrentDiffPath = diff is null ? null : file?.Path;
+        // One reference write publishes both halves: a reader sees this whole pair or none of it.
+        _current = diff is null || file is null ? null : new DiffState(diff, file.Path);
     }
 
     /// <summary>Computes (or returns the cached) diff for one file. Does not touch <see cref="CurrentDiff"/>.</summary>

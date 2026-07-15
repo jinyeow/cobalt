@@ -445,6 +445,45 @@ public class PrDiffViewModelTests
     }
 
     [Fact]
+    public async Task Concurrent_Selects_Never_Leave_CurrentDiff_And_Path_Describing_Different_Files()
+    {
+        var source = new GatedBlobSource
+        {
+            Changes =
+            [
+                new FileChange("/a.cs", FileChangeKind.Edit),
+                new FileChange("/b.cs", FileChangeKind.Edit),
+                new FileChange("/c.cs", FileChangeKind.Edit),
+            ],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        // Distinct addition counts, so a pair describing two different files is detectable.
+        source.Blobs[("/b.cs", "base")] = "1\n";
+        source.Blobs[("/b.cs", "src")] = "1\nb1\n";
+        source.Blobs[("/c.cs", "base")] = "1\n";
+        source.Blobs[("/c.cs", "src")] = "1\nc1\nc2\nc3\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        source.Release();
+        await vm.LoadAsync(TestContext.Current.CancellationToken); // warms /a.cs only
+        source.Rearm();
+
+        // Two rapid `j` presses: both fetches go in flight, then both continuations resume at once.
+        var toB = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        var toC = vm.SelectFileAsync(2, TestContext.Current.CancellationToken);
+        source.Release();
+        await Task.WhenAll(toB, toC);
+
+        // Which select lands last is deliberately not asserted: last-writer-wins is pre-existing
+        // CurrentDiff behaviour. The contract is only that the two agree with *each other*, so the
+        // view never renders one file's path above another file's stats.
+        Assert.NotNull(vm.CurrentDiff);
+        Assert.Contains(vm.CurrentDiffPath, (string?[])["/b.cs", "/c.cs"]);
+        Assert.Equal(vm.CurrentDiffPath == "/b.cs" ? 1 : 3, vm.CurrentDiff!.Additions);
+    }
+
+    [Fact]
     public async Task CurrentDiffPath_Is_Null_When_There_Is_No_Diff()
     {
         var source = new FakeDiffSource { Iteration = null };
