@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed
+- **Comments, thread replies and mark-viewed could act on the wrong file.** Moving to a file whose
+  diff is still loading left the cursor on the new file while the previous one was still on screen.
+  Anything done in that window — adding a line comment, opening and replying to a thread, marking
+  viewed, jumping with `]t`/`[t` — used the file under the cursor rather than the file being looked
+  at, so a comment could land on a different file than the one it was written about. Everything that
+  acts on the diff now keys off the diff on screen.
+- **A failed review-thread load could look like a PR with no comments.** If fetching the review
+  threads failed while the diff itself loaded, the error was replaced by the normal file header as
+  soon as you moved to another file, and the title read `0 unresolved` — indistinguishable from a
+  clean PR, on a PR that had comments. The threads are only fetched once per diff session, so this
+  persisted silently for the whole review. The title now reads `comments unavailable` for the rest
+  of the session.
+
 ### Performance
 - **Faster PR opens.** Opening a pull request costs about three network round-trips instead of
   five: the two file blobs are fetched concurrently rather than one after the other, and the

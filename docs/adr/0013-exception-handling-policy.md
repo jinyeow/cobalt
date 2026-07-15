@@ -69,6 +69,21 @@ alternate-screen/raw state that Terminal.Gui puts it in.
   caller's own token is a genuine user/dialog cancel (rethrown, silent); any other is a
   timeout, surfaced in the message bar as an expected error instead of a blank pane.
 
+- **A transient `Error` cannot carry a lasting degradation.** `Error` is cleared by the
+  next operation, so it only describes a failure the user is about to see. When a failed
+  fetch leaves a *capability* missing for the rest of a screen's life, that outlives the
+  message and needs its own state. The diff review's review-thread fetch is the case in
+  hand: it runs once per dialog, so if it fails there are no comment markers until the
+  dialog is reopened, and the next file selection publishes a diff that overwrites the
+  error header — leaving a clean-looking diff and a `0 unresolved` title on a pull request
+  that *does* carry review comments, with nothing left on screen to say otherwise. A
+  reviewer could approve blind. `PrDiffViewModel.ThreadsUnavailable` records the
+  degradation for the session and the title reads `comments unavailable` instead of a
+  count, because **"no comments" and "comments unknown" are different facts and a count
+  cannot express the second**. The general rule: if a failure removes a capability for
+  longer than the message bar's lifetime, model the capability's absence — do not rely on
+  `Error` to keep saying it.
+
 - **Formatting is a pure, injectable unit.** `CrashLog.Write(path, exception,
   timestamp)`/`CrashLog.Format(exception, timestamp)` take the timestamp as a
   parameter (never `DateTime.Now` internally), and the boundary itself
