@@ -37,9 +37,11 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     private readonly HashSet<string> _viewed = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// How many files the background prefetch warms at once. Four keeps a large PR warming in
-    /// parallel without risking 429s; the Polly retry is Retry-After aware but a burst is still
-    /// rude. Deliberately not configurable.
+    /// How many <em>files</em> the background prefetch warms at once. Each file fetches its base
+    /// and source blobs concurrently, so this is 4 files = up to 8 concurrent blob requests, plus
+    /// up to 2 more from user navigation. That ceiling is well inside what the org tolerates, and
+    /// the Polly retry is Retry-After aware if a burst ever does draw a 429.
+    /// Deliberately not configurable.
     /// </summary>
     private const int PrefetchWorkers = 4;
 
@@ -368,13 +370,17 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 
     public async Task AddCommentAtLineAsync(int diffLineIndex, string text, CancellationToken ct)
     {
-        if (CurrentDiff is null || SelectedFile is null ||
-            diffLineIndex < 0 || diffLineIndex >= CurrentDiff.Lines.Count)
+        // Read the displayed state once, and take both the line and the file it posts to from that
+        // one DiffState. SelectedFile is NOT the file on screen: it moves the instant the reviewer
+        // navigates, while the new diff is still being fetched — anchoring to it would post this
+        // line number against a different file.
+        var current = _current;
+        if (current is null || diffLineIndex < 0 || diffLineIndex >= current.Diff.Lines.Count)
         {
             return;
         }
 
-        var line = CurrentDiff.Lines[diffLineIndex];
+        var line = current.Diff.Lines[diffLineIndex];
         // Comment on the right (new) side for context/added lines, left for deletions.
         var rightSide = line.Kind != DiffLineKind.Removed;
         var lineNumber = rightSide ? line.NewLineNumber : line.OldLineNumber;
@@ -389,7 +395,7 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         try
         {
             await source.AddLineCommentAsync(
-                pr.ProjectName, pr.RepositoryId, pr.PullRequestId, SelectedFile.Path, lineNumber.Value, rightSide, text, ct)
+                pr.ProjectName, pr.RepositoryId, pr.PullRequestId, current.Path, lineNumber.Value, rightSide, text, ct)
                 .ConfigureAwait(false);
             Threads = await source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
         }

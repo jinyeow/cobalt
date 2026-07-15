@@ -71,6 +71,7 @@ public class PrDiffViewModelTests
         public PrIteration? Iteration { get; set; } = new(2, "src", "tgt", "base");
         public IReadOnlyList<FileChange> Changes { get; set; } = [];
         public Dictionary<(string path, string commit), string> Blobs { get; } = new();
+        public (string path, int line, bool right, string text)? LastComment { get; private set; }
 
         /// <summary>How many blob fetches have been issued (not necessarily completed).</summary>
         public int BlobCalls => Volatile.Read(ref _blobCalls);
@@ -91,8 +92,11 @@ public class PrDiffViewModelTests
         public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<PrThread>>([]);
 
-        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
-            Task.CompletedTask;
+        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct)
+        {
+            LastComment = (path, line, right, text);
+            return Task.CompletedTask;
+        }
         public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
             Task.CompletedTask;
         public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
@@ -842,6 +846,43 @@ public class PrDiffViewModelTests
         Assert.Equal("/a.cs", source.LastComment!.Value.path);
         Assert.True(source.LastComment.Value.right);
         Assert.Equal(2, source.LastComment.Value.line); // new line number
+    }
+
+    [Fact]
+    public async Task Comment_Anchors_To_The_Displayed_Diffs_File_Not_The_Pending_Selection()
+    {
+        var source = new GatedBlobSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        source.Blobs[("/b.cs", "base")] = "1\n";
+        source.Blobs[("/b.cs", "src")] = "1\n2\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        source.Release();
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("/a.cs", vm.CurrentDiffPath);
+        source.Rearm(); // /b.cs will be slow to arrive
+
+        // The reviewer starts navigating to /b.cs: SelectedFile moves immediately, but /a.cs is
+        // still the diff on screen and still the diff their cursor is sitting in.
+        var select = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        Assert.Equal("/b.cs", vm.SelectedFile?.Path);
+        Assert.Equal("/a.cs", vm.CurrentDiffPath);
+
+        var addedIndex = vm.CurrentDiff!.Lines.ToList().FindIndex(l => l.Kind == DiffLineKind.Added);
+        await vm.AddCommentAtLineAsync(addedIndex, "nice", TestContext.Current.CancellationToken);
+
+        // The line number came from /a.cs's diff, so the comment must post to /a.cs. Posting it to
+        // the pending selection writes a colleague's PR at another file's line number.
+        Assert.Equal("/a.cs", source.LastComment?.path);
+        Assert.Equal(2, source.LastComment?.line);
+        Assert.True(source.LastComment?.right);
+
+        source.Release();
+        await select;
     }
 
     [Fact]
