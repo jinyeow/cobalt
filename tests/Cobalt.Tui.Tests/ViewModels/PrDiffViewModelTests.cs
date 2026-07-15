@@ -71,6 +71,7 @@ public class PrDiffViewModelTests
         public PrIteration? Iteration { get; set; } = new(2, "src", "tgt", "base");
         public IReadOnlyList<FileChange> Changes { get; set; } = [];
         public Dictionary<(string path, string commit), string> Blobs { get; } = new();
+        public IReadOnlyList<PrThread> Threads { get; set; } = [];
         public (string path, int line, bool right, string text)? LastComment { get; private set; }
 
         /// <summary>How many blob fetches have been issued (not necessarily completed).</summary>
@@ -90,7 +91,7 @@ public class PrDiffViewModelTests
         }
 
         public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<PrThread>>([]);
+            Task.FromResult(Threads);
 
         public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct)
         {
@@ -846,6 +847,49 @@ public class PrDiffViewModelTests
         Assert.Equal("/a.cs", source.LastComment!.Value.path);
         Assert.True(source.LastComment.Value.right);
         Assert.Equal(2, source.LastComment.Value.line); // new line number
+    }
+
+    [Fact]
+    public async Task Thread_Lookup_Anchors_To_The_Displayed_Diffs_File_Not_The_Pending_Selection()
+    {
+        var source = new GatedBlobSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+            Threads =
+            [
+                new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "on a", false)], "/a.cs", 2, null),
+                new PrThread(2, PrThreadStatus.Active, [new PrComment(1, "Sam", "on b", false)], "/b.cs", 2, null),
+            ],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        source.Blobs[("/b.cs", "base")] = "1\n";
+        source.Blobs[("/b.cs", "src")] = "1\n2\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        source.Release();
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("/a.cs", vm.CurrentDiffPath);
+        source.Rearm(); // /b.cs will be slow to arrive
+
+        // The reviewer starts navigating to /b.cs, but /a.cs is still the diff on screen and still
+        // the diff their cursor is in.
+        var select = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        Assert.Equal("/b.cs", vm.SelectedFile?.Path);
+        Assert.Equal("/a.cs", vm.CurrentDiffPath);
+
+        var addedLine = vm.CurrentDiff!.Lines.First(l => l.Kind == DiffLineKind.Added);
+        var found = vm.ThreadsForDiffLine(addedLine);
+
+        // These threads open the thread overlay, whose reply/resolve/reactivate mutate them: a
+        // lookup anchored to the pending selection would let the reviewer reply to a comment on a
+        // file they are not looking at.
+        var thread = Assert.Single(found);
+        Assert.Equal(1, thread.Id);
+        Assert.Equal("/a.cs", thread.FilePath);
+
+        source.Release();
+        await select;
     }
 
     [Fact]

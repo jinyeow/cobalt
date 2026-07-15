@@ -319,18 +319,25 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         Changed?.Invoke();
     }
 
-    /// <summary>Threads anchored to a diff line: right side for added/context, left side for removed.</summary>
+    /// <summary>
+    /// Threads anchored to a diff line: right side for added/context, left side for removed.
+    /// Anchored to the displayed diff rather than <see cref="SelectedFile"/>, which moves the
+    /// instant the reviewer navigates while this line still belongs to the diff on screen. These
+    /// threads open the thread overlay, whose reply/resolve/reactivate mutate them, so anchoring
+    /// to a pending selection would land a reply on a thread in a file nobody is looking at.
+    /// </summary>
     public IReadOnlyList<PrThread> ThreadsForDiffLine(DiffLine line)
     {
-        var path = SelectedFile?.Path;
-        if (path is null)
+        // Read once: the line and the file it is matched against must come from one DiffState.
+        var current = _current;
+        if (current is null)
         {
             return [];
         }
         return
         [
             .. Threads.Where(t =>
-                string.Equals(t.FilePath, path, StringComparison.Ordinal) &&
+                string.Equals(t.FilePath, current.Path, StringComparison.Ordinal) &&
                 (line.Kind == DiffLineKind.Removed
                     ? line.OldLineNumber is { } l && t.LeftLine == l
                     : line.NewLineNumber is { } r && t.RightLine == r)),
