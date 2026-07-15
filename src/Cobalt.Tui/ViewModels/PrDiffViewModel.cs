@@ -254,21 +254,7 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
             //  - a diff failure must still leave Threads populated: LoadAsync runs once per dialog,
             //    so dropping them here costs the whole session its comment markers.
             // Awaiting does not serialise the two: both requests are already in flight.
-            try
-            {
-                Threads = await threadsTask.ConfigureAwait(false);
-            }
-            catch (Exception ex) when (
-                AdoExceptions.IsExpected(ex) || (ex is OperationCanceledException oce && AdoExceptions.IsTimeout(oce, ct)))
-            {
-                // A threads failure is a persistent degraded state, not a transient error. Error is
-                // cleared by the next operation, but LoadAsync runs once per dialog, so Threads
-                // stays empty for the session: every later paint would otherwise be
-                // indistinguishable from "this file has no comments". A genuine user cancel is
-                // deliberately not caught — the dialog is closing, not degraded.
-                ThreadsUnavailable = true;
-                throw; // the outer filters own the Error message
-            }
+            await HarvestThreadsAsync(threadsTask, ct).ConfigureAwait(false);
 
             if (file is not null && diffTask is not null)
             {
@@ -295,6 +281,37 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
             ObserveFault(diffTask);
             IsLoading = false;
             Changed?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Harvests a review-threads fetch and records whether the threads are available, then rethrows
+    /// a failure for the caller's filters to turn into <see cref="Error"/>.
+    ///
+    /// <para>The state tracks the <em>most recent</em> fetch, not the first (ADR 0013). Success
+    /// clears it, so an outage that has passed stops warning — a stale warning while markers are on
+    /// screen is a false alarm, and one that cries wolf trains the reviewer to ignore the one that
+    /// matters. Failure sets it, so a refresh that fails after a clean load still degrades: an empty
+    /// <see cref="Threads"/> would otherwise read as "no comments" on a PR that has them.</para>
+    ///
+    /// <para>Every thread fetch goes through here so none can forget the flag, and it takes the
+    /// fetch already in flight rather than starting one, so <see cref="LoadAsync"/> keeps overlapping
+    /// it with the blobs. A genuine user cancel is deliberately not caught — the dialog is closing,
+    /// not degraded — and a caller whose mutation fails before calling this leaves the state alone,
+    /// because a rejected post says nothing about the threads.</para>
+    /// </summary>
+    private async Task HarvestThreadsAsync(Task<IReadOnlyList<PrThread>> fetch, CancellationToken ct)
+    {
+        try
+        {
+            Threads = await fetch.ConfigureAwait(false);
+            ThreadsUnavailable = false;
+        }
+        catch (Exception ex) when (
+            AdoExceptions.IsExpected(ex) || (ex is OperationCanceledException oce && AdoExceptions.IsTimeout(oce, ct)))
+        {
+            ThreadsUnavailable = true;
+            throw; // the caller's filters own the Error message
         }
     }
 
@@ -404,7 +421,11 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
             await source.AddLineCommentAsync(
                 pr.ProjectName, pr.RepositoryId, pr.PullRequestId, current.Path, lineNumber.Value, rightSide, text, ct)
                 .ConfigureAwait(false);
-            Threads = await source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
+            // Separate awaits, so a failure is attributed to the right thing: the post throwing
+            // skips the harvest entirely and leaves the threads state untouched, while only the
+            // harvest can mark the threads unavailable.
+            await HarvestThreadsAsync(
+                source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct), ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {
@@ -469,7 +490,10 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         try
         {
             await mutate().ConfigureAwait(false);
-            Threads = await source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
+            // Separate awaits: a mutation that fails never reaches the harvest, so it cannot mark
+            // the threads unavailable or retract a degradation the load established.
+            await HarvestThreadsAsync(
+                source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct), ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {

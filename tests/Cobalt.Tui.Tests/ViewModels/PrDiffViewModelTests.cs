@@ -30,11 +30,23 @@ public class PrDiffViewModelTests
         public Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct) =>
             Task.FromResult(Blobs.GetValueOrDefault((path, commit), ""));
 
+        /// <summary>When set, every threads fetch fails with it — an ADO outage, on load or refresh.</summary>
+        public Exception? ThreadsError { get; set; }
+
+        /// <summary>When set, the mutation itself fails with it, before any threads refresh runs.</summary>
+        public Exception? MutationError { get; set; }
+
         public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
-            Task.FromResult(Threads);
+            ThreadsError is { } ex
+                ? Task.FromException<IReadOnlyList<PrThread>>(ex)
+                : Task.FromResult(Threads);
 
         public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct)
         {
+            if (MutationError is { } ex)
+            {
+                return Task.FromException(ex);
+            }
             LastProject = project;
             LastComment = (path, line, right, text);
             return Task.CompletedTask;
@@ -42,6 +54,10 @@ public class PrDiffViewModelTests
 
         public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct)
         {
+            if (MutationError is { } ex)
+            {
+                return Task.FromException(ex);
+            }
             LastReply = (project, repo, prId, threadId, text);
             return Task.CompletedTask;
         }
@@ -581,6 +597,100 @@ public class PrDiffViewModelTests
         // "No threads" and "threads unknown" are different facts; conflating them is the bug.
         Assert.Empty(vm.Threads);
         Assert.False(vm.ThreadsUnavailable);
+    }
+
+    /// <summary>A loaded PR with one file on screen, ready to comment on.</summary>
+    private static async Task<PrDiffViewModel> LoadedForComment(FakeDiffSource source)
+    {
+        source.Changes = [new FileChange("/a.cs", FileChangeKind.Edit)];
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        return vm;
+    }
+
+    [Fact]
+    public async Task A_Failed_Threads_Refresh_After_A_Comment_Marks_Threads_Unavailable()
+    {
+        // The load direction is not the only one. A PR that genuinely has no comments loads clean,
+        // the reviewer posts a line comment, the post succeeds and only the refresh fails: Threads
+        // is empty and stale, so the title would say "0 unresolved" while a comment the reviewer
+        // just wrote exists server-side. Same approve-blind failure, reached by mutation.
+        var source = new FakeDiffSource { Threads = [] };
+        var vm = await LoadedForComment(source);
+        Assert.False(vm.ThreadsUnavailable);
+        var addedIndex = vm.CurrentDiff!.Lines.ToList().FindIndex(l => l.Kind == DiffLineKind.Added);
+
+        source.ThreadsError = new HttpRequestException("threads down");
+        await vm.AddCommentAtLineAsync(addedIndex, "nice", TestContext.Current.CancellationToken);
+
+        Assert.NotNull(source.LastComment); // the comment really was posted
+        Assert.True(vm.ThreadsUnavailable);
+        Assert.NotNull(vm.Error);
+    }
+
+    [Fact]
+    public async Task A_Successful_Threads_Refresh_Clears_Threads_Unavailable()
+    {
+        // Persistent is not permanent. If the load lost the threads but a later refresh gets them,
+        // the markers are back on screen — leaving the indicator up would be a false alarm, and a
+        // warning that cries wolf trains the reviewer to ignore the one that matters.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads = [new PrThread(7, PrThreadStatus.Active, [], "/a.cs", 2, null)],
+            ThreadsError = new HttpRequestException("threads down"),
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.True(vm.ThreadsUnavailable);
+
+        source.ThreadsError = null; // the outage passes
+        await vm.ReplyToThreadAsync(7, "thanks", TestContext.Current.CancellationToken);
+
+        Assert.False(vm.ThreadsUnavailable);
+        Assert.Single(vm.Threads);
+    }
+
+    [Fact]
+    public async Task A_Failed_Comment_Post_Does_Not_Mark_Threads_Unavailable()
+    {
+        // The mutation failing is not a threads problem: the refresh never ran, so nothing was
+        // learned about the threads. Reporting the comments as unknown here would be a false alarm.
+        var source = new FakeDiffSource { Threads = [] };
+        var vm = await LoadedForComment(source);
+        var addedIndex = vm.CurrentDiff!.Lines.ToList().FindIndex(l => l.Kind == DiffLineKind.Added);
+
+        source.MutationError = new HttpRequestException("comment rejected");
+        await vm.AddCommentAtLineAsync(addedIndex, "nice", TestContext.Current.CancellationToken);
+
+        Assert.False(vm.ThreadsUnavailable);
+        Assert.NotNull(vm.Error); // the rejection still surfaces, as a transient error
+    }
+
+    [Fact]
+    public async Task A_Failed_Mutation_Does_Not_Clear_An_Existing_Threads_Unavailable()
+    {
+        // The mirror: a mutation that fails before its refresh has learned nothing either way, so
+        // it must not quietly retract a degradation the load established.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            ThreadsError = new HttpRequestException("threads down"),
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.True(vm.ThreadsUnavailable);
+
+        source.MutationError = new HttpRequestException("reply rejected");
+        await vm.ReplyToThreadAsync(7, "thanks", TestContext.Current.CancellationToken);
+
+        Assert.True(vm.ThreadsUnavailable);
     }
 
     [Fact]
