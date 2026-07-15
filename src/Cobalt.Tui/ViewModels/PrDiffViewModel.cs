@@ -28,6 +28,12 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     // UI thread reads it (StatsFor / TotalAdditions) during render, and user navigation is a
     // second writer — a plain Dictionary would throw mid-enumeration on a multi-file PR.
     private readonly ConcurrentDictionary<string, FileDiff> _diffCache = new(StringComparer.Ordinal);
+
+    // Fetches currently in flight, so the background prefetch and user navigation landing on the
+    // same uncached file share one fetch rather than issuing a duplicate pair of blob requests.
+    // Lazy: GetOrAdd may run its factory more than once under contention, and only the published
+    // Lazy's task must ever be started.
+    private readonly ConcurrentDictionary<string, Lazy<Task<FileDiff>>> _inflight = new(StringComparer.Ordinal);
     private readonly HashSet<string> _viewed = new(StringComparer.Ordinal);
     private PrIteration? _iteration;
     private int _selectedFileIndex;
@@ -362,7 +368,7 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     /// <summary>Computes (or returns the cached) diff for one file. Does not touch <see cref="CurrentDiff"/>.</summary>
     private async Task<FileDiff?> ComputeDiffForFileAsync(FileChange file, CancellationToken ct)
     {
-        if (_iteration is null)
+        if (_iteration is not { } iteration)
         {
             return null;
         }
@@ -371,6 +377,30 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
             return cached;
         }
 
+        // The shared task carries whichever caller started it — its token included. That is safe
+        // because the prefetch and the selection both pass the dialog's token, so no caller can
+        // cancel a fetch another caller is awaiting without cancelling its own too.
+        var inflight = _inflight.GetOrAdd(
+            file.Path,
+            _ => new Lazy<Task<FileDiff>>(() => FetchDiffAsync(file, iteration, ct)));
+        try
+        {
+            var diff = await inflight.Value.ConfigureAwait(false);
+            // Published before the eviction below, so a caller that misses the result cache still
+            // finds the in-flight entry rather than starting a second fetch.
+            _diffCache[file.Path] = diff;
+            return diff;
+        }
+        finally
+        {
+            // Evicted on success and on failure alike: a file whose fetch failed must be
+            // retryable by a later select, never stuck behind a permanently faulted task.
+            _inflight.TryRemove(file.Path, out _);
+        }
+    }
+
+    private async Task<FileDiff> FetchDiffAsync(FileChange file, PrIteration iteration, CancellationToken ct)
+    {
         // Added files have no base version; deleted files have no source version.
         // Renamed/moved files have their base blob at the old path.
         // The two blobs are independent, so both requests are started before either is awaited:
@@ -378,17 +408,15 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         var basePath = file.OriginalPath ?? file.Path;
         var baseTask = file.ChangeType == FileChangeKind.Add
             ? Task.FromResult("")
-            : source.GetFileContentAsync(pr.ProjectName, pr.RepositoryId, basePath, _iteration.BaseCommitId ?? "", ct);
+            : source.GetFileContentAsync(pr.ProjectName, pr.RepositoryId, basePath, iteration.BaseCommitId ?? "", ct);
         var sourceTask = file.ChangeType == FileChangeKind.Delete
             ? Task.FromResult("")
-            : source.GetFileContentAsync(pr.ProjectName, pr.RepositoryId, file.Path, _iteration.SourceCommitId ?? "", ct);
+            : source.GetFileContentAsync(pr.ProjectName, pr.RepositoryId, file.Path, iteration.SourceCommitId ?? "", ct);
 
         // WhenAll (rather than two sequential awaits) so a failure of the first blob still observes
         // the second's exception; it rethrows the first fault, keeping the ADR 0013 filters intact.
         var texts = await Task.WhenAll(baseTask, sourceTask).ConfigureAwait(false);
 
-        var diff = DiffService.Unified(texts[0], texts[1]);
-        _diffCache[file.Path] = diff;
-        return diff;
+        return DiffService.Unified(texts[0], texts[1]);
     }
 }

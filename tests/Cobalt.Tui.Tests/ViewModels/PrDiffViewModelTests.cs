@@ -65,12 +65,15 @@ public class PrDiffViewModelTests
     /// </summary>
     private sealed class GatedBlobSource : IPrDiffSource
     {
-        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly SemaphoreSlim _issued = new(0);
+        private TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _blobCalls;
 
         public PrIteration? Iteration { get; set; } = new(2, "src", "tgt", "base");
         public IReadOnlyList<FileChange> Changes { get; set; } = [];
         public Dictionary<(string path, string commit), string> Blobs { get; } = new();
+
+        /// <summary>How many blob fetches have been issued (not necessarily completed).</summary>
+        public int BlobCalls => Volatile.Read(ref _blobCalls);
 
         public Task<PrIteration?> GetLatestIterationAsync(string project, string repo, int prId, CancellationToken ct) =>
             Task.FromResult(Iteration);
@@ -80,8 +83,8 @@ public class PrDiffViewModelTests
 
         public async Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct)
         {
-            _issued.Release();
-            await _release.Task.ConfigureAwait(false);
+            Interlocked.Increment(ref _blobCalls);
+            await Volatile.Read(ref _release).Task.ConfigureAwait(false);
             return Blobs.GetValueOrDefault((path, commit), "");
         }
 
@@ -97,25 +100,27 @@ public class PrDiffViewModelTests
         public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
             Task.CompletedTask;
 
-        /// <summary>True once <paramref name="count"/> blob requests have been issued; false on timeout.</summary>
-        public async Task<bool> WaitForBlobRequestsAsync(int count, TimeSpan timeout)
+        /// <summary>True once at least <paramref name="count"/> blob fetches have been issued; false on timeout.</summary>
+        public async Task<bool> WaitForBlobCallsAsync(int count, TimeSpan timeout)
         {
-            using var cts = new CancellationTokenSource(timeout);
-            try
+            var deadline = DateTime.UtcNow + timeout;
+            while (BlobCalls < count)
             {
-                for (var i = 0; i < count; i++)
+                if (DateTime.UtcNow > deadline)
                 {
-                    await _issued.WaitAsync(cts.Token).ConfigureAwait(false);
+                    return false;
                 }
-                return true;
+                await Task.Delay(10).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
-            {
-                return false;
-            }
+            return true;
         }
 
-        public void Release() => _release.TrySetResult();
+        /// <summary>Lets every blocked and subsequent blob fetch complete.</summary>
+        public void Release() => Volatile.Read(ref _release).TrySetResult();
+
+        /// <summary>Blocks blob fetches again, so a later navigation can be caught in flight.</summary>
+        public void Rearm() =>
+            Volatile.Write(ref _release, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
     }
 
     /// <summary>A diff source whose thread fetch blocks until <see cref="ReleaseThreads"/>; blobs resolve immediately.</summary>
@@ -150,6 +155,38 @@ public class PrDiffViewModelTests
 
         public void ReleaseThreads(IReadOnlyList<PrThread> threads) => _threads.TrySetResult(threads);
         public void FailThreads(Exception ex) => _threads.TrySetException(ex);
+    }
+
+    /// <summary>
+    /// Fails /bad.cs's blobs until <see cref="Succeed"/> is set. Unlike <see cref="OneFileFailsSource"/>
+    /// (which fails permanently), this can show that a failed fetch leaves nothing behind that would
+    /// block a later retry.
+    /// </summary>
+    private sealed class FailThenSucceedSource : IPrDiffSource
+    {
+        public bool Succeed { get; set; }
+
+        public Task<PrIteration?> GetLatestIterationAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromResult<PrIteration?>(new(2, "src", "tgt", "base"));
+
+        public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repo, int prId, int iterationId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<FileChange>>([new("/good.cs", FileChangeKind.Edit), new("/bad.cs", FileChangeKind.Edit)]);
+
+        public Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct) =>
+            path.Contains("bad") && !Succeed
+                ? Task.FromException<string>(new HttpRequestException("404"))
+                : Task.FromResult(commit == "base" ? "a\n" : "a\nb\n");
+
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PrThread>>([]);
+        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
+            Task.CompletedTask;
     }
 
     /// <summary>True if <paramref name="task"/> completes within <paramref name="timeout"/>.</summary>
@@ -195,7 +232,7 @@ public class PrDiffViewModelTests
         // The two blobs are independent: awaiting them in sequence leaves the source blob unissued
         // until the base blob lands, costing a whole round-trip on every cache miss.
         Assert.True(
-            await source.WaitForBlobRequestsAsync(2, TimeSpan.FromSeconds(5)),
+            await source.WaitForBlobCallsAsync(2, TimeSpan.FromSeconds(5)),
             "both blob requests must be in flight before either is released");
 
         source.Release();
@@ -214,15 +251,63 @@ public class PrDiffViewModelTests
         source.Blobs[("/new.cs", "src")] = "a\nb\n";
         var vm = new PrDiffViewModel(source, Pr());
 
-        var load = vm.LoadAsync(TestContext.Current.CancellationToken);
-        Assert.True(await source.WaitForBlobRequestsAsync(1, TimeSpan.FromSeconds(5)));
         source.Release();
-        await load;
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         // An added file has no base version: the short-circuit must survive parallelising the pair,
-        // so a second request must never be issued.
-        Assert.False(await source.WaitForBlobRequestsAsync(1, TimeSpan.FromMilliseconds(200)));
+        // so only the source blob is ever requested.
+        Assert.Equal(1, source.BlobCalls);
         Assert.Equal(2, vm.CurrentDiff!.Additions);
+    }
+
+    [Fact]
+    public async Task Concurrent_Selects_Of_The_Same_File_Share_One_Fetch()
+    {
+        var source = new GatedBlobSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/b.cs", "base")] = "1\n";
+        source.Blobs[("/b.cs", "src")] = "1\n2\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        source.Release();
+        await vm.LoadAsync(TestContext.Current.CancellationToken); // warms /a.cs
+        source.Rearm();                                            // /b.cs's blobs now block
+        var before = source.BlobCalls;
+
+        // Prefetch and user navigation routinely land on the same uncached file at once: the
+        // second caller must join the first fetch, not start its own.
+        var first = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        var second = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        Assert.True(await source.WaitForBlobCallsAsync(before + 2, TimeSpan.FromSeconds(5)));
+
+        source.Release();
+        await Task.WhenAll(first, second);
+
+        // One shared fetch = one base + one source blob, not a pair per caller.
+        Assert.Equal(2, source.BlobCalls - before);
+        Assert.Equal("/b.cs", vm.CurrentDiffPath);
+        Assert.Equal(1, vm.CurrentDiff!.Additions);
+    }
+
+    [Fact]
+    public async Task A_File_Whose_Fetch_Failed_Is_Retried_On_A_Later_Select()
+    {
+        var source = new FailThenSucceedSource();
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // The prefetch swallows /bad.cs's failure...
+        await vm.PrefetchAllDiffsAsync(TestContext.Current.CancellationToken);
+        Assert.Null(vm.StatsFor("/bad.cs"));
+
+        // ...and must not leave a stuck in-flight entry behind: selecting it re-issues the fetch.
+        source.Succeed = true;
+        await vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+
+        Assert.Equal("/bad.cs", vm.CurrentDiffPath);
+        Assert.NotNull(vm.StatsFor("/bad.cs"));
     }
 
     [Fact]
