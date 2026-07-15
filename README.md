@@ -9,7 +9,7 @@ requests, diff review with line comments). The agreed specification lives in
 and design decisions in [docs/adr/](docs/adr/).
 
 Built with a UI-free `Cobalt.Core` and a view-model layer that never references
-Terminal.Gui, so the interesting logic is unit-tested (386 tests). See
+Terminal.Gui, so the interesting logic is unit-tested (808 tests). See
 [docs/adr/0004](docs/adr/0004-terminal-gui-v2-with-viewmodels.md) and
 [0007](docs/adr/0007-vim-input-as-testable-data.md).
 
@@ -259,3 +259,21 @@ dotnet clean Cobalt.slnx -c Release
 dotnet build Cobalt.slnx -c Release -p:ContinuousIntegrationBuild=true --no-incremental  # 0 warnings
 dotnet test Cobalt.slnx
 ```
+
+### Checks the test suite can't make (UAT)
+
+The suite never reaches a real Azure DevOps org, so it verifies the org-wide routes only
+"by shape" and can say nothing about latency. `tools/uat` is a read-only console harness
+that probes the live routes — org-wide lists, cross-project drill-in, the Team tab, the
+diff-review load path, and whether ADO gzips authenticated responses — and prints results
+for a human to read:
+
+```sh
+dotnet run --project tools/uat -- --context <name>
+```
+
+It needs the same `config.toml` + `az login` as cobalt, and is deliberately outside
+`Cobalt.slnx` — **CI never builds it**, so a compile error there stays hidden until you run
+it. Every call is a GET; nothing votes, comments, or mutates. Latency is noisy, so run it a
+few times rather than trusting one sample. What each probe covers, and why, is in
+[tools/uat/README.md](tools/uat/README.md).
