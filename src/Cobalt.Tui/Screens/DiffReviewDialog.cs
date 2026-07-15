@@ -44,6 +44,7 @@ public sealed class DiffReviewDialog(
     private int _lastDialogWidth = -1;
     private int _diffContentWidth = 1;
     private readonly DiffStyleCache _styleCache = new();
+    private readonly CoalescingGate _statsRefresh = new();
 
     /// <summary>Stands in for the commented-line sets when there is no file to look them up for.</summary>
     private static readonly IReadOnlySet<int> NoLines = new HashSet<int>();
@@ -250,14 +251,25 @@ public sealed class DiffReviewDialog(
     });
 
     // Background stats prefetch: only the title totals and file-row stats changed, so refresh the
-    // chrome and skip the diff-pane rebuild — the displayed file's diff is unchanged.
-    private void OnStatsChanged() => app.Invoke(() =>
+    // chrome and skip the diff-pane rebuild — the displayed file's diff is unchanged. The prefetch
+    // raises this once per file and each refresh rebuilds the whole file tree, so a burst collapses
+    // into one queued refresh rather than one per file competing with the reviewer's keys.
+    private void OnStatsChanged()
     {
-        if (!_closed)
+        if (!_statsRefresh.TryQueue())
         {
-            Render(includeDiffPane: false);
+            return; // a refresh is already queued; it will pick this file's stats up too
         }
-    });
+        app.Invoke(() =>
+        {
+            // Reopened before rendering, so stats arriving during the render queue a fresh refresh.
+            _statsRefresh.Release();
+            if (!_closed)
+            {
+                Render(includeDiffPane: false);
+            }
+        });
+    }
 
     private void OnViewportChanged(object? sender, Terminal.Gui.ViewBase.DrawEventArgs e)
     {
@@ -1200,4 +1212,22 @@ internal sealed record DiffRow(int? LineIndex, int? LeftIndex, int? RightIndex, 
 {
     /// <summary>The unified diff-line this row anchors to (new/right side preferred); null for a fold marker.</summary>
     public int? Anchor => LineIndex ?? RightIndex ?? LeftIndex;
+}
+
+/// <summary>
+/// Collapses a burst of events into a single queued refresh: the first caller to
+/// <see cref="TryQueue"/> owns the refresh, every caller after it is told one is already coming.
+/// <see cref="Release"/> reopens the gate and must run *before* the refresh does its work, so an
+/// event raised while it runs still queues a later one rather than being swallowed. Interlocked
+/// because the raising thread and the releasing (UI) thread are not the same.
+/// </summary>
+internal sealed class CoalescingGate
+{
+    private int _queued;
+
+    /// <summary>True if the caller should queue the refresh; false if one is already queued.</summary>
+    public bool TryQueue() => Interlocked.CompareExchange(ref _queued, 1, 0) == 0;
+
+    /// <summary>Reopens the gate; call at the start of the queued refresh, not the end.</summary>
+    public void Release() => Interlocked.Exchange(ref _queued, 0);
 }
