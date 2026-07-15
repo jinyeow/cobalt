@@ -38,6 +38,13 @@ public static class CobaltTuiApp
             [.. config.Contexts.Keys.Order(StringComparer.Ordinal)], context.Name, context.PrScope, config.Theme);
 
         using var connection = AdoConnection.Create(context, tokens);
+
+        // Open the connection while the UI builds, so the first real call skips the ~700ms cold
+        // DNS + TCP + TLS. Dropped on the floor deliberately rather than routed through
+        // FireAndForget: WarmUpAsync is silent by contract, and FireAndForget would report a
+        // warm-up fault to the message bar and the crash log — the two things it must never do.
+        _ = connection.Http.WarmUpAsync();
+
         var workItems = new WorkItemStoreAdapter(new WorkItemsApi(connection.Http, context), context.PrScope);
 
         // Resolve the signed-in user once and share it: the status bar and the PR
