@@ -29,8 +29,6 @@ public class DiffListDataSourceTests
         RemovedGutterForeground: new Color("#101112"),
         SearchHitBackground: new Color("#131415"));
 
-    private static DiffListDataSource Source() => new([], () => Custom);
-
     private static readonly Attribute Normal =
         new(new Color("#aaaaaa"), new Color("#222222"));
 
@@ -41,7 +39,7 @@ public class DiffListDataSourceTests
     {
         var style = new RunStyle(TokenKind.Plain, DiffLineKind.Added, Emphasis: false, IsGutter: true);
 
-        var attr = Source().Map(style, Normal, RoleForeground);
+        var attr = DiffListDataSource.Map(style, Normal, RoleForeground, Custom);
 
         Assert.Equal(Custom.AddedGutterForeground, attr.Foreground);
         Assert.Equal(Custom.AddedBackground, attr.Background);
@@ -52,7 +50,7 @@ public class DiffListDataSourceTests
     {
         var style = new RunStyle(TokenKind.Identifier, DiffLineKind.Removed, Emphasis: true, IsGutter: false);
 
-        var attr = Source().Map(style, Normal, RoleForeground);
+        var attr = DiffListDataSource.Map(style, Normal, RoleForeground, Custom);
 
         Assert.Equal(RoleForeground, attr.Foreground);
         Assert.Equal(Custom.RemovedEmphasisBackground, attr.Background);
@@ -66,7 +64,7 @@ public class DiffListDataSourceTests
             SearchHit = true,
         };
 
-        var attr = Source().Map(style, Normal, RoleForeground);
+        var attr = DiffListDataSource.Map(style, Normal, RoleForeground, Custom);
 
         Assert.Equal(Custom.SearchHitBackground, attr.Background);
     }
@@ -76,24 +74,25 @@ public class DiffListDataSourceTests
     {
         var style = new RunStyle(TokenKind.Plain, DiffLineKind.Context, Emphasis: false, IsGutter: false);
 
-        var attr = Source().Map(style, Normal, RoleForeground);
+        var attr = DiffListDataSource.Map(style, Normal, RoleForeground, Custom);
 
         Assert.Equal(Normal.Background, attr.Background);
     }
 
     [Fact]
-    public void Defaults_To_The_Ambient_Current_Palette()
+    public void Defaults_To_The_Ambient_Current_Palette_Read_Fresh()
     {
+        // The production path constructs the source with no palette override, so this default is
+        // what paints the diff — and it must be read fresh on every use, not captured, or a live
+        // :theme switch would leave the pane on the palette it was built under (ADR 0019).
         ThemeService.Enable();
-        ThemeService.Apply(ThemeResolver.Resolve(Cobalt.Core.Config.ThemeChoice.Dark, OsTheme.Unknown));
         var ambient = new DiffListDataSource([]);
-        var style = new RunStyle(TokenKind.Plain, DiffLineKind.Added, Emphasis: false, IsGutter: true);
 
-        var attr = ambient.Map(style, Normal, RoleForeground);
+        ThemeService.Apply(ThemeResolver.Resolve(Cobalt.Core.Config.ThemeChoice.Dark, OsTheme.Unknown));
+        Assert.Equal(DiffPalette.Dark, ambient.Palette);
 
-        // With no injected Func, the source reads ThemeService.CurrentPalette (dark here).
-        Assert.Equal(DiffPalette.Dark.AddedGutterForeground, attr.Foreground);
-        Assert.Equal(DiffPalette.Dark.AddedBackground, attr.Background);
+        ThemeService.Apply(ThemeResolver.Resolve(Cobalt.Core.Config.ThemeChoice.Light, OsTheme.Unknown));
+        Assert.Equal(DiffPalette.Light, ambient.Palette);
     }
 
     [Fact]
@@ -113,9 +112,9 @@ public class DiffListDataSourceTests
 
         ThemeService.Enable();
         ThemeService.Apply(ThemeResolver.Resolve(Cobalt.Core.Config.ThemeChoice.Dark, OsTheme.Unknown));
-        var dark = new DiffListDataSource([cached]).Map(gutter, Normal, RoleForeground);
+        var dark = DiffListDataSource.Map(gutter, Normal, RoleForeground, ThemeService.CurrentPalette);
         ThemeService.Apply(ThemeResolver.Resolve(Cobalt.Core.Config.ThemeChoice.Light, OsTheme.Unknown));
-        var light = new DiffListDataSource([cached]).Map(gutter, Normal, RoleForeground);
+        var light = DiffListDataSource.Map(gutter, Normal, RoleForeground, ThemeService.CurrentPalette);
 
         Assert.Same(cached, cache.Unified(0)); // the same cached line drew both
         Assert.Equal(DiffPalette.Dark.AddedBackground, dark.Background);

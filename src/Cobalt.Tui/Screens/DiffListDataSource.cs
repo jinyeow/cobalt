@@ -36,6 +36,12 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
     /// <summary>Test seam: the composed lines this source draws, by row.</summary>
     internal IReadOnlyList<StyledLine> Lines => _lines;
 
+    /// <summary>
+    /// Test seam: the diff palette this source paints with, read fresh — the production path
+    /// constructs it without an override, so this is what makes <c>:theme</c> live (ADR 0019).
+    /// </summary>
+    internal DiffPalette Palette => _palette();
+
     public int MaxItemLength { get; } = lines.Count == 0 ? 0 : lines.Max(l => l.DisplayText.Length);
 
     public bool SuspendCollectionChangedEvent { get; set; }
@@ -132,30 +138,28 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
     }
 
     /// <summary>
-    /// Maps a <see cref="RunStyle"/> to its <see cref="Attribute"/> using the active
-    /// <see cref="DiffPalette"/>. The theme-role parts are supplied by the caller:
-    /// <paramref name="normal"/> is <see cref="VisualRole.Normal"/> (context foreground/background)
-    /// and <paramref name="roleForeground"/> is the token's Code* foreground — so this stays a
-    /// pure, headless-testable palette mapping. <paramref name="palette"/> defaults to
-    /// <see cref="_palette"/> (read fresh); <see cref="Render"/> reads it once per row and passes
-    /// it through so live <c>:theme</c> switching keeps working without re-reading it per run.
+    /// Maps a <see cref="RunStyle"/> to its <see cref="Attribute"/> using <paramref name="palette"/>.
+    /// The theme-role parts are supplied by the caller: <paramref name="normal"/> is
+    /// <see cref="VisualRole.Normal"/> (context foreground/background) and
+    /// <paramref name="roleForeground"/> is the token's Code* foreground — so this stays a pure
+    /// palette mapping. <see cref="Render"/> reads the palette once per row and passes it through,
+    /// so live <c>:theme</c> switching works without re-reading it per run.
     /// </summary>
-    internal Attribute Map(RunStyle style, Attribute normal, Color roleForeground, DiffPalette? palette = null)
+    internal static Attribute Map(RunStyle style, Attribute normal, Color roleForeground, DiffPalette palette)
     {
-        var p = palette ?? _palette();
         var foreground = style.IsGutter
             ? style.LineKind switch
             {
-                DiffLineKind.Added => p.AddedGutterForeground,
-                DiffLineKind.Removed => p.RemovedGutterForeground,
+                DiffLineKind.Added => palette.AddedGutterForeground,
+                DiffLineKind.Removed => palette.RemovedGutterForeground,
                 _ => normal.Foreground,
             }
             : roleForeground;
 
         // A search hit wins the background so matches stand out over the diff tint.
         var background = style.SearchHit
-            ? p.SearchHitBackground
-            : BackgroundFor(style.LineKind, style.Emphasis, normal.Background, p);
+            ? palette.SearchHitBackground
+            : BackgroundFor(style.LineKind, style.Emphasis, normal.Background, palette);
         return new Attribute(foreground, background);
     }
 
