@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Performance
+- **Faster PR opens.** Opening a pull request costs about three network round-trips instead of
+  five: the two file blobs are fetched concurrently rather than one after the other, and the
+  review threads are fetched alongside them instead of waiting their turn. Switching to a file
+  that isn't cached yet is one round-trip instead of two, and the background prefetch and your
+  own navigation now share a single fetch when they land on the same file rather than each
+  requesting it. See [ADR 0008](docs/adr/0008-client-side-diff-and-line-comments.md).
 - **Snappier UI.** Cut redundant redraws and re-tokenization that made navigation feel laggy:
   the diff-review pane no longer re-tokenizes the open file once per file in the PR while the
   background stats prefetch runs (it now refreshes only the title totals and file-row stats);
