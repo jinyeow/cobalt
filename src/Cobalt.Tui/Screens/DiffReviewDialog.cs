@@ -778,7 +778,7 @@ public sealed class DiffReviewDialog(
             return;
         }
         vm.MarkViewed(path);
-        Render();
+        Render(includeDiffPane: false);
         log($"marked viewed: {path}");
     }
 
@@ -790,7 +790,7 @@ public sealed class DiffReviewDialog(
             return;
         }
         vm.MarkUnviewed(path);
-        Render();
+        Render(includeDiffPane: false);
         log($"marked unviewed: {path}");
     }
 

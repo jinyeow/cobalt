@@ -118,6 +118,30 @@ public class DiffReviewDialogKeyTests
     }
 
     [Fact]
+    public async Task Mark_Viewed_Does_Not_Rebuild_The_Diff_Pane()
+    {
+        // m only changes the file-tree glyph for the current file; the displayed diff is
+        // unchanged, so it must not pay the re-tokenize cost of a full diff-pane rebuild.
+        var (detail, dialog) = await BuiltDialog();
+        var before = detail.DiffPane.Source;
+
+        dialog.NewKeyDownEvent(new Key('m'));
+
+        Assert.Same(before, detail.DiffPane.Source);
+    }
+
+    [Fact]
+    public async Task Mark_Unviewed_Does_Not_Rebuild_The_Diff_Pane()
+    {
+        var (detail, dialog) = await BuiltDialog();
+        var before = detail.DiffPane.Source;
+
+        dialog.NewKeyDownEvent(new Key('M'));
+
+        Assert.Same(before, detail.DiffPane.Source);
+    }
+
+    [Fact]
     public async Task Tab_Flips_Focus_Between_Panes()
     {
         var (detail, dialog) = await BuiltDialog();
