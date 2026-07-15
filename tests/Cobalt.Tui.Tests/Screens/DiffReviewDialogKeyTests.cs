@@ -53,8 +53,13 @@ public class DiffReviewDialogKeyTests
             Gates.TryGetValue(path, out var gate)
                 ? gate.Task
                 : Task.FromResult(Blobs.GetValueOrDefault((path, commit), ""));
+        /// <summary>Makes the review-threads fetch fail the way a real ADO outage does.</summary>
+        public bool FailThreads { get; set; }
+
         public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
-            Task.FromResult(Threads);
+            FailThreads
+                ? Task.FromException<IReadOnlyList<PrThread>>(new HttpRequestException("threads unavailable"))
+                : Task.FromResult(Threads);
         public string? LastLineCommentText { get; private set; }
 
         public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct)
@@ -100,6 +105,58 @@ public class DiffReviewDialogKeyTests
         dialog.Layout(new Size(100, 24));
         dialog.SetFocus();
         return (detail, dialog);
+    }
+
+    /// <summary>A dialog whose review threads failed to load, with a second file to navigate to.</summary>
+    private static async Task<(DiffReviewDialog Detail, Dialog Dialog, PrDiffViewModel Vm)> ThreadsFailedDialog()
+    {
+        var source = new FakeDiffSource
+        {
+            FailThreads = true,
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
+        };
+        source.Blobs[("/a.cs", "src")] = "alpha\n";
+        source.Blobs[("/b.cs", "src")] = "beta\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.True(vm.ThreadsUnavailable); // the fixture really did lose its threads
+
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+        dialog.SetFocus();
+        return (detail, dialog, vm);
+    }
+
+    [Fact]
+    public async Task Unloadable_Threads_Stay_Visible_After_Navigating()
+    {
+        // A threads failure is permanent for the session (LoadAsync runs once), so every later
+        // paint shows unmarked code that is indistinguishable from "this file has no comments".
+        // The reviewer must be able to tell that markers are unknown rather than absent — at any
+        // time, on any file — or they can approve a PR blind to its review comments.
+        var (detail, _, vm) = await ThreadsFailedDialog();
+
+        // Selecting a file publishes a diff, which is what used to mask the state. Changed fires
+        // at the end of the select and a headless Application cannot service the Invoke it posts,
+        // so observe that fault; the diff is published before Changed, which is the state here.
+        var select = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<NotInitializedException>(() => select);
+        Assert.NotNull(vm.CurrentDiff); // a diff is now on screen — the masking condition
+        detail.RefreshStats();          // any later chrome refresh
+
+        Assert.DoesNotContain("unresolved", detail.Title);
+        Assert.Contains("comments unavailable", detail.Title);
+    }
+
+    [Fact]
+    public async Task The_Title_Reports_Unresolved_Threads_When_They_Loaded()
+    {
+        // The counterpart: with threads loaded, the title keeps reporting the real count.
+        var (detail, _) = await BuiltDialog();
+
+        Assert.Contains("unresolved", detail.Title);
+        Assert.DoesNotContain("comments unavailable", detail.Title);
     }
 
     [Fact]

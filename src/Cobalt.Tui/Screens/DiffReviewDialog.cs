@@ -87,6 +87,9 @@ public sealed class DiffReviewDialog(
     /// <summary>Test seam: the header above the diff pane (file path and stats).</summary>
     internal Label DiffHeader => _diffHeader;
 
+    /// <summary>Test seam: the dialog title (PR id, totals, thread state, key hints).</summary>
+    internal string Title => _dialog?.Title ?? "";
+
     /// <summary>Test seam: the inline search bar (hidden until '/').</summary>
     internal TextField SearchBar => _searchBar;
 
@@ -912,9 +915,18 @@ public sealed class DiffReviewDialog(
         _diffPane.SelectedItem = Math.Clamp(target, 0, source.Count - 1);
     }
 
-    /// <summary>The dialog title: PR id, running +Σ/-Σ diff totals, unresolved count, then the key hints.</summary>
+    /// <summary>
+    /// The dialog title: PR id, running +Σ/-Σ diff totals, thread state, then the key hints.
+    /// When the review threads could not be loaded they stay unloaded for the session, and every
+    /// file then paints without comment markers — indistinguishable from a file with no comments.
+    /// Reporting "0 unresolved" there would be an outright lie the reviewer could approve on, so
+    /// the count is replaced by the reason: the markers are unknown, not absent. The title carries
+    /// it because it is the one thing on screen on every file, at all times, and it is where the
+    /// false count lived.
+    /// </summary>
     private string TitleFor() =>
-        $"diff review !{vm.PrId}  +{vm.TotalAdditions} -{vm.TotalDeletions}  {vm.UnresolvedThreadCount} unresolved — " +
+        $"diff review !{vm.PrId}  +{vm.TotalAdditions} -{vm.TotalDeletions}  " +
+        $"{(vm.ThreadsUnavailable ? "⚠ comments unavailable" : $"{vm.UnresolvedThreadCount} unresolved")} — " +
         "q close · Tab panes · h/l scroll · [f/]f file · [c/]c hunk · [t/]t thread · [v/]v unviewed · / search · n/N · " +
         "z fold · e/E context · s split · c comment · o thread · gb branch · v vote · m viewed · T filter · ? keys";
 
