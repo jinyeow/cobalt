@@ -3,6 +3,7 @@ using Cobalt.Core.Text.Syntax;
 using Cobalt.Tui.Screens;
 using Cobalt.Tui.Theming;
 using Terminal.Gui.Drawing;
+using Terminal.Gui.Views;
 using Attribute = Terminal.Gui.Drawing.Attribute;
 
 namespace Cobalt.Tui.Tests.Screens;
@@ -93,5 +94,35 @@ public class DiffListDataSourceTests
         // With no injected Func, the source reads ThemeService.CurrentPalette (dark here).
         Assert.Equal(DiffPalette.Dark.AddedGutterForeground, attr.Foreground);
         Assert.Equal(DiffPalette.Dark.AddedBackground, attr.Background);
+    }
+
+    [Fact]
+    public void Render_Resolves_Each_Distinct_Role_At_Most_Once_Per_Row()
+    {
+        // A row is a gutter run plus six code runs spanning only two distinct token kinds
+        // (Identifier, Keyword). Today GetAttributeForRole is called once per non-gutter run
+        // (six calls); it should instead be resolved once per distinct role used.
+        ThemeService.Enable();
+        ThemeService.Apply(ThemeResolver.Resolve(Cobalt.Core.Config.ThemeChoice.Dark, OsTheme.Unknown));
+        var runs = new List<StyledRun>
+        {
+            new(0, 2, new RunStyle(TokenKind.Plain, DiffLineKind.Context, Emphasis: false, IsGutter: true)),
+            new(2, 1, new RunStyle(TokenKind.Identifier, DiffLineKind.Context, Emphasis: false, IsGutter: false)),
+            new(3, 1, new RunStyle(TokenKind.Identifier, DiffLineKind.Context, Emphasis: false, IsGutter: false)),
+            new(4, 1, new RunStyle(TokenKind.Keyword, DiffLineKind.Context, Emphasis: false, IsGutter: false)),
+            new(5, 1, new RunStyle(TokenKind.Identifier, DiffLineKind.Context, Emphasis: false, IsGutter: false)),
+            new(6, 1, new RunStyle(TokenKind.Keyword, DiffLineKind.Context, Emphasis: false, IsGutter: false)),
+            new(7, 1, new RunStyle(TokenKind.Identifier, DiffLineKind.Context, Emphasis: false, IsGutter: false)),
+        };
+        var line = new StyledLine("+ aaaaaa", runs);
+        var source = new DiffListDataSource([line]);
+        var listView = new ListView { SchemeName = "Base", Width = 40, Height = 1 };
+        var invocations = 0;
+        listView.GettingAttributeForRole += (_, _) => invocations++;
+
+        source.Render(listView, selected: false, item: 0, col: 0, row: 0, width: 40, viewportX: 0);
+
+        // Normal (once) + CodeIdentifier + CodeKeyword = at most 3 distinct roles resolved.
+        Assert.True(invocations <= 3, $"expected at most 3 role resolutions, got {invocations}");
     }
 }
