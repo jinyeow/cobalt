@@ -131,6 +131,96 @@ public class PrDiffViewModelTests
     }
 
     [Fact]
+    public async Task CurrentDiffPath_Tracks_The_File_CurrentDiff_Belongs_To()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        source.Blobs[("/b.cs", "base")] = "1\n";
+        source.Blobs[("/b.cs", "src")] = "1\n2\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("/a.cs", vm.CurrentDiffPath);
+
+        await vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+
+        // The path must name the file CurrentDiff was actually computed from: the view pairs the
+        // two to render the header, so a drift shows one file's path with another's stats.
+        Assert.Equal("/b.cs", vm.CurrentDiffPath);
+        Assert.Equal(1, vm.CurrentDiff!.Additions);
+    }
+
+    [Fact]
+    public async Task CurrentDiffPath_Is_Null_When_There_Is_No_Diff()
+    {
+        var source = new FakeDiffSource { Iteration = null };
+        var vm = new PrDiffViewModel(source, Pr());
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(vm.CurrentDiff);
+        Assert.Null(vm.CurrentDiffPath);
+    }
+
+    [Fact]
+    public async Task CommentedLinesFor_Splits_Thread_Lines_By_Side_For_One_File()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads =
+            [
+                new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "right", false)], "/a.cs", 2, null),
+                new PrThread(2, PrThreadStatus.Active, [new PrComment(1, "Sam", "right too", false)], "/a.cs", 7, null),
+                new PrThread(3, PrThreadStatus.Active, [new PrComment(1, "Sam", "left", false)], "/a.cs", null, 4),
+                new PrThread(4, PrThreadStatus.Active, [new PrComment(1, "Sam", "other file", false)], "/other.cs", 9, null),
+                new PrThread(5, PrThreadStatus.Active, [new PrComment(1, "Sam", "no anchor", false)], "/a.cs", null, null),
+            ],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var (left, right) = vm.CommentedLinesFor("/a.cs");
+
+        Assert.Equal([4], left.Order());
+        Assert.Equal([2, 7], right.Order());
+        // Another file's threads never leak in.
+        var (otherLeft, otherRight) = vm.CommentedLinesFor("/other.cs");
+        Assert.Empty(otherLeft);
+        Assert.Equal([9], otherRight.Order());
+    }
+
+    [Fact]
+    public async Task CommentedLinesFor_Counts_Resolved_And_System_Threads_Like_ThreadsForDiffLine()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads =
+            [
+                new PrThread(1, PrThreadStatus.Fixed, [new PrComment(1, "Sam", "resolved", false)], "/a.cs", 2, null),
+                new PrThread(2, PrThreadStatus.Active, [new PrComment(1, "System", "system", true)], "/a.cs", 3, null),
+            ],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var (_, right) = vm.CommentedLinesFor("/a.cs");
+
+        // ThreadsForDiffLine does no status/system filtering, so the marker sets must not either.
+        Assert.Equal([2, 3], right.Order());
+    }
+
+    [Fact]
     public async Task Existing_Threads_Map_To_Their_File_And_Line()
     {
         var source = new FakeDiffSource

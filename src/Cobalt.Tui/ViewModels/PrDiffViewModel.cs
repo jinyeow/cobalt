@@ -42,6 +42,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     public IReadOnlyList<PrThread> Threads { get; private set; } = [];
     public FileDiff? CurrentDiff { get; private set; }
 
+    /// <summary>The file path <see cref="CurrentDiff"/> belongs to; null when there is no diff.</summary>
+    public string? CurrentDiffPath { get; private set; }
+
     public event Action? Changed;
 
     /// <summary>
@@ -179,6 +182,33 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         ];
     }
 
+    /// <summary>
+    /// Line numbers carrying at least one thread on each side, for one file. Pure; built once per
+    /// render so the view can test a line for markers by lookup instead of scanning
+    /// <see cref="Threads"/> per line. Sides are anchored as in <see cref="ThreadsForDiffLine"/>.
+    /// </summary>
+    public (IReadOnlySet<int> Left, IReadOnlySet<int> Right) CommentedLinesFor(string path)
+    {
+        var left = new HashSet<int>();
+        var right = new HashSet<int>();
+        foreach (var thread in Threads)
+        {
+            if (!string.Equals(thread.FilePath, path, StringComparison.Ordinal))
+            {
+                continue;
+            }
+            if (thread.LeftLine is { } l)
+            {
+                left.Add(l);
+            }
+            if (thread.RightLine is { } r)
+            {
+                right.Add(r);
+            }
+        }
+        return (left, right);
+    }
+
     /// <summary>The current threads matching the given ids, in id order, skipping any not present.</summary>
     public IReadOnlyList<PrThread> ThreadsByIds(IReadOnlyList<int> ids) =>
         [.. ids.Select(id => Threads.FirstOrDefault(t => t.Id == id)).OfType<PrThread>()];
@@ -295,7 +325,11 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     private async Task ComputeCurrentDiffAsync(CancellationToken ct)
     {
         var file = SelectedFile;
-        CurrentDiff = file is null ? null : await ComputeDiffForFileAsync(file, ct).ConfigureAwait(false);
+        var diff = file is null ? null : await ComputeDiffForFileAsync(file, ct).ConfigureAwait(false);
+        // Assigned together with no await between: the view pairs the path with the diff to render
+        // the header, so a drift would show one file's path against another file's stats.
+        CurrentDiff = diff;
+        CurrentDiffPath = diff is null ? null : file?.Path;
     }
 
     /// <summary>Computes (or returns the cached) diff for one file. Does not touch <see cref="CurrentDiff"/>.</summary>
