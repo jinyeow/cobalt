@@ -185,6 +185,34 @@ public class DiffReviewDialogKeyTests
     }
 
     [Fact]
+    public async Task Mark_Viewed_Marks_The_File_On_Screen_Not_The_One_Being_Selected()
+    {
+        // Same drift as the header: during a select, SelectedFile is already the next file while
+        // the previous one is still on screen. 'm' means "I have reviewed what I am looking at",
+        // so it must mark the displayed file — marking the one the reviewer has not seen yet
+        // silently drops a file out of their review.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
+        };
+        source.Blobs[("/a.cs", "src")] = "alpha\n";
+        source.Gates["/b.cs"] = new TaskCompletionSource<string>();
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        _ = vm.SelectFileAsync(1, TestContext.Current.CancellationToken); // /b.cs's fetch hangs
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+        Assert.Equal("/b.cs", vm.SelectedFile?.Path);
+        Assert.Equal("/a.cs", vm.CurrentDiffPath);
+
+        dialog.NewKeyDownEvent(new Key('m'));
+
+        Assert.True(vm.IsViewed("/a.cs"), "the file on screen should be marked viewed");
+        Assert.False(vm.IsViewed("/b.cs"), "the file still loading should not be marked viewed");
+    }
+
+    [Fact]
     public async Task Mark_Viewed_Does_Not_Rebuild_The_Diff_Pane()
     {
         // m only changes the file-tree glyph for the current file; the displayed diff is

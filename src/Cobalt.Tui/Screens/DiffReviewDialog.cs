@@ -792,7 +792,9 @@ public sealed class DiffReviewDialog(
     /// <summary>m: mark the file shown in the diff pane viewed (a ✓ in the tree).</summary>
     private void MarkCurrentViewed()
     {
-        if (vm.SelectedFile?.Path is not { } path)
+        // The displayed file, not the selected one: "I have reviewed this" is a claim about what
+        // the reviewer is looking at, and during a select those are different files.
+        if (vm.CurrentDiffPath is not { } path)
         {
             return;
         }
@@ -804,7 +806,7 @@ public sealed class DiffReviewDialog(
     /// <summary>M: mark the file shown in the diff pane unviewed (clears its ✓ in the tree).</summary>
     private void MarkCurrentUnviewed()
     {
-        if (vm.SelectedFile?.Path is not { } path)
+        if (vm.CurrentDiffPath is not { } path)
         {
             return;
         }
