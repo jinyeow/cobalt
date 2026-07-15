@@ -46,8 +46,13 @@ public class DiffReviewDialogKeyTests
             Task.FromResult(Iteration);
         public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repo, int prId, int iterationId, CancellationToken ct) =>
             Task.FromResult(Changes);
+        /// <summary>Blob fetches held open by path, so a test can render inside a select's await window.</summary>
+        public Dictionary<string, TaskCompletionSource<string>> Gates { get; } = new(StringComparer.Ordinal);
+
         public Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct) =>
-            Task.FromResult(Blobs.GetValueOrDefault((path, commit), ""));
+            Gates.TryGetValue(path, out var gate)
+                ? gate.Task
+                : Task.FromResult(Blobs.GetValueOrDefault((path, commit), ""));
         public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
             Task.FromResult(Threads);
         public string? LastLineCommentText { get; private set; }
@@ -61,8 +66,13 @@ public class DiffReviewDialogKeyTests
             Task.CompletedTask;
         public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
             Task.CompletedTask;
+        /// <summary>Makes a vote fail the way a real ADO rejection does (an expected error, ADR 0013).</summary>
+        public bool FailVote { get; set; }
+
         public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
-            Task.CompletedTask;
+            FailVote
+                ? Task.FromException(new HttpRequestException("vote rejected"))
+                : Task.CompletedTask;
     }
 
     private static PullRequest Pr() =>
@@ -173,6 +183,72 @@ public class DiffReviewDialogKeyTests
             }
         }
         return map;
+    }
+
+    [Fact]
+    public async Task The_Diff_Pane_Describes_The_File_Its_Diff_Came_From()
+    {
+        // SelectFileAsync moves SelectedFile to the new file immediately and only publishes that
+        // file's diff once the fetch returns (PrDiffViewModel.SelectFileAsync). A render inside
+        // that window — a comment or vote round-trip landing — would otherwise pair the new
+        // file's identity with the previous file's diff: its path over the old stats, and its
+        // comment markers painted onto the old file's lines.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
+            // A thread on /b.cs, right line 1 — the same line number /a.cs's diff has.
+            Threads = [new PrThread(1, PrThreadStatus.Active, [], "/b.cs", 1, null)],
+        };
+        source.Blobs[("/a.cs", "src")] = "alpha\n";
+        source.Gates["/b.cs"] = new TaskCompletionSource<string>();
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        // Left in flight deliberately: completing it would raise Changed, and a headless
+        // Application cannot service the Invoke that posts.
+        _ = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        Assert.Equal("/b.cs", vm.SelectedFile?.Path); // the cursor has moved
+        Assert.Equal("/a.cs", vm.CurrentDiffPath);    // the diff on screen has not
+
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+
+        Assert.Contains("/a.cs", detail.DiffHeader.Text);
+        var shown = Assert.IsType<DiffListDataSource>(detail.DiffPane.Source);
+        Assert.DoesNotContain(shown.Lines, l => l.DisplayText.Contains('●'));
+    }
+
+    [Fact]
+    public async Task Mark_Viewed_Keeps_The_File_Header_After_A_Failed_Action()
+    {
+        // A failed vote leaves vm.Error set, and its message reaches the reviewer through the
+        // message bar. The header's job is to say which file is on screen, so marking it viewed
+        // must not replace the path/stats with a stale error from an unrelated action.
+        var source = new FakeDiffSource
+        {
+            FailVote = true,
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add)],
+        };
+        source.Blobs[("/a.cs", "src")] = "line 0\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        // Voted before Build subscribes: a headless Application cannot service the Invoke that
+        // vm.Changed would post. The state under test is the same — Error set, a diff on screen.
+        await vm.VoteAsync(PrVote.Approved, TestContext.Current.CancellationToken);
+        Assert.NotNull(vm.Error); // the vote really did fail
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+        dialog.SetFocus();
+        // A full render already prefers the path over the error; the partial render must agree.
+        var expected = detail.DiffHeader.Text;
+        Assert.Contains("/a.cs", expected);
+
+        dialog.NewKeyDownEvent(new Key('m'));
+
+        // Compared whole, not just for the path, so the binary/too-large/side-by-side suffix
+        // cannot be dropped either — m changes nothing the header reports.
+        Assert.Equal(expected, detail.DiffHeader.Text);
     }
 
     [Fact]

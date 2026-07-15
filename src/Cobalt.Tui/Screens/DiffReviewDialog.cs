@@ -46,9 +46,6 @@ public sealed class DiffReviewDialog(
     private readonly DiffStyleCache _styleCache = new();
     private readonly CoalescingGate _statsRefresh = new();
 
-    /// <summary>Stands in for the commented-line sets when there is no file to look them up for.</summary>
-    private static readonly IReadOnlySet<int> NoLines = new HashSet<int>();
-
     private CancellationToken Token => _cts.Token;
 
     private static readonly string[] VoteLabels =
@@ -86,6 +83,9 @@ public sealed class DiffReviewDialog(
 
     /// <summary>Test seam: the unified-diff pane.</summary>
     internal ListView DiffPane => _diffPane;
+
+    /// <summary>Test seam: the header above the diff pane (file path and stats).</summary>
+    internal Label DiffHeader => _diffHeader;
 
     /// <summary>Test seam: the inline search bar (hidden until '/').</summary>
     internal TextField SearchBar => _searchBar;
@@ -921,6 +921,30 @@ public sealed class DiffReviewDialog(
     /// <summary>Test seam: refresh title totals and file-row stats without re-tokenizing the diff.</summary>
     internal void RefreshStats() => Render(includeDiffPane: false);
 
+    /// <summary>
+    /// The header above the diff pane: which file is on screen and its stats. Keyed on the diff's
+    /// own path so it never labels one file's diff with another's name. Precedence matches what a
+    /// full render has always produced — a diff on screen wins, then loading, then an error, and
+    /// with none of those the header keeps whatever it last said.
+    /// </summary>
+    private void WriteDiffHeader()
+    {
+        if (vm.CurrentDiff is { } diff && vm.CurrentDiffPath is { } path)
+        {
+            var mode = _sideBySide ? "  (side-by-side)" : "";
+            _diffHeader.Text = $" {path}   +{diff.Additions} -{diff.Deletions}" +
+                (diff.IsBinary ? "  (binary)" : diff.TooLarge ? "  (too large)" : mode);
+        }
+        else if (vm.IsLoading)
+        {
+            _diffHeader.Text = " loading diff…";
+        }
+        else if (vm.Error is { } e)
+        {
+            _diffHeader.Text = $" error: {e}";
+        }
+    }
+
     /// <param name="includeDiffPane">
     /// When <see langword="false"/>, refresh only the chrome (title totals, file-row stats) and
     /// skip rebuilding the diff pane — used by the background stats prefetch, whose updates never
@@ -934,32 +958,27 @@ public sealed class DiffReviewDialog(
             _dialog.Title = TitleFor();
         }
 
-        if (vm.IsLoading)
-        {
-            _diffHeader.Text = " loading diff…";
-        }
-        else if (vm.Error is { } e)
-        {
-            _diffHeader.Text = $" error: {e}";
-        }
+        // Set in one place, on every render: a partial (chrome-only) refresh describes the same
+        // file as a full one, so marking a file viewed cannot leave a stale error where the path
+        // belongs. The error text is the fallback for having no diff to show — an expected failure
+        // reaches the reviewer through the message bar (ADR 0013), which is its surface.
+        WriteDiffHeader();
 
         // Rebuild the file tree, keeping the highlight on the displayed file's row.
         RepointIfFilteredOut();
         RebuildFileList(SelectedFileNodePath());
 
-        if (includeDiffPane && vm.CurrentDiff is { } diff)
+        // Everything below describes the diff on screen, so it keys off the path that diff came
+        // from — never the file-tree cursor. SelectFileAsync moves the cursor to the new file and
+        // publishes its diff only once fetched, so in that window vm.SelectedFile is already the
+        // next file while this is still the previous one; keying on it would anchor this file's
+        // lines to the next file's comment threads.
+        if (includeDiffPane && vm.CurrentDiff is { } diff && vm.CurrentDiffPath is { } diffPath)
         {
-            var file = vm.SelectedFile;
-            var mode = _sideBySide ? "  (side-by-side)" : "";
-            _diffHeader.Text = file is null
-                ? ""
-                : $" {file.Path}   +{diff.Additions} -{diff.Deletions}" +
-                  (diff.IsBinary ? "  (binary)" : diff.TooLarge ? "  (too large)" : mode);
-
             // Rebuild the diff pane (thread markers may have changed after a comment),
             // but preserve the reviewer's line position on a same-file refresh; reset
-            // to the top only when the selected file actually changed.
-            var sameFile = file?.Path == _renderedDiffPath;
+            // to the top only when the displayed file actually changed.
+            var sameFile = diffPath == _renderedDiffPath;
             var keepLine = sameFile ? _diffPane.SelectedItem : 0;
             if (!sameFile)
             {
@@ -967,14 +986,14 @@ public sealed class DiffReviewDialog(
                 _searchQuery = null;
                 _searchMatches = [];
             }
-            _renderedDiffPath = file?.Path;
+            _renderedDiffPath = diffPath;
 
             // Point the style cache at this render's inputs: it reuses every composition whose
             // line, language and thread marker are unchanged, so a render that only expands a
             // fold, filters the tree or lands a comment no longer re-tokenizes the whole file.
             // The commented lines are looked up once here rather than scanned per line.
-            var language = LanguageDetector.FromPath(file?.Path ?? "");
-            var (commentedLeft, commentedRight) = file is null ? (NoLines, NoLines) : vm.CommentedLinesFor(file.Path);
+            var language = LanguageDetector.FromPath(diffPath);
+            var (commentedLeft, commentedRight) = vm.CommentedLinesFor(diffPath);
             _styleCache.Prepare(diff.Lines, language, commentedLeft, commentedRight);
             var rows = new List<DiffRow>();
             List<StyledLine> styled;
