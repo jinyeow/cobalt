@@ -923,7 +923,7 @@ public sealed class DiffReviewDialog(
     /// </summary>
     private string TitleFor() =>
         $"diff review !{vm.PrId}  +{vm.TotalAdditions} -{vm.TotalDeletions}  " +
-        $"{(vm.ThreadsUnavailable ? "⚠ comments unavailable" : $"{vm.UnresolvedThreadCount} unresolved")} — " +
+        $"{(vm.ThreadsUnavailable ? "comments unavailable" : $"{vm.UnresolvedThreadCount} unresolved")} — " +
         "q close · Tab panes · h/l scroll · [f/]f file · [c/]c hunk · [t/]t thread · [v/]v unviewed · / search · n/N · " +
         "z fold · e/E context · s split · c comment · o thread · gb branch · v vote · m viewed · T filter · ? keys";
 
