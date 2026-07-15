@@ -118,6 +118,25 @@ public class DiffStyleCacheTests
     }
 
     [Fact]
+    public void Overlaying_Search_Hits_Leaves_The_Cached_Line_Unmarked()
+    {
+        // The view overlays search hits onto the cached composition. The cache must never see
+        // them: a query is per-render state, so a hit baked into a cached line would outlive the
+        // search and freeze stale highlights into every later render of that file. This holds by
+        // construction today — WithSearchHits builds a new run list — so this guards a future
+        // in-place "optimisation": StyledLine.Runs is a mutable List behind an IReadOnlyList, and
+        // nothing else would catch one.
+        var cache = Prepared();
+        var line = cache.Unified(0);
+
+        var highlighted = DiffLineStyler.WithSearchHits(line, [new LineSpan(0, 3)], line.Runs[0].Length);
+
+        Assert.Contains(highlighted.Runs, r => r.Style.SearchHit); // the overlay really did mark it
+        Assert.Same(line, cache.Unified(0));
+        Assert.DoesNotContain(cache.Unified(0).Runs, r => r.Style.SearchHit);
+    }
+
+    [Fact]
     public void SideBySide_Composes_Rows_Exactly_As_The_Composer_Does()
     {
         var rows = SideBySideComposer.Pair(Sample);
