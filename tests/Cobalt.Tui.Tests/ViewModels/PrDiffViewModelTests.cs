@@ -158,6 +158,88 @@ public class PrDiffViewModelTests
     }
 
     /// <summary>
+    /// Records every blob request in order and blocks each until released by path, so a test can
+    /// observe which files the prefetch chooses, how many it runs at once, and in what order.
+    /// </summary>
+    private sealed class OrderedGateSource : IPrDiffSource
+    {
+        private readonly object _lock = new();
+        private readonly List<string> _requested = [];
+        private readonly Dictionary<string, TaskCompletionSource> _gates = new(StringComparer.Ordinal);
+
+        public IReadOnlyList<FileChange> Changes { get; set; } = [];
+
+        /// <summary>Blob request paths, in the order they were issued.</summary>
+        public IReadOnlyList<string> Requested
+        {
+            get { lock (_lock) { return [.. _requested]; } }
+        }
+
+        public Task<PrIteration?> GetLatestIterationAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromResult<PrIteration?>(new(2, "src", "tgt", "base"));
+
+        public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repo, int prId, int iterationId, CancellationToken ct) =>
+            Task.FromResult(Changes);
+
+        public async Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct)
+        {
+            TaskCompletionSource gate;
+            lock (_lock)
+            {
+                _requested.Add(path);
+                gate = GateFor(path);
+            }
+            await gate.Task.ConfigureAwait(false);
+            return $"{path} line\n";
+        }
+
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<PrThread>>([]);
+
+        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public void Release(string path)
+        {
+            lock (_lock)
+            {
+                GateFor(path).TrySetResult();
+            }
+        }
+
+        /// <summary>True once at least <paramref name="count"/> blob requests have been issued.</summary>
+        public async Task<bool> WaitForRequestsAsync(int count, TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow + timeout;
+            while (Requested.Count < count)
+            {
+                if (DateTime.UtcNow > deadline)
+                {
+                    return false;
+                }
+                await Task.Delay(10).ConfigureAwait(false);
+            }
+            return true;
+        }
+
+        // Callers hold _lock.
+        private TaskCompletionSource GateFor(string path) =>
+            _gates.TryGetValue(path, out var gate)
+                ? gate
+                : _gates[path] = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    /// <summary>Eight added files: one blob request each, so request order is unambiguous.</summary>
+    private static FileChange[] EightAddedFiles() =>
+        [.. Enumerable.Range(0, 8).Select(i => new FileChange($"/f{i}.cs", FileChangeKind.Add))];
+
+    /// <summary>
     /// Fails /bad.cs's blobs until <see cref="Succeed"/> is set. Unlike <see cref="OneFileFailsSource"/>
     /// (which fails permanently), this can show that a failed fetch leaves nothing behind that would
     /// block a later retry.
@@ -1072,29 +1154,104 @@ public class PrDiffViewModelTests
     }
 
     [Fact]
-    public async Task PrefetchAllDiffsAsync_Stops_When_Cancelled()
+    public async Task PrefetchAllDiffsAsync_Stops_Claiming_New_Files_When_Cancelled()
     {
-        var source = new FakeDiffSource
+        var source = new FakeDiffSource { Changes = EightAddedFiles() };
+        // Only the first four files have blobs. Any file claimed after the cancel would still
+        // "succeed" with empty text and register stats, so a null StatsFor proves it was never
+        // claimed rather than merely never returned.
+        for (var i = 0; i < 4; i++)
         {
-            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
-        };
-        source.Blobs[("/a.cs", "base")] = "x\n";
-        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
-        // /b.cs blobs deliberately omitted: if the loop reached it after cancellation, this would
-        // silently succeed with empty text instead of the test failing loudly.
+            source.Blobs[($"/f{i}.cs", "src")] = "a\n";
+        }
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         using var cts = new CancellationTokenSource();
-        // Prefetch signals each computed file via StatsChanged; cancel after the first so the
-        // loop must stop before /b.cs (whose blobs are omitted above).
+        // Each worker raises StatsChanged before looping, so the first completed file cancels
+        // before any worker can claim a fifth.
         vm.StatsChanged += () => cts.Cancel();
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => vm.PrefetchAllDiffsAsync(cts.Token));
 
-        Assert.NotNull(vm.StatsFor("/a.cs"));
-        Assert.Null(vm.StatsFor("/b.cs"));
+        // With bounded concurrency, cancelling stops the next *claim*, not the in-flight wave:
+        // files already being fetched (up to the worker count) still land. Nothing beyond may.
+        Assert.NotNull(vm.StatsFor("/f0.cs"));
+        for (var i = 4; i < 8; i++)
+        {
+            Assert.Null(vm.StatsFor($"/f{i}.cs"));
+        }
+    }
+
+    [Fact]
+    public async Task Prefetch_Fetches_Four_Files_Concurrently()
+    {
+        var source = new OrderedGateSource { Changes = EightAddedFiles() };
+        var vm = new PrDiffViewModel(source, Pr());
+        source.Release("/f0.cs"); // let the initial load finish and cache the first file
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // The load already requested /f0.cs (request 0) and cached it, so the prefetch's own
+        // requests start at index 1.
+        Assert.Single(source.Requested);
+
+        var prefetch = vm.PrefetchAllDiffsAsync(TestContext.Current.CancellationToken);
+
+        // A sequential prefetch keeps exactly one blob in flight, so a 40-file PR warms one serial
+        // round-trip at a time. Four workers cap the concurrency without going unbounded.
+        Assert.True(
+            await source.WaitForRequestsAsync(5, TimeSpan.FromSeconds(5)),
+            "four prefetch blob requests must be in flight at once");
+        Assert.False(
+            await source.WaitForRequestsAsync(6, TimeSpan.FromMilliseconds(200)),
+            "and no more than four: the prefetch is bounded");
+
+        for (var i = 1; i < 8; i++)
+        {
+            source.Release($"/f{i}.cs");
+        }
+        await prefetch;
+    }
+
+    [Fact]
+    public async Task Prefetch_Claims_The_File_Nearest_The_Selection()
+    {
+        var source = new OrderedGateSource { Changes = EightAddedFiles() };
+        var vm = new PrDiffViewModel(source, Pr());
+        source.Release("/f0.cs");
+        await vm.LoadAsync(TestContext.Current.CancellationToken); // caches /f0.cs, selection = 0
+
+        Assert.Single(source.Requested); // the load's /f0.cs
+
+        var prefetch = vm.PrefetchAllDiffsAsync(TestContext.Current.CancellationToken);
+        Assert.True(await source.WaitForRequestsAsync(5, TimeSpan.FromSeconds(5)));
+        // The workers start beside the selection (0). /f0.cs is already cached, so the four in
+        // flight are 1-4 — the reviewer's next rows — never the far end of the PR.
+        Assert.Equal(
+            ["/f1.cs", "/f2.cs", "/f3.cs", "/f4.cs"],
+            [.. source.Requested.Skip(1).Order(StringComparer.Ordinal)]);
+
+        // The reviewer jumps to the far end while the prefetch is still saturated.
+        var select = vm.SelectFileAsync(7, TestContext.Current.CancellationToken);
+        Assert.True(await source.WaitForRequestsAsync(6, TimeSpan.FromSeconds(5)));
+        Assert.Equal("/f7.cs", source.Requested[5]);
+        source.Release("/f7.cs");
+        await select;
+
+        // Freeing one worker: it must pick up beside where the reviewer now is (6), not resume
+        // blind index order (5). /f7.cs is already cached, so /f6.cs is the nearest un-fetched.
+        source.Release("/f1.cs");
+        Assert.True(
+            await source.WaitForRequestsAsync(7, TimeSpan.FromSeconds(5)),
+            "the freed worker must claim another file");
+        Assert.Equal("/f6.cs", source.Requested[6]);
+
+        for (var i = 1; i < 8; i++)
+        {
+            source.Release($"/f{i}.cs");
+        }
+        await prefetch;
     }
 
     private sealed class OneFileFailsSource : IPrDiffSource

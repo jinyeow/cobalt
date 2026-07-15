@@ -35,6 +35,16 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     // Lazy's task must ever be started.
     private readonly ConcurrentDictionary<string, Lazy<Task<FileDiff>>> _inflight = new(StringComparer.Ordinal);
     private readonly HashSet<string> _viewed = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// How many files the background prefetch warms at once. Four keeps a large PR warming in
+    /// parallel without risking 429s; the Polly retry is Retry-After aware but a burst is still
+    /// rude. Deliberately not configurable.
+    /// </summary>
+    private const int PrefetchWorkers = 4;
+
+    private readonly object _prefetchLock = new();
+    private readonly HashSet<int> _prefetchClaimed = [];
     private PrIteration? _iteration;
     private int _selectedFileIndex;
 
@@ -104,20 +114,45 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     public int TotalDeletions => _diffCache.Values.Sum(d => d.Deletions);
 
     /// <summary>
-    /// Computes every file's diff sequentially into the cache (so <see cref="StatsFor"/> and the
-    /// totals fill in), raising <see cref="StatsChanged"/> after each. This never changes the
-    /// selected file or <see cref="CurrentDiff"/>, so it deliberately does not raise
-    /// <see cref="Changed"/>: the view refreshes only the title totals and file-row stats, not the
-    /// (unchanged) displayed diff — otherwise an N-file PR re-tokenizes the open file N times.
+    /// Computes every file's diff into the cache (so <see cref="StatsFor"/> and the totals fill
+    /// in), raising <see cref="StatsChanged"/> after each. Files are taken nearest-first from the
+    /// current selection by <see cref="PrefetchWorkers"/> workers, so the rows the reviewer is
+    /// about to reach warm first and a large PR does not warm one serial round-trip at a time.
+    /// Single-flight means a file the reviewer opens mid-prefetch shares the in-flight fetch.
+    /// This never changes the selected file or <see cref="CurrentDiff"/>, so it deliberately does
+    /// not raise <see cref="Changed"/>: the view refreshes only the title totals and file-row
+    /// stats, not the (unchanged) displayed diff — otherwise an N-file PR re-tokenizes the open
+    /// file N times. Cancelling stops the next claim, not the in-flight wave.
     /// </summary>
     public async Task PrefetchAllDiffsAsync(CancellationToken ct)
     {
-        foreach (var file in Files)
+        lock (_prefetchLock)
+        {
+            _prefetchClaimed.Clear();
+        }
+
+        var workers = Math.Min(PrefetchWorkers, Files.Count);
+        if (workers == 0)
+        {
+            return;
+        }
+
+        await Task.WhenAll(Enumerable.Range(0, workers).Select(_ => PrefetchWorkerAsync(ct))).ConfigureAwait(false);
+    }
+
+    private async Task PrefetchWorkerAsync(CancellationToken ct)
+    {
+        while (true)
         {
             ct.ThrowIfCancellationRequested();
+            if (ClaimNearestUnfetched() is not { } index)
+            {
+                return; // every file is claimed
+            }
+
             try
             {
-                await ComputeDiffForFileAsync(file, ct).ConfigureAwait(false);
+                await ComputeDiffForFileAsync(Files[index], ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
             {
@@ -130,6 +165,48 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
             }
             StatsChanged?.Invoke();
         }
+    }
+
+    /// <summary>Claims the un-fetched file nearest the current selection; null when none remain.</summary>
+    private int? ClaimNearestUnfetched()
+    {
+        // The lock covers the claim only and is never held across the fetch. The selection is read
+        // here rather than captured once, so a worker freed mid-prefetch picks up beside wherever
+        // the reviewer has since navigated; racing with SelectFileAsync's write only costs one
+        // file's priority, so that writer stays lock-free.
+        lock (_prefetchLock)
+        {
+            if (NearestUnclaimed(Files.Count, _prefetchClaimed, _selectedFileIndex) is not { } index)
+            {
+                return null;
+            }
+            _prefetchClaimed.Add(index);
+            return index;
+        }
+    }
+
+    /// <summary>
+    /// The unclaimed index nearest <paramref name="selectedIndex"/>, or null when all are claimed.
+    /// Ties go to the lower index. Pure.
+    /// </summary>
+    internal static int? NearestUnclaimed(int fileCount, IReadOnlySet<int> claimed, int selectedIndex)
+    {
+        int? nearest = null;
+        var nearestDistance = int.MaxValue;
+        for (var i = 0; i < fileCount; i++)
+        {
+            if (claimed.Contains(i))
+            {
+                continue;
+            }
+            var distance = Math.Abs(i - selectedIndex);
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearest = i;
+            }
+        }
+        return nearest;
     }
 
     public async Task LoadAsync(CancellationToken ct)
