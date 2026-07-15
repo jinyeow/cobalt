@@ -137,7 +137,7 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         IsLoading = true;
         Error = null;
         Changed?.Invoke();
-        Task<IReadOnlyList<PrThread>>? threadsTask = null;
+        Task<FileDiff?>? diffTask = null;
         try
         {
             _iteration = await source.GetLatestIterationAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
@@ -151,27 +151,36 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
             Files = await source.GetIterationChangesAsync(
                 pr.ProjectName, pr.RepositoryId, pr.PullRequestId, _iteration.Id, ct).ConfigureAwait(false);
 
-            // Threads depend only on the PR id, so this round-trip overlaps the first diff's blobs
-            // instead of preceding them. It starts here rather than at the top of the method
-            // because the blobs cannot start any earlier than this anyway (they need the
-            // iteration's commit ids), and the early return above would otherwise abandon it.
-            threadsTask = source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct);
+            // Threads need only the PR id and the first file's blobs need only the iteration, so
+            // both round-trips start here and are harvested below: an open costs ~3 round-trips
+            // rather than 5. They start after the files fetch (not at the top of the method)
+            // because the blobs cannot start any earlier than this anyway, and the early return
+            // above would otherwise abandon an in-flight task.
+            var threadsTask = source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct);
 
             _selectedFileIndex = 0;
-            if (Files.Count > 0)
-            {
-                await ComputeCurrentDiffAsync(ct).ConfigureAwait(false);
-                // First paint: the diff is ready, so show it now rather than behind the threads
-                // fetch. The finally's Changed then fills in the thread markers.
-                IsLoading = false;
-                Changed?.Invoke();
-            }
+            var file = SelectedFile;
+            diffTask = file is null ? null : ComputeDiffForFileAsync(file, ct);
 
+            // Threads are harvested before the diff is published, and both land before the single
+            // paint in the finally. This order is load-bearing, not stylistic:
+            //  - a threads failure must leave CurrentDiff null, because the view renders Error only
+            //    while CurrentDiff is null and otherwise overwrites the error header with the
+            //    file's stats — a swallowed failure shows a clean diff with no markers on a PR
+            //    that has review comments;
+            //  - a diff failure must still leave Threads populated: LoadAsync runs once per dialog,
+            //    so dropping them here costs the whole session its comment markers.
+            // Awaiting does not serialise the two: both requests are already in flight.
             Threads = await threadsTask.ConfigureAwait(false);
+
+            if (file is not null && diffTask is not null)
+            {
+                var diff = await diffTask.ConfigureAwait(false);
+                _current = diff is null ? null : new DiffState(diff, file.Path);
+            }
         }
         catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {
-            ObserveFault(threadsTask);
             throw; // genuine user/dialog cancel (carries our token) stays silent
         }
         catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
@@ -179,10 +188,14 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
             // A cancellation reaching here carries a foreign token → an HttpClient timeout,
             // surfaced as an expected error rather than a silent no-data pane (L2).
             Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
-            ObserveFault(threadsTask);
         }
         finally
         {
+            // The blobs are started before the threads are harvested, so a threads failure leaves
+            // this fetch running unawaited. Observing it on every path (rather than in each catch)
+            // keeps its fault off the crash log; on the happy path it is already awaited and this
+            // is a no-op. The threads fetch never needs this: it is always the first await.
+            ObserveFault(diffTask);
             IsLoading = false;
             Changed?.Invoke();
         }
@@ -192,7 +205,8 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     /// Observes a fetch that was started but left unawaited because something before its await
     /// failed. Without this its fault would resurface as a phantom crash-log entry via the
     /// <see cref="TaskScheduler.UnobservedTaskException"/> hook, with no message bar (ADR 0013) —
-    /// the error the user actually needs is the one already in <see cref="Error"/>.
+    /// the error the user actually needs is the one already in <see cref="Error"/>. Harmless on an
+    /// already-awaited task, so callers can invoke it unconditionally on every exit path.
     /// </summary>
     private static void ObserveFault(Task? task) =>
         _ = task?.ContinueWith(
@@ -404,7 +418,10 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         {
             // Evicted on success and on failure alike: a file whose fetch failed must be
             // retryable by a later select, never stuck behind a permanently faulted task.
-            _inflight.TryRemove(file.Path, out _);
+            // Removed by key *and value*, so a late awaiter cannot evict a newer entry that
+            // another caller registered after this fetch finished — that would send the newer
+            // caller's joiners on duplicate round-trips, defeating the point of sharing.
+            _inflight.TryRemove(new KeyValuePair<string, Lazy<Task<FileDiff>>>(file.Path, inflight));
         }
     }
 

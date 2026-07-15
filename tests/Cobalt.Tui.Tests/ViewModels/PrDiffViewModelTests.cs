@@ -189,6 +189,33 @@ public class PrDiffViewModelTests
             Task.CompletedTask;
     }
 
+    /// <summary>Threads load cleanly, but the only (first) file's blobs fail.</summary>
+    private sealed class FirstFileBlobFailsSource : IPrDiffSource
+    {
+        public IReadOnlyList<PrThread> Threads { get; set; } = [];
+
+        public Task<PrIteration?> GetLatestIterationAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromResult<PrIteration?>(new(2, "src", "tgt", "base"));
+
+        public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repo, int prId, int iterationId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<FileChange>>([new("/bad.cs", FileChangeKind.Edit)]);
+
+        public Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct) =>
+            Task.FromException<string>(new HttpRequestException("blob 500"));
+
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromResult(Threads);
+
+        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
+            Task.CompletedTask;
+    }
+
     /// <summary>True if <paramref name="task"/> completes within <paramref name="timeout"/>.</summary>
     private static async Task<bool> CompletesWithinAsync(Task task, TimeSpan timeout) =>
         await Task.WhenAny(task, Task.Delay(timeout)).ConfigureAwait(false) == task;
@@ -311,7 +338,7 @@ public class PrDiffViewModelTests
     }
 
     [Fact]
-    public async Task Load_Paints_The_Diff_Before_Threads_Arrive()
+    public async Task Load_Does_Not_Publish_An_Interactive_Diff_Before_Threads_Arrive()
     {
         var source = new GatedThreadsSource
         {
@@ -321,37 +348,60 @@ public class PrDiffViewModelTests
         source.Blobs[("/a.cs", "src")] = "x\nadded\n";
         var vm = new PrDiffViewModel(source, Pr());
 
-        var painted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // A paint carrying a finished, interactive diff while Threads is still empty tells the
+        // reviewer this file has no comments on a PR that has them — `o` / `]t` report "no thread"
+        // with no cue that the threads simply have not arrived yet.
+        string? premature = null;
         vm.Changed += () =>
         {
-            if (vm.CurrentDiff is not null && !vm.IsLoading)
+            if (!vm.IsLoading && vm.CurrentDiff is not null && vm.Threads.Count == 0)
             {
-                painted.TrySetResult();
+                premature = "a Changed published an interactive diff while Threads was still empty";
             }
         };
 
         var load = vm.LoadAsync(TestContext.Current.CancellationToken);
-
-        // Threads depend only on the PR id, so the diff must not wait behind them: a Changed
-        // carrying a finished diff has to reach the view while the threads fetch is still pending.
-        Assert.True(
-            await CompletesWithinAsync(painted.Task, TimeSpan.FromSeconds(5)),
-            "the diff must paint (Changed with CurrentDiff set and IsLoading false) before threads land");
-        Assert.Empty(vm.Threads);
-
         source.ReleaseThreads([
             new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null),
         ]);
         await load;
 
-        // The threads still land, filling in the markers on the already-painted diff.
+        Assert.Null(premature);
         Assert.Single(vm.Threads);
+        Assert.NotNull(vm.CurrentDiff);
         Assert.False(vm.IsLoading);
-        Assert.Null(vm.Error);
     }
 
     [Fact]
-    public async Task Load_Threads_Failure_Still_Surfaces_As_Error_After_First_Paint()
+    public async Task Load_Publishes_The_Diff_In_A_Single_Paint()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        // Every Changed carrying a diff re-tokenizes the whole file in the view, so opening a PR
+        // must cost exactly one such pass rather than one per loading stage.
+        var paintsWithADiff = 0;
+        vm.Changed += () =>
+        {
+            if (vm.CurrentDiff is not null)
+            {
+                paintsWithADiff++;
+            }
+        };
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, paintsWithADiff);
+    }
+
+    [Fact]
+    public async Task Load_Threads_Failure_Leaves_CurrentDiff_Null_So_The_Error_Survives()
     {
         var source = new GatedThreadsSource
         {
@@ -365,10 +415,31 @@ public class PrDiffViewModelTests
         source.FailThreads(new HttpRequestException("threads down"));
         await load;
 
-        // Overlapping the fetch must not move a threads failure outside the ADR 0013 catch filters.
         Assert.NotNull(vm.Error);
         Assert.Contains("threads down", vm.Error);
+        // The view renders Error only while CurrentDiff is null, overwriting the error header with
+        // the file's stats otherwise. Publishing a diff here would swallow the failure and show a
+        // clean diff with zero markers on a PR that has review comments.
+        Assert.Null(vm.CurrentDiff);
         Assert.False(vm.IsLoading);
+    }
+
+    [Fact]
+    public async Task Load_Diff_Failure_Still_Populates_Threads()
+    {
+        var source = new FirstFileBlobFailsSource
+        {
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/bad.cs", 2, null)],
+        };
+        var vm = new PrDiffViewModel(source, Pr());
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // LoadAsync runs once per dialog, so losing the threads to a first-file diff failure leaves
+        // the whole session with no comment markers.
+        Assert.Single(vm.Threads);
+        Assert.NotNull(vm.Error);
+        Assert.Null(vm.CurrentDiff);
     }
 
     [Fact]
