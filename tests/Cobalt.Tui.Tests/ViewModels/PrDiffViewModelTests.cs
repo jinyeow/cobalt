@@ -522,6 +522,60 @@ public class PrDiffViewModelTests
         Assert.Single(vm.Threads);
         Assert.NotNull(vm.Error);
         Assert.Null(vm.CurrentDiff);
+        // The threads loaded fine; only the diff failed. Reporting a degraded session here would
+        // warn about a condition that does not exist.
+        Assert.False(vm.ThreadsUnavailable);
+    }
+
+    [Fact]
+    public async Task Threads_Failure_Marks_Threads_Unavailable_For_The_Whole_Session()
+    {
+        var source = new GatedThreadsSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        source.Blobs[("/b.cs", "base")] = "1\n";
+        source.Blobs[("/b.cs", "src")] = "1\n2\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        Assert.False(vm.ThreadsUnavailable);
+
+        var load = vm.LoadAsync(TestContext.Current.CancellationToken);
+        source.FailThreads(new HttpRequestException("threads down"));
+        await load;
+
+        Assert.True(vm.ThreadsUnavailable);
+
+        // LoadAsync runs once per dialog, so the threads never arrive later. Error is transient —
+        // the next operation clears it — but this degraded state must outlive it: otherwise the
+        // first keypress publishes a diff, the view's header precedence overwrites the error, and
+        // the reviewer sees a clean file with no markers on a PR that has review comments.
+        await vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+
+        Assert.True(vm.ThreadsUnavailable);
+        Assert.NotNull(vm.CurrentDiff);
+        Assert.Empty(vm.Threads);
+    }
+
+    [Fact]
+    public async Task A_Pr_With_No_Threads_Is_Not_Marked_Threads_Unavailable()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads = [],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // "No threads" and "threads unknown" are different facts; conflating them is the bug.
+        Assert.Empty(vm.Threads);
+        Assert.False(vm.ThreadsUnavailable);
     }
 
     [Fact]

@@ -57,6 +57,10 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     public IReadOnlyList<FileChange> Files { get; private set; } = [];
     public IReadOnlyList<PrThread> Threads { get; private set; } = [];
 
+    /// <summary>True when the review threads could not be loaded, so comment markers and thread
+    /// navigation are unavailable for this dialog session (LoadAsync runs once).</summary>
+    public bool ThreadsUnavailable { get; private set; }
+
     /// <summary>
     /// The displayed diff and the file it came from, held as one object so the pair is published by
     /// a single (atomic) reference write. Two overlapping selects resuming on threadpool threads
@@ -248,7 +252,21 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
             //  - a diff failure must still leave Threads populated: LoadAsync runs once per dialog,
             //    so dropping them here costs the whole session its comment markers.
             // Awaiting does not serialise the two: both requests are already in flight.
-            Threads = await threadsTask.ConfigureAwait(false);
+            try
+            {
+                Threads = await threadsTask.ConfigureAwait(false);
+            }
+            catch (Exception ex) when (
+                AdoExceptions.IsExpected(ex) || (ex is OperationCanceledException oce && AdoExceptions.IsTimeout(oce, ct)))
+            {
+                // A threads failure is a persistent degraded state, not a transient error. Error is
+                // cleared by the next operation, but LoadAsync runs once per dialog, so Threads
+                // stays empty for the session: every later paint would otherwise be
+                // indistinguishable from "this file has no comments". A genuine user cancel is
+                // deliberately not caught — the dialog is closing, not degraded.
+                ThreadsUnavailable = true;
+                throw; // the outer filters own the Error message
+            }
 
             if (file is not null && diffTask is not null)
             {
