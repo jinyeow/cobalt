@@ -88,4 +88,19 @@ public class IntraLineDiffTests
         Assert.NotEmpty(oldSpans);
         Assert.NotEmpty(newSpans);
     }
+
+    [Fact]
+    public void Lines_Over_The_Length_Guard_Return_Empty_Even_For_A_Small_Word_Change()
+    {
+        // A single-word change would normally clear the similarity guard (low ChangedRatio)
+        // and produce spans; the length guard must short-circuit before that regardless.
+        var oldLine = string.Join(" ", Enumerable.Repeat("word", 480)) + " end";
+        var newLine = string.Join(" ", Enumerable.Repeat("word", 480)) + " tail";
+        Assert.True(oldLine.Length > 2000, "fixture must exceed the length guard");
+
+        var (oldSpans, newSpans) = IntraLineDiff.Compute(oldLine, newLine);
+
+        Assert.Empty(oldSpans);
+        Assert.Empty(newSpans);
+    }
 }
