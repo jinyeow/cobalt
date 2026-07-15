@@ -182,14 +182,11 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
         _ => VisualRole.Normal,
     };
 
-    private Color BackgroundFor(DiffLineKind kind, bool emphasis, Color contextBackground, DiffPalette? palette = null)
-    {
-        var p = palette ?? _palette();
-        return kind switch
+    private static Color BackgroundFor(DiffLineKind kind, bool emphasis, Color contextBackground, DiffPalette palette) =>
+        kind switch
         {
-            DiffLineKind.Added => emphasis ? p.AddedEmphasisBackground : p.AddedBackground,
-            DiffLineKind.Removed => emphasis ? p.RemovedEmphasisBackground : p.RemovedBackground,
+            DiffLineKind.Added => emphasis ? palette.AddedEmphasisBackground : palette.AddedBackground,
+            DiffLineKind.Removed => emphasis ? palette.RemovedEmphasisBackground : palette.RemovedBackground,
             _ => contextBackground,
         };
-    }
 }
