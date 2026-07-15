@@ -33,6 +33,9 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
 
     public int Count => _lines.Count;
 
+    /// <summary>Test seam: the composed lines this source draws, by row.</summary>
+    internal IReadOnlyList<StyledLine> Lines => _lines;
+
     public int MaxItemLength { get; } = lines.Count == 0 ? 0 : lines.Max(l => l.DisplayText.Length);
 
     public bool SuspendCollectionChangedEvent { get; set; }

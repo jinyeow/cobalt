@@ -141,6 +141,59 @@ public class DiffReviewDialogKeyTests
         Assert.Same(before, detail.DiffPane.Source);
     }
 
+    // An edited file whose only change is at the top, so the 20-odd context lines below it fold
+    // away (radius 3) and 'e' has something to expand.
+    private static async Task<(DiffReviewDialog Detail, Dialog Dialog)> FoldedDialog()
+    {
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Edit)] };
+        var original = Enumerable.Range(0, 30).Select(i => $"var x{i} = {i};").ToList();
+        source.Blobs[("/a.cs", "base")] = string.Join("\n", original) + "\n";
+        original[0] = "var x0 = 99;";
+        source.Blobs[("/a.cs", "src")] = string.Join("\n", original) + "\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+        dialog.SetFocus();
+        return (detail, dialog);
+    }
+
+    /// <summary>The composed line currently shown for each visible unified diff-line index.</summary>
+    private static Dictionary<int, StyledLine> ComposedByLine(DiffReviewDialog detail)
+    {
+        var source = Assert.IsType<DiffListDataSource>(detail.DiffPane.Source);
+        var map = new Dictionary<int, StyledLine>();
+        for (var i = 0; i < detail.DiffRows.Count; i++)
+        {
+            if (detail.DiffRows[i].LineIndex is { } lineIndex)
+            {
+                map[lineIndex] = source.Lines[i];
+            }
+        }
+        return map;
+    }
+
+    [Fact]
+    public async Task Expanding_A_Fold_Reuses_The_Lines_Already_Composed()
+    {
+        // 'e' changes only which lines are visible, so the lines that were already on screen must
+        // come back as the same composition — re-tokenizing them is the cost this exists to avoid.
+        var (detail, dialog) = await FoldedDialog();
+        Assert.Contains(detail.DiffRows, r => r.FoldId is not null); // the fixture actually folds
+        var before = ComposedByLine(detail);
+
+        dialog.NewKeyDownEvent(new Key('e'));
+
+        var after = ComposedByLine(detail);
+        Assert.True(after.Count > before.Count, "expanding the fold should reveal more lines");
+        foreach (var (lineIndex, styled) in before)
+        {
+            Assert.Same(styled, after[lineIndex]);
+        }
+    }
+
     [Fact]
     public async Task Tab_Flips_Focus_Between_Panes()
     {

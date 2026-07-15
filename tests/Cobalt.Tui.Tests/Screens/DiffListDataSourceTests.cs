@@ -97,6 +97,32 @@ public class DiffListDataSourceTests
     }
 
     [Fact]
+    public void A_Composition_Reused_Across_Renders_Still_Recolours_With_The_Theme()
+    {
+        // ADR 0019: DiffStyleCache hands the same StyledLine back on every render, so the pane
+        // would freeze on one theme if a composition pinned any colour. It must not — a
+        // StyledLine carries roles and diff kinds only, and the palette is read at paint.
+        var cache = new Cobalt.Core.Text.DiffStyleCache();
+        cache.Prepare(
+            [new DiffLine(DiffLineKind.Added, null, 1, "x")],
+            Language.CSharp,
+            new HashSet<int>(),
+            new HashSet<int>());
+        var cached = cache.Unified(0);
+        var gutter = cached.Runs[0].Style;
+
+        ThemeService.Enable();
+        ThemeService.Apply(ThemeResolver.Resolve(Cobalt.Core.Config.ThemeChoice.Dark, OsTheme.Unknown));
+        var dark = new DiffListDataSource([cached]).Map(gutter, Normal, RoleForeground);
+        ThemeService.Apply(ThemeResolver.Resolve(Cobalt.Core.Config.ThemeChoice.Light, OsTheme.Unknown));
+        var light = new DiffListDataSource([cached]).Map(gutter, Normal, RoleForeground);
+
+        Assert.Same(cached, cache.Unified(0)); // the same cached line drew both
+        Assert.Equal(DiffPalette.Dark.AddedBackground, dark.Background);
+        Assert.Equal(DiffPalette.Light.AddedBackground, light.Background);
+    }
+
+    [Fact]
     public void Render_Resolves_Each_Distinct_Role_At_Most_Once_Per_Row()
     {
         // A row is a gutter run plus six code runs spanning only two distinct token kinds

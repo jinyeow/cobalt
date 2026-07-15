@@ -43,6 +43,10 @@ public sealed class DiffReviewDialog(
     private int _searchIndex;
     private int _lastDialogWidth = -1;
     private int _diffContentWidth = 1;
+    private readonly DiffStyleCache _styleCache = new();
+
+    /// <summary>Stands in for the commented-line sets when there is no file to look them up for.</summary>
+    private static readonly IReadOnlySet<int> NoLines = new HashSet<int>();
 
     private CancellationToken Token => _cts.Token;
 
@@ -953,8 +957,13 @@ public sealed class DiffReviewDialog(
             }
             _renderedDiffPath = file?.Path;
 
+            // Point the style cache at this render's inputs: it reuses every composition whose
+            // line, language and thread marker are unchanged, so a render that only expands a
+            // fold, filters the tree or lands a comment no longer re-tokenizes the whole file.
+            // The commented lines are looked up once here rather than scanned per line.
             var language = LanguageDetector.FromPath(file?.Path ?? "");
-            bool HasThread(DiffLine l) => vm.ThreadsForDiffLine(l).Count > 0;
+            var (commentedLeft, commentedRight) = file is null ? (NoLines, NoLines) : vm.CommentedLinesFor(file.Path);
+            _styleCache.Prepare(diff.Lines, language, commentedLeft, commentedRight);
             var rows = new List<DiffRow>();
             List<StyledLine> styled;
             if (_sideBySide)
@@ -967,7 +976,7 @@ public sealed class DiffReviewDialog(
                     rows.Add(new DiffRow(null, r.LeftIndex, r.RightIndex, null, null));
                 }
                 var columnWidth = Math.Max(1, (_diffContentWidth - SideBySideComposer.Separator.Length) / 2);
-                styled = [.. SideBySideComposer.Compose(diff.Lines, sbs, language, HasThread, columnWidth)];
+                styled = [.. _styleCache.SideBySide(sbs, columnWidth)];
             }
             else
             {
@@ -985,10 +994,12 @@ public sealed class DiffReviewDialog(
                 styled = [];
                 foreach (var foldRow in _foldState.Rows())
                 {
-                    if (foldRow.Line is { } line && foldRow.LineIndex is { } li)
+                    if (foldRow.Line is not null && foldRow.LineIndex is { } li)
                     {
                         rows.Add(new DiffRow(li, null, null, null, null));
-                        var composed = DiffLineStyler.Compose(line, SyntaxTokenizer.Tokenize(line.Text, language), HasThread(line));
+                        // Search hits stay an overlay on the cached composition: a query change
+                        // must not invalidate a line's styling, only decorate it.
+                        var composed = _styleCache.Unified(li);
                         if (hitsByLine is not null && hitsByLine.TryGetValue(li, out var spans))
                         {
                             composed = DiffLineStyler.WithSearchHits(composed, spans, composed.Runs[0].Length);
