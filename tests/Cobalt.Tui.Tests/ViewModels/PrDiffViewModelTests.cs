@@ -118,6 +118,44 @@ public class PrDiffViewModelTests
         public void Release() => _release.TrySetResult();
     }
 
+    /// <summary>A diff source whose thread fetch blocks until <see cref="ReleaseThreads"/>; blobs resolve immediately.</summary>
+    private sealed class GatedThreadsSource : IPrDiffSource
+    {
+        private readonly TaskCompletionSource<IReadOnlyList<PrThread>> _threads =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IReadOnlyList<FileChange> Changes { get; set; } = [];
+        public Dictionary<(string path, string commit), string> Blobs { get; } = new();
+
+        public Task<PrIteration?> GetLatestIterationAsync(string project, string repo, int prId, CancellationToken ct) =>
+            Task.FromResult<PrIteration?>(new(2, "src", "tgt", "base"));
+
+        public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repo, int prId, int iterationId, CancellationToken ct) =>
+            Task.FromResult(Changes);
+
+        public Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct) =>
+            Task.FromResult(Blobs.GetValueOrDefault((path, commit), ""));
+
+        public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
+            _threads.Task;
+
+        public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task ReplyToThreadAsync(string project, string repo, int prId, int threadId, string text, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public void ReleaseThreads(IReadOnlyList<PrThread> threads) => _threads.TrySetResult(threads);
+        public void FailThreads(Exception ex) => _threads.TrySetException(ex);
+    }
+
+    /// <summary>True if <paramref name="task"/> completes within <paramref name="timeout"/>.</summary>
+    private static async Task<bool> CompletesWithinAsync(Task task, TimeSpan timeout) =>
+        await Task.WhenAny(task, Task.Delay(timeout)).ConfigureAwait(false) == task;
+
     private static PullRequest Pr() =>
         new(10, "t", null, "active", false, "f", "main", "succeeded", "Jin", "repo-1", "web", [], [], "src",
             "Contoso.Web");
@@ -185,6 +223,67 @@ public class PrDiffViewModelTests
         // so a second request must never be issued.
         Assert.False(await source.WaitForBlobRequestsAsync(1, TimeSpan.FromMilliseconds(200)));
         Assert.Equal(2, vm.CurrentDiff!.Additions);
+    }
+
+    [Fact]
+    public async Task Load_Paints_The_Diff_Before_Threads_Arrive()
+    {
+        var source = new GatedThreadsSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        var painted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        vm.Changed += () =>
+        {
+            if (vm.CurrentDiff is not null && !vm.IsLoading)
+            {
+                painted.TrySetResult();
+            }
+        };
+
+        var load = vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // Threads depend only on the PR id, so the diff must not wait behind them: a Changed
+        // carrying a finished diff has to reach the view while the threads fetch is still pending.
+        Assert.True(
+            await CompletesWithinAsync(painted.Task, TimeSpan.FromSeconds(5)),
+            "the diff must paint (Changed with CurrentDiff set and IsLoading false) before threads land");
+        Assert.Empty(vm.Threads);
+
+        source.ReleaseThreads([
+            new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null),
+        ]);
+        await load;
+
+        // The threads still land, filling in the markers on the already-painted diff.
+        Assert.Single(vm.Threads);
+        Assert.False(vm.IsLoading);
+        Assert.Null(vm.Error);
+    }
+
+    [Fact]
+    public async Task Load_Threads_Failure_Still_Surfaces_As_Error_After_First_Paint()
+    {
+        var source = new GatedThreadsSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        var load = vm.LoadAsync(TestContext.Current.CancellationToken);
+        source.FailThreads(new HttpRequestException("threads down"));
+        await load;
+
+        // Overlapping the fetch must not move a threads failure outside the ADR 0013 catch filters.
+        Assert.NotNull(vm.Error);
+        Assert.Contains("threads down", vm.Error);
+        Assert.False(vm.IsLoading);
     }
 
     [Fact]

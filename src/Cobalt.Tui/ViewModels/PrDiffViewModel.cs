@@ -120,6 +120,7 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         IsLoading = true;
         Error = null;
         Changed?.Invoke();
+        Task<IReadOnlyList<PrThread>>? threadsTask = null;
         try
         {
             _iteration = await source.GetLatestIterationAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
@@ -132,16 +133,28 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 
             Files = await source.GetIterationChangesAsync(
                 pr.ProjectName, pr.RepositoryId, pr.PullRequestId, _iteration.Id, ct).ConfigureAwait(false);
-            Threads = await source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
+
+            // Threads depend only on the PR id, so this round-trip overlaps the first diff's blobs
+            // instead of preceding them. It starts here rather than at the top of the method
+            // because the blobs cannot start any earlier than this anyway (they need the
+            // iteration's commit ids), and the early return above would otherwise abandon it.
+            threadsTask = source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct);
 
             _selectedFileIndex = 0;
             if (Files.Count > 0)
             {
                 await ComputeCurrentDiffAsync(ct).ConfigureAwait(false);
+                // First paint: the diff is ready, so show it now rather than behind the threads
+                // fetch. The finally's Changed then fills in the thread markers.
+                IsLoading = false;
+                Changed?.Invoke();
             }
+
+            Threads = await threadsTask.ConfigureAwait(false);
         }
         catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {
+            ObserveFault(threadsTask);
             throw; // genuine user/dialog cancel (carries our token) stays silent
         }
         catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
@@ -149,6 +162,7 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
             // A cancellation reaching here carries a foreign token → an HttpClient timeout,
             // surfaced as an expected error rather than a silent no-data pane (L2).
             Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
+            ObserveFault(threadsTask);
         }
         finally
         {
@@ -156,6 +170,19 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
             Changed?.Invoke();
         }
     }
+
+    /// <summary>
+    /// Observes a fetch that was started but left unawaited because something before its await
+    /// failed. Without this its fault would resurface as a phantom crash-log entry via the
+    /// <see cref="TaskScheduler.UnobservedTaskException"/> hook, with no message bar (ADR 0013) —
+    /// the error the user actually needs is the one already in <see cref="Error"/>.
+    /// </summary>
+    private static void ObserveFault(Task? task) =>
+        _ = task?.ContinueWith(
+            static t => _ = t.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 
     public async Task SelectFileAsync(int index, CancellationToken ct)
     {
