@@ -736,11 +736,15 @@ public sealed class DiffReviewDialog(
     /// <summary>]t/[t: move the diff-pane selection to the next/previous commented line, count-aware.</summary>
     private void NavThread(bool forward, int count)
     {
-        if (vm.CurrentDiff is not { Lines.Count: > 0 } diff)
+        if (vm.CurrentDiff is not { Lines.Count: > 0 } diff || vm.CurrentDiffPath is not { } path)
         {
             return;
         }
-        bool HasThread(int i) => vm.ThreadsForDiffLine(diff.Lines[i]).Count > 0;
+        // Looked up once, then probed by set: the predicate runs on every line of the file, and
+        // scanning every thread per line (allocating a list each time) made ]t/[t cost O(lines ×
+        // threads) per keypress. Keyed on the displayed file, like the pane it navigates.
+        var (commentedLeft, commentedRight) = vm.CommentedLinesFor(path);
+        bool HasThread(int i) => DiffThreadAnchor.HasThread(diff.Lines[i], commentedLeft, commentedRight);
         var from = CurrentUnifiedLine();
         var target = forward
             ? DiffNavigator.NextThread(diff.Lines, from, HasThread, count)

@@ -97,9 +97,23 @@ public sealed class DiffStyleCache
         return _sideBySide = SideBySideComposer.Compose(_lines, rows, _language, HasThread, columnWidth);
     }
 
-    /// <summary>Whether a line carries a comment marker: right side for added/context, left for removed.</summary>
-    private bool HasThread(DiffLine line) =>
+    private bool HasThread(DiffLine line) => DiffThreadAnchor.HasThread(line, _commentedLeft, _commentedRight);
+}
+
+/// <summary>
+/// Where a review comment anchors on a diff line: the right (new) side for added and context
+/// lines, the left (old) side for removed ones — the rule Azure DevOps files comments under.
+/// Shared so the marker a reviewer sees and the line <c>]t</c>/<c>[t</c> jumps to are decided by
+/// one rule; two copies that drifted would navigate to lines showing no marker.
+/// </summary>
+public static class DiffThreadAnchor
+{
+    /// <summary>
+    /// Whether <paramref name="line"/> carries a thread, given the commented line numbers on each
+    /// side (as <c>PrDiffViewModel.CommentedLinesFor</c> reports them).
+    /// </summary>
+    public static bool HasThread(DiffLine line, IReadOnlySet<int> commentedLeft, IReadOnlySet<int> commentedRight) =>
         line.Kind == DiffLineKind.Removed
-            ? line.OldLineNumber is { } l && _commentedLeft.Contains(l)
-            : line.NewLineNumber is { } r && _commentedRight.Contains(r);
+            ? line.OldLineNumber is { } l && commentedLeft.Contains(l)
+            : line.NewLineNumber is { } r && commentedRight.Contains(r);
 }

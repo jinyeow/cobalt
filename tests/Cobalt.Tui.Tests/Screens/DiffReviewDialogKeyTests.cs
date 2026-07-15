@@ -185,6 +185,36 @@ public class DiffReviewDialogKeyTests
     }
 
     [Fact]
+    public async Task Thread_Navigation_Follows_The_Displayed_File_Threads()
+    {
+        // ]t probed threads through vm.ThreadsForDiffLine, which scopes to SelectedFile — so
+        // during a select it navigated the *next* file's threads over the displayed file's lines
+        // and simply refused to move. Probing the displayed file's commented lines fixes both
+        // that and the per-line O(threads) scan behind it.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [], "/a.cs", 3, null)],
+        };
+        source.Blobs[("/a.cs", "src")] = "l0\nl1\nl2\n"; // added lines, new line numbers 1..3
+        source.Gates["/b.cs"] = new TaskCompletionSource<string>();
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        _ = vm.SelectFileAsync(1, TestContext.Current.CancellationToken); // /b.cs's fetch hangs
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+        detail.DiffPane.SetFocus();
+        Assert.Equal("/a.cs", vm.CurrentDiffPath); // /a.cs is on screen, /b.cs is selected
+
+        dialog.NewKeyDownEvent(new Key(']'));
+        dialog.NewKeyDownEvent(new Key('t'));
+
+        // /a.cs's thread is on new line 3 — the third of its three added lines.
+        Assert.Equal(2, detail.SelectedDiffLineIndex);
+    }
+
+    [Fact]
     public async Task Mark_Viewed_Marks_The_File_On_Screen_Not_The_One_Being_Selected()
     {
         // Same drift as the header: during a select, SelectedFile is already the next file while
