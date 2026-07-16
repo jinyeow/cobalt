@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+- **Auto-switch to the `dotnet` driver in remote/RDP sessions.** cobalt now detects a remote
+  session (`SESSIONNAME=RDP-*`, e.g. a Windows 365 Cloud PC), like it already does for
+  zellij/tmux, and selects the stdio/ANSI `dotnet` driver instead of the Win32 `windows`
+  driver. On a remote, GPU-less host the `windows` driver's console painting is translated to
+  VT by ConPTY on every redraw — expensive over a latency link, and it drives the terminal
+  process's CPU high while cobalt itself stays near 0%. The `dotnet` driver writes VT straight
+  to stdout and skips the round-trip, so navigation stays responsive with no configuration. A
+  physical console is unchanged; `COBALT_DRIVER` still overrides. See
+  [ADR 0016](docs/adr/0016-terminal-driver-selection.md).
+
 ### Changed
 - **Dev builds are prereleases, and `cobalt --version` now names the commit.** The version is
   `0.3.0`, and any build that doesn't set `Version` explicitly — every local and branch build —
