@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace Cobalt.Core.Text.Syntax;
 
 public enum TokenKind
@@ -24,11 +26,11 @@ public readonly record struct SyntaxToken(int Start, int Length, TokenKind Kind)
 public static class SyntaxTokenizer
 {
     private sealed record LangSpec(
-        IReadOnlySet<string> Keywords,
+        FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> Keywords,
         string? LineComment,
         char[] Quotes);
 
-    private static readonly IReadOnlySet<string> CSharpKeywords = new HashSet<string>(StringComparer.Ordinal)
+    private static readonly FrozenSet<string> CSharpKeywords = new HashSet<string>(StringComparer.Ordinal)
     {
         "public", "private", "protected", "internal", "static", "readonly", "const", "var", "void",
         "return", "if", "else", "for", "foreach", "while", "do", "switch", "case", "default", "break",
@@ -37,31 +39,32 @@ public static class SyntaxTokenizer
         "string", "bool", "double", "float", "decimal", "char", "object", "async", "await", "get",
         "set", "init", "sealed", "override", "virtual", "abstract", "throw", "try", "catch", "finally",
         "in", "out", "ref", "is", "as", "typeof", "nameof", "yield", "params", "where", "when",
-    };
+    }.ToFrozenSet(StringComparer.Ordinal);
 
-    private static readonly IReadOnlySet<string> JsTsKeywords = new HashSet<string>(StringComparer.Ordinal)
+    private static readonly FrozenSet<string> JsTsKeywords = new HashSet<string>(StringComparer.Ordinal)
     {
         "const", "let", "var", "function", "return", "if", "else", "for", "while", "do", "switch",
         "case", "default", "break", "continue", "new", "class", "extends", "super", "this", "null",
         "undefined", "true", "false", "import", "export", "from", "async", "await", "yield", "typeof",
         "instanceof", "in", "of", "void", "delete", "try", "catch", "finally", "throw", "interface",
         "type", "enum", "public", "private", "protected", "readonly", "static", "as", "namespace",
-    };
+    }.ToFrozenSet(StringComparer.Ordinal);
 
-    private static readonly IReadOnlySet<string> PythonKeywords = new HashSet<string>(StringComparer.Ordinal)
+    private static readonly FrozenSet<string> PythonKeywords = new HashSet<string>(StringComparer.Ordinal)
     {
         "def", "return", "if", "elif", "else", "for", "while", "in", "not", "and", "or", "is", "None",
         "True", "False", "class", "import", "from", "as", "pass", "break", "continue", "with", "try",
         "except", "finally", "raise", "lambda", "yield", "global", "nonlocal", "self", "async", "await",
         "del", "assert",
-    };
+    }.ToFrozenSet(StringComparer.Ordinal);
 
-    private static readonly IReadOnlySet<string> JsonKeywords = new HashSet<string>(StringComparer.Ordinal)
+    private static readonly FrozenSet<string> JsonKeywords = new HashSet<string>(StringComparer.Ordinal)
     {
         "true", "false", "null",
-    };
+    }.ToFrozenSet(StringComparer.Ordinal);
 
-    private static readonly IReadOnlySet<string> NoKeywords = new HashSet<string>(StringComparer.Ordinal);
+    private static readonly FrozenSet<string> NoKeywords =
+        new HashSet<string>(StringComparer.Ordinal).ToFrozenSet(StringComparer.Ordinal);
 
     public static IReadOnlyList<SyntaxToken> Tokenize(string line, Language language)
     {
@@ -149,8 +152,9 @@ public static class SyntaxTokenizer
                 {
                     i++;
                 }
-                var word = line[start..i];
-                var kind = spec.Keywords.Contains(word) ? TokenKind.Keyword : TokenKind.Identifier;
+                var kind = spec.Keywords.Contains(line.AsSpan(start, i - start))
+                    ? TokenKind.Keyword
+                    : TokenKind.Identifier;
                 tokens.Add(new SyntaxToken(start, i - start, kind));
                 continue;
             }
@@ -185,12 +189,15 @@ public static class SyntaxTokenizer
 
     private static LangSpec SpecFor(Language language) => language switch
     {
-        Language.CSharp => new LangSpec(CSharpKeywords, "//", ['"', '\'']),
-        Language.JsTs => new LangSpec(JsTsKeywords, "//", ['"', '\'', '`']),
-        Language.Python => new LangSpec(PythonKeywords, "#", ['\'', '"']),
-        Language.Json => new LangSpec(JsonKeywords, null, ['"']),
-        _ => new LangSpec(NoKeywords, null, []),
+        Language.CSharp => new LangSpec(Lookup(CSharpKeywords), "//", ['"', '\'']),
+        Language.JsTs => new LangSpec(Lookup(JsTsKeywords), "//", ['"', '\'', '`']),
+        Language.Python => new LangSpec(Lookup(PythonKeywords), "#", ['\'', '"']),
+        Language.Json => new LangSpec(Lookup(JsonKeywords), null, ['"']),
+        _ => new LangSpec(Lookup(NoKeywords), null, []),
     };
+
+    private static FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> Lookup(FrozenSet<string> set) =>
+        set.GetAlternateLookup<ReadOnlySpan<char>>();
 
     private static bool MatchesAt(string line, int i, string token) =>
         i + token.Length <= line.Length && string.CompareOrdinal(line, i, token, 0, token.Length) == 0;

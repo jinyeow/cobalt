@@ -32,6 +32,34 @@ public class SyntaxTokenizerTests
     }
 
     [Fact]
+    public void Classifying_Identifiers_Allocates_No_Per_Word_Substring()
+    {
+        // ALGO-3: keyword membership is tested against the line span directly, so an
+        // identifier-heavy line must allocate no more than a substring-free control of the
+        // identical token structure (a number word per slot). The only difference between
+        // the two lines is the per-identifier substring the old path built to probe the set.
+        const int words = 200;
+        var identifiers = string.Join(" ", Enumerable.Repeat("ab", words));
+        var numbers = string.Join(" ", Enumerable.Repeat("12", words));
+
+        SyntaxTokenizer.Tokenize(identifiers, Language.CSharp); // warm up
+        SyntaxTokenizer.Tokenize(numbers, Language.CSharp);
+
+        var idAlloc = AllocatedBy(() => SyntaxTokenizer.Tokenize(identifiers, Language.CSharp));
+        var numAlloc = AllocatedBy(() => SyntaxTokenizer.Tokenize(numbers, Language.CSharp));
+
+        Assert.True(idAlloc <= numAlloc + 64,
+            $"identifier path allocated {idAlloc} vs substring-free control {numAlloc}");
+    }
+
+    private static long AllocatedBy(Action action)
+    {
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        action();
+        return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
+
+    [Fact]
     public void SyntaxToken_Is_A_Value_Type()
     {
         // ALGO-2: a per-token heap object on every code line is pure churn; the token is a
