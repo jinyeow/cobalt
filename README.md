@@ -13,6 +13,22 @@ Terminal.Gui, so the interesting logic is unit-tested (386 tests). See
 [docs/adr/0004](docs/adr/0004-terminal-gui-v2-with-viewmodels.md) and
 [0007](docs/adr/0007-vim-input-as-testable-data.md).
 
+## Contents
+
+- [Install](#install)
+- [Configure](#configure)
+- [Themes](#themes)
+- [Sign in](#sign-in)
+- [Keys (vim layer)](#keys-vim-layer)
+- [Lists](#lists)
+- [Editor](#editor)
+- [Terminal multiplexers (zellij / tmux)](#terminal-multiplexers-zellij--tmux)
+- [Crash logs](#crash-logs)
+- [Known limitations](#known-limitations)
+- [Development](#development)
+  - [Testing local changes](#testing-local-changes)
+  - [Before pushing](#before-pushing)
+
 ## Install
 
 ```sh
