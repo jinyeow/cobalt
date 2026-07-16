@@ -61,19 +61,29 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
             return [];
         }
 
-        // workitemsbatch caps at 200 ids per call; page through and merge.
-        var byId = new Dictionary<long, WorkItem>();
-        foreach (var page in Chunk(ids, 200))
+        // workitemsbatch caps at 200 ids per call; the pages are independent, so dispatch them
+        // concurrently and merge once they all return.
+        var pages = await Task.WhenAll(
+            Chunk(ids, 200).Select(page => BatchAsync(page, ListFields, orgRoute, cancellationToken)))
+            .ConfigureAwait(false);
+
+        var byId = new Dictionary<long, WorkItem>(ids.Count);
+        foreach (var dto in pages.SelectMany(p => p.Value))
         {
-            var batch = await BatchAsync(page, ListFields, orgRoute, cancellationToken).ConfigureAwait(false);
-            foreach (var dto in batch.Value)
-            {
-                byId[dto.Id] = WorkItem.From(dto);
-            }
+            byId[dto.Id] = WorkItem.From(dto);
         }
 
         // WIQL returns ids ordered; the batch endpoint does not, so re-sort by WIQL order.
-        return [.. ids.Where(byId.ContainsKey).Select(id => byId[id])];
+        var ordered = new List<WorkItem>(ids.Count);
+        foreach (var id in ids)
+        {
+            if (byId.TryGetValue(id, out var item))
+            {
+                ordered.Add(item);
+            }
+        }
+
+        return ordered;
     }
 
     /// <summary>
@@ -148,11 +158,11 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
         return WorkItemComment.From(dto);
     }
 
-    private static IEnumerable<List<T>> Chunk<T>(IReadOnlyList<T> items, int size)
+    private static IEnumerable<List<T>> Chunk<T>(List<T> items, int size)
     {
         for (var i = 0; i < items.Count; i += size)
         {
-            yield return [.. items.Skip(i).Take(size)];
+            yield return items.GetRange(i, Math.Min(size, items.Count - i));
         }
     }
 

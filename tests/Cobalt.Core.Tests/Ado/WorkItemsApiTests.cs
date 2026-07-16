@@ -1,4 +1,6 @@
 using System.Net;
+using System.Text;
+using System.Text.Json;
 using Cobalt.Core.Ado;
 using Cobalt.Core.Config;
 using Cobalt.Core.Tests.Fakes;
@@ -332,5 +334,73 @@ public class WorkItemsApiTests : IDisposable
         await Api(handler).GetWorkItemAsync(42, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains("My%20Project/_apis/wit/workitems/42", handler.Requests[0].RequestUri!.AbsoluteUri);
+    }
+
+    // ---- NET-5: batch pages are dispatched concurrently ----
+
+    [Fact]
+    public async Task QueryMyWorkItems_Dispatches_Batch_Pages_Concurrently()
+    {
+        // 250 ids -> two workitemsbatch pages. If the pages were awaited one at a time, the second
+        // page would not be issued until the first (gated) call returned, so SecondBatchArrived
+        // would never complete. Concurrent dispatch issues both before either responds.
+        var wiqlIds = string.Join(",", Enumerable.Range(1, 250).Select(i => $"{{\"id\":{i}}}"));
+        var handler = new GatedBatchHandler($"{{\"workItems\":[{wiqlIds}]}}");
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
+        _disposables.Add(httpClient);
+        var api = new WorkItemsApi(new AdoHttp(httpClient), Context);
+
+        var query = api.QueryMyWorkItemsAsync(TestContext.Current.CancellationToken);
+        await handler.SecondBatchArrived.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        handler.Release();
+        var items = await query;
+
+        Assert.Equal(2, handler.BatchCount);
+        Assert.Equal(250, items.Count);
+        Assert.Equal(1, items[0].Id);     // WIQL order preserved across concurrent pages
+        Assert.Equal(250, items[^1].Id);
+    }
+
+    /// <summary>Answers the WIQL immediately, then gates every workitemsbatch call so pages overlap.</summary>
+    private sealed class GatedBatchHandler(string wiqlJson) : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _secondBatch = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _batchCount;
+
+        public int BatchCount => Volatile.Read(ref _batchCount);
+        public Task SecondBatchArrived => _secondBatch.Task;
+        public void Release() => _release.TrySetResult();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var uri = request.RequestUri!.AbsoluteUri;
+            if (uri.Contains("wiql", StringComparison.Ordinal))
+            {
+                return Ok(wiqlJson);
+            }
+
+            var body = await request.Content!.ReadAsStringAsync(ct).ConfigureAwait(false);
+            if (Interlocked.Increment(ref _batchCount) == 2)
+            {
+                _secondBatch.TrySetResult();
+            }
+
+            await _release.Task.WaitAsync(ct).ConfigureAwait(false);
+            return Ok(EchoRequestedIds(body));
+        }
+
+        // Echo the ids this page asked for back as work items, so the merge is correct regardless
+        // of which page's gated response completes first.
+        private static string EchoRequestedIds(string requestBody)
+        {
+            using var doc = JsonDocument.Parse(requestBody);
+            var items = doc.RootElement.GetProperty("ids").EnumerateArray()
+                .Select(e => $"{{\"id\":{e.GetInt64()},\"fields\":{{\"System.Title\":\"t\",\"System.State\":\"New\",\"System.WorkItemType\":\"Task\"}}}}");
+            return $"{{\"value\":[{string.Join(",", items)}]}}";
+        }
+
+        private static HttpResponseMessage Ok(string json) =>
+            new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
     }
 }
