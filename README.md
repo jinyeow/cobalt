@@ -231,8 +231,13 @@ dotnet run --project src/Cobalt -c Release -- auth status
 dotnet run --project src/Cobalt -c Release            # launch the TUI
 ```
 
-**Or install your build as the `cobalt` global tool.** **Watch the cache:** the package
-version is fixed (`0.2.0`) and NuGet caches packages *by version*, so `dotnet tool
+**Keep the `-c Release`.** A bare `dotnet run` builds **Debug**, which is measurably slower on the
+render path — a full re-render of a 10k-line diff measures ~35 ms in Debug against ~13 ms in
+Release, so Debug misses the ~16 ms frame budget on every redraw and the UI feels laggy. Judge
+responsiveness only from a Release build; a Debug build tells you nothing about how it will feel.
+
+**Or install your build as the `cobalt` global tool.** **Watch the cache:** an unreleased build
+packs as `0.3.0-alpha` every time and NuGet caches packages *by version*, so `dotnet tool
 update`/`install --add-source` can silently reuse a **stale** cached build — which looks
 exactly like "my change didn't take". Give each build a unique version so the install
 can't hit the cache:
@@ -240,14 +245,19 @@ can't hit the cache:
 ```sh
 dotnet tool uninstall -g cobalt-tui
 dotnet pack src/Cobalt/Cobalt.csproj -c Release -o ./artifacts \
-  -p:PackageVersion=0.2.0-local1 -p:PublishRepositoryUrl=false -p:EmbedUntrackedSources=false
-dotnet tool install -g cobalt-tui --add-source ./artifacts --version 0.2.0-local1
+  -p:PackageVersion=0.3.0-local1 -p:PublishRepositoryUrl=false -p:EmbedUntrackedSources=false
+dotnet tool install -g cobalt-tui --add-source ./artifacts --version 0.3.0-local1
 ```
 
 Bump `local1` → `local2` … on each rebuild. To keep the same version instead, delete the
 cached package first: `rm -rf ~/.nuget/packages/cobalt-tui` (Windows:
-`rmdir /s /q "%USERPROFILE%\.nuget\packages\cobalt-tui"`). Note `cobalt --version` prints
-only `0.2.0` — it can't tell you which commit you're on; use `git log --oneline -1` for that.
+`rmdir /s /q "%USERPROFILE%\.nuget\packages\cobalt-tui"`).
+
+**Check what you're actually running:** `cobalt --version` prints the version *and* the commit —
+`0.3.0-alpha+fd36e1b` for a branch build, a clean `0.3.0+<sha>` only for a tagged release. The
+`-alpha` marks any build that isn't a release, so a dev build can't be mistaken for one. If the
+sha isn't the commit you expect, you're running a stale install — that mistake is invisible
+without this, because every build between two releases carries the same number.
 
 ### Before pushing
 

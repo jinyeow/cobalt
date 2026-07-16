@@ -66,9 +66,16 @@ static string InformationalVersion()
     var attr = Assembly.GetExecutingAssembly()
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>();
     var version = attr?.InformationalVersion ?? "unknown";
-    // Strip the source-revision suffix SourceLink appends after '+'.
+    // Keep the source revision SourceLink appends after '+', shortened to the usual 7 chars. The
+    // number alone cannot identify a build — every build between two releases carries the same one —
+    // so a report of "it's slow on 0.2.0" is unactionable without the commit.
     var plus = version.IndexOf('+');
-    return plus >= 0 ? version[..plus] : version;
+    if (plus < 0)
+    {
+        return version;
+    }
+    var revision = version[(plus + 1)..];
+    return revision.Length > 7 ? $"{version[..plus]}+{revision[..7]}" : version;
 }
 
 static void PrintHelp()

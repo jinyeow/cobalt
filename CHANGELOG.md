@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+- **Dev builds are prereleases, and `cobalt --version` now names the commit.** The version is
+  `0.3.0`, and any build that doesn't set `Version` explicitly — every local and branch build —
+  reports `0.3.0-alpha` and packs as `cobalt-tui.0.3.0-alpha.nupkg`. Tagged releases still pack a
+  clean `0.3.0`: the release workflow passes the tag's version, which overrides the suffix.
+  `--version` now keeps the source revision it used to discard (`0.3.0-alpha+fd36e1b`) — the number
+  alone can't identify a build, since every build between two releases shares it, so a stale
+  install was indistinguishable from a fresh one.
+
 ### Fixed
 - **Comments, thread replies and mark-viewed could act on the wrong file.** Moving to a file whose
   diff is still loading left the cursor on the new file while the previous one was still on screen.
