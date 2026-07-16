@@ -8,6 +8,10 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
 {
     private const string ApiVersion = "api-version=7.2-preview.3";
 
+    // Upper bound on the assigned-items list (matches GitApi.ListTop); a heavier assignee is
+    // silently truncated to the most-recently-changed 200.
+    private const int WiqlTop = 200;
+
     private static readonly string[] ListFields =
     [
         "System.Id", "System.WorkItemType", "System.Title", "System.State",
@@ -49,7 +53,9 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
 
         var result = await http.SendJsonAsync(
             HttpMethod.Post,
-            $"{prefix}_apis/wit/wiql?api-version=7.2-preview.2",
+            // $top caps the assigned-items list: without it a heavy assignee pulls an unbounded id
+            // set (then that many batch reads). 200 matches GitApi.ListTop; excess is truncated.
+            $"{prefix}_apis/wit/wiql?$top={WiqlTop}&api-version=7.2-preview.2",
             wiql,
             WorkItemJsonContext.Default.WiqlQuery,
             WorkItemJsonContext.Default.WiqlResult,

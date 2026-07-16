@@ -336,6 +336,19 @@ public class WorkItemsApiTests : IDisposable
         Assert.Contains("My%20Project/_apis/wit/workitems/42", handler.Requests[0].RequestUri!.AbsoluteUri);
     }
 
+    // ---- NET-6: WIQL is capped with $top so an unbounded assigned-items list can't blow up ----
+
+    [Fact]
+    public async Task QueryMyWorkItems_Caps_The_Wiql_With_Top()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"workItems":[]}""");
+
+        await Api(handler).QueryMyWorkItemsAsync(
+            new WorkItemQuery(), PrScope.Org, TestContext.Current.CancellationToken);
+
+        Assert.Contains("$top=200", handler.Requests[0].RequestUri!.AbsoluteUri);
+    }
+
     // ---- NET-5: batch pages are dispatched concurrently ----
 
     [Fact]
