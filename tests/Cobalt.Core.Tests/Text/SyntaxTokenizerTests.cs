@@ -60,6 +60,33 @@ public class SyntaxTokenizerTests
     }
 
     [Fact]
+    public void Repeated_Tokenize_Does_Not_Rebuild_The_Language_Spec()
+    {
+        // ALGO-4: the (keywords, line-comment, quotes) spec is constant per language, so
+        // building a fresh LangSpec + quotes array on every call is pure churn. A short line
+        // makes the token list tiny, so a per-call spec allocation would dominate — the bound
+        // sits below the per-call cost of rebuilding it.
+        const string line = "if";
+        const int iterations = 4000;
+
+        for (var i = 0; i < 50; i++)
+        {
+            SyntaxTokenizer.Tokenize(line, Language.CSharp); // warm up
+        }
+
+        var allocated = AllocatedBy(() =>
+        {
+            for (var i = 0; i < iterations; i++)
+            {
+                SyntaxTokenizer.Tokenize(line, Language.CSharp);
+            }
+        });
+
+        var perCall = (double)allocated / iterations;
+        Assert.True(perCall < 96, $"per-call allocation {perCall:F1} bytes suggests the spec is rebuilt each call");
+    }
+
+    [Fact]
     public void SyntaxToken_Is_A_Value_Type()
     {
         // ALGO-2: a per-token heap object on every code line is pure churn; the token is a

@@ -187,13 +187,21 @@ public static class SyntaxTokenizer
         return tokens;
     }
 
+    // One immutable spec per language, built once at static init — the (keywords, comment,
+    // quotes) triple never varies per call, so there is nothing to rebuild on each Tokenize.
+    private static readonly LangSpec CSharpSpec = new(Lookup(CSharpKeywords), "//", ['"', '\'']);
+    private static readonly LangSpec JsTsSpec = new(Lookup(JsTsKeywords), "//", ['"', '\'', '`']);
+    private static readonly LangSpec PythonSpec = new(Lookup(PythonKeywords), "#", ['\'', '"']);
+    private static readonly LangSpec JsonSpec = new(Lookup(JsonKeywords), null, ['"']);
+    private static readonly LangSpec NoneSpec = new(Lookup(NoKeywords), null, []);
+
     private static LangSpec SpecFor(Language language) => language switch
     {
-        Language.CSharp => new LangSpec(Lookup(CSharpKeywords), "//", ['"', '\'']),
-        Language.JsTs => new LangSpec(Lookup(JsTsKeywords), "//", ['"', '\'', '`']),
-        Language.Python => new LangSpec(Lookup(PythonKeywords), "#", ['\'', '"']),
-        Language.Json => new LangSpec(Lookup(JsonKeywords), null, ['"']),
-        _ => new LangSpec(Lookup(NoKeywords), null, []),
+        Language.CSharp => CSharpSpec,
+        Language.JsTs => JsTsSpec,
+        Language.Python => PythonSpec,
+        Language.Json => JsonSpec,
+        _ => NoneSpec,
     };
 
     private static FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> Lookup(FrozenSet<string> set) =>
