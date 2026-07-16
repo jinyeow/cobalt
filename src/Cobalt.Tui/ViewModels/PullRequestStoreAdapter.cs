@@ -24,7 +24,8 @@ public sealed class PullRequestStoreAdapter(
     : IPullRequestSource, IPullRequestStore, IPrDiffSource
 {
     private Guid? _me;
-    private TeamDirectory? _teams;
+    private readonly object _teamsLock = new();
+    private Lazy<Task<TeamDirectory>>? _teamsInflight;
 
     /// <summary>The active PR-list breadth; flipped by the <c>:scope</c> command.</summary>
     public PrScope Scope { get; set; } = initialScope;
@@ -32,9 +33,40 @@ public sealed class PullRequestStoreAdapter(
     private async Task<Guid> MeAsync(CancellationToken ct) =>
         _me ??= await resolveMe(ct).ConfigureAwait(false);
 
-    private async Task<TeamDirectory> TeamsAsync(CancellationToken ct) =>
-        _teams ??= await (resolveTeams
-            ?? throw new InvalidOperationException("no team directory resolver configured"))(ct).ConfigureAwait(false);
+    /// <summary>
+    /// The team directory, resolved once and shared. Single-flight and <em>start-detached</em>: the
+    /// first caller builds the task; every caller awaits it via <see cref="Task.WaitAsync(CancellationToken)"/>,
+    /// so one caller's cancellation cancels only its own await, never the shared build the others are
+    /// joined to (ADR 0008). The shared build itself runs on <see cref="CancellationToken.None"/>. A
+    /// faulted build is evicted so the next caller retries rather than caching the failure.
+    /// </summary>
+    private async Task<TeamDirectory> TeamsAsync(CancellationToken ct)
+    {
+        Lazy<Task<TeamDirectory>> lazy;
+        lock (_teamsLock)
+        {
+            lazy = _teamsInflight ??= new Lazy<Task<TeamDirectory>>(() =>
+                (resolveTeams ?? throw new InvalidOperationException("no team directory resolver configured"))(
+                    CancellationToken.None));
+        }
+        try
+        {
+            return await lazy.Value.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Evict the faulted build (by identity, so a newer build another caller started is kept),
+            // leaving the directory retryable; a joiner's own cancellation (OCE) is not a build fault.
+            lock (_teamsLock)
+            {
+                if (ReferenceEquals(_teamsInflight, lazy))
+                {
+                    _teamsInflight = null;
+                }
+            }
+            throw;
+        }
+    }
 
     public async Task<IReadOnlyList<PullRequest>> ListPullRequestsAsync(PrListFilter filter, CancellationToken ct)
     {
@@ -69,25 +101,40 @@ public sealed class PullRequestStoreAdapter(
     /// </summary>
     private async Task<IReadOnlyList<PullRequest>> ListTeamAsync(CancellationToken ct)
     {
-        var directory = await TeamsAsync(ct).ConfigureAwait(false);
-
-        // Under project scope, only teams that live in the context project take part.
-        var teams = Scope == PrScope.Project
-            ? directory.Teams.Where(t => string.Equals(t.ProjectName, project, StringComparison.OrdinalIgnoreCase))
-            : directory.Teams;
-        var inScope = teams.ToList();
-
-        var teammateIds = inScope.SelectMany(t => t.MemberIds).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        // (a) team-as-reviewer: one reviewer-list call per in-scope team, in parallel.
-        var reviewerTask = Task.WhenAll(inScope.Select(t =>
-            api.ListPullRequestsForReviewerAsync(t.TeamId, Scope, ct)));
         // (b) teammate-authored: reuse the single Active list, filtered client-side by author.
+        // Started before the directory is awaited so the two round-trips overlap; observed on the
+        // fault path so a directory-build failure never leaves it as an unobserved orphan (ADR 0013).
         var activeTask = api.ListPullRequestsAsync(PrListFilter.Active, Guid.Empty, Scope, ct);
+        try
+        {
+            var directory = await TeamsAsync(ct).ConfigureAwait(false);
 
-        var reviewed = await reviewerTask.ConfigureAwait(false);
-        var active = await activeTask.ConfigureAwait(false);
+            // Under project scope, only teams that live in the context project take part.
+            var teams = Scope == PrScope.Project
+                ? directory.Teams.Where(t => string.Equals(t.ProjectName, project, StringComparison.OrdinalIgnoreCase))
+                : directory.Teams;
+            var inScope = teams.ToList();
 
+            var teammateIds = inScope.SelectMany(t => t.MemberIds).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            // (a) team-as-reviewer: one reviewer-list call per in-scope team, in parallel.
+            var reviewerTask = Task.WhenAll(inScope.Select(t =>
+                api.ListPullRequestsForReviewerAsync(t.TeamId, Scope, ct)));
+
+            var reviewed = await reviewerTask.ConfigureAwait(false);
+            var active = await activeTask.ConfigureAwait(false);
+
+            return BuildTeamUnion(reviewed, active, teammateIds);
+        }
+        finally
+        {
+            ObserveFault(activeTask);
+        }
+    }
+
+    private static IReadOnlyList<PullRequest> BuildTeamUnion(
+        IReadOnlyList<PullRequest>[] reviewed, IReadOnlyList<PullRequest> active, HashSet<string> teammateIds)
+    {
         var union = new Dictionary<int, PullRequest>();
         foreach (var pr in reviewed.SelectMany(r => r))
         {
@@ -161,4 +208,17 @@ public sealed class PullRequestStoreAdapter(
 
     public async Task AddLineCommentAsync(string project, string repositoryId, int prId, string path, int line, bool rightSide, string text, CancellationToken ct) =>
         await api.AddLineCommentAsync(repositoryId, prId, path, line, rightSide, text, project, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Observes a fetch left unawaited because something before its await threw (the Active list,
+    /// when the team-directory build fails). Without this its fault resurfaces via the
+    /// <see cref="TaskScheduler.UnobservedTaskException"/> hook as a phantom crash-log entry (ADR
+    /// 0013). Harmless on an already-awaited task, so callers invoke it on every exit path.
+    /// </summary>
+    private static void ObserveFault(Task? task) =>
+        _ = task?.ContinueWith(
+            static t => _ = t.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 }

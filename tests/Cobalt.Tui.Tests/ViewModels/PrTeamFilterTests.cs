@@ -196,6 +196,55 @@ public class PrTeamFilterTests : IDisposable
     }
 
     [Fact]
+    public async Task Concurrent_Team_Loads_Share_One_Directory_Build()
+    {
+        var calls = 0;
+        var gate = new TaskCompletionSource<TeamDirectory>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Func<CancellationToken, Task<TeamDirectory>> resolve = _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return gate.Task;
+        };
+        var handler = new DispatchHandler("""{"value":[]}""", """{"value":[]}""");
+        var adapter = Adapter(handler, resolve);
+
+        // Two Team loads race before the directory build finishes: a plain `_teams ??= await …`
+        // lets both see null and build it twice. Single-flight must collapse them onto one build.
+        var first = adapter.ListPullRequestsAsync(PrListFilter.Team, TestContext.Current.CancellationToken);
+        var second = adapter.ListPullRequestsAsync(PrListFilter.Team, TestContext.Current.CancellationToken);
+        gate.SetResult(new TeamDirectory([new TeamMembership(TeamId, "Proj", new HashSet<string> { TeammateId })]));
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(1, Volatile.Read(ref calls));
+    }
+
+    [Fact]
+    public async Task Team_Directory_Is_Rebuilt_After_A_Failed_Build()
+    {
+        var calls = 0;
+        var fail = true;
+        Func<CancellationToken, Task<TeamDirectory>> resolve = _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return fail
+                ? Task.FromException<TeamDirectory>(new AdoApiException(HttpStatusCode.ServiceUnavailable, "flaky"))
+                : Task.FromResult(new TeamDirectory([new TeamMembership(TeamId, "Proj", new HashSet<string> { TeammateId })]));
+        };
+        var handler = new DispatchHandler("""{"value":[]}""", """{"value":[]}""");
+        var adapter = Adapter(handler, resolve);
+
+        await Assert.ThrowsAsync<AdoApiException>(
+            () => adapter.ListPullRequestsAsync(PrListFilter.Team, TestContext.Current.CancellationToken));
+
+        // A faulted build must be evicted, not cached: the next load retries and can succeed.
+        fail = false;
+        var prs = await adapter.ListPullRequestsAsync(PrListFilter.Team, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, Volatile.Read(ref calls));
+        Assert.Empty(prs);
+    }
+
+    [Fact]
     public async Task Teams_Resolution_Failure_Surfaces_As_Error()
     {
         Func<CancellationToken, Task<TeamDirectory>> resolve = _ =>
