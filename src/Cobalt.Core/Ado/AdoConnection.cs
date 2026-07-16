@@ -1,6 +1,7 @@
 using System.Net;
 using Cobalt.Core.Auth;
 using Cobalt.Core.Config;
+using Cobalt.Core.Models;
 using Microsoft.Extensions.Http.Resilience;
 using Polly;
 
@@ -24,6 +25,21 @@ public sealed class AdoConnection : IDisposable
     public AdoHttp Http { get; }
     public IdentityApi Identity { get; }
     public TeamsApi Teams { get; }
+
+    /// <summary>
+    /// The signed-in user, resolved once and shared (reset-on-fault single-flight, see
+    /// <see cref="IdentityApi.GetIdentityAsync"/>). The status bar and the PR reviewer/creator
+    /// filters consume this single cached <c>connectionData</c> call.
+    /// </summary>
+    public Task<AdoUser> GetIdentityAsync(CancellationToken cancellationToken = default) =>
+        Identity.GetIdentityAsync(cancellationToken);
+
+    /// <summary>
+    /// Warms the identity cache after auth, swallowing expected faults (ADR 0013). The warm-up
+    /// primes this instead of a separate connection ping, so cold start makes one
+    /// <c>connectionData</c> call, not two.
+    /// </summary>
+    public Task PrimeIdentityAsync() => Identity.PrimeIdentityAsync();
 
     public static AdoConnection Create(AdoContext context, ITokenProvider tokens)
     {
