@@ -96,6 +96,22 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     /// </summary>
     public event Action? StatsChanged;
 
+    /// <summary>
+    /// Raised when only the busy/error chrome changes at the <em>start</em> of a mutation, not the
+    /// diff content or threads. Lets the dialog refresh the busy indicator and error header without
+    /// re-tokenizing the open file on every keystroke that starts an operation (mirror of
+    /// <see cref="StatsChanged"/>). The trailing completion still raises <see cref="Changed"/>,
+    /// because the threads refresh that lands with it is a real content change.
+    /// </summary>
+    public event Action? BusyChanged;
+
+    /// <summary>
+    /// Raised once per load, the instant <see cref="Files"/> is assigned — before the first file's
+    /// diff is published. Lets a consumer start its background prefetch off the changed-file list
+    /// without waiting for the whole load (threads + first diff) to settle (ASYNC-3).
+    /// </summary>
+    public event Action? FilesLoaded;
+
     public FileChange? SelectedFile =>
         Files.Count == 0 ? null : Files[Math.Clamp(_selectedFileIndex, 0, Files.Count - 1)];
 
@@ -255,6 +271,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 
             Files = await source.GetIterationChangesAsync(
                 pr.ProjectName, pr.RepositoryId, pr.PullRequestId, _iteration.Id, ct).ConfigureAwait(false);
+            // Signal the changed-file list is ready so a consumer can start prefetch now, before
+            // the threads fetch and first diff below complete (ASYNC-3).
+            FilesLoaded?.Invoke();
 
             // Threads need only the PR id and the first file's blobs need only the iteration, so
             // both round-trips start here and are harvested below: an open costs ~3 round-trips
@@ -440,7 +459,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 
         IsBusy = true;
         Error = null;
-        Changed?.Invoke();
+        // Chrome-only signal: the diff content and threads are unchanged at the busy flip, so this
+        // must not re-tokenize the open file. The trailing Changed (below) covers the real refresh.
+        BusyChanged?.Invoke();
         try
         {
             await source.AddLineCommentAsync(
@@ -485,7 +506,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     {
         IsBusy = true;
         Error = null;
-        Changed?.Invoke();
+        // Chrome-only signal: the diff content and threads are unchanged at the busy flip, so this
+        // must not re-tokenize the open file. The trailing Changed (below) covers the real refresh.
+        BusyChanged?.Invoke();
         try
         {
             await source.VoteAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, vote, ct).ConfigureAwait(false);
@@ -511,7 +534,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     {
         IsBusy = true;
         Error = null;
-        Changed?.Invoke();
+        // Chrome-only signal: the diff content and threads are unchanged at the busy flip, so this
+        // must not re-tokenize the open file. The trailing Changed (below) covers the real refresh.
+        BusyChanged?.Invoke();
         try
         {
             await mutate().ConfigureAwait(false);

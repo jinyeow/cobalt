@@ -62,10 +62,14 @@ public class PrDiffViewModelTests
             return Task.CompletedTask;
         }
 
+        /// <summary>When set, <see cref="SetThreadStatusAsync"/> blocks on it, so a test can observe
+        /// the view-model while a mutation is mid-flight (IsBusy true, before the threads refresh).</summary>
+        public TaskCompletionSource? StatusGate { get; set; }
+
         public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct)
         {
             LastStatusChange = (project, repo, prId, threadId, status);
-            return Task.CompletedTask;
+            return StatusGate is { } gate ? gate.Task : Task.CompletedTask;
         }
 
         public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct)
@@ -1534,6 +1538,75 @@ public class PrDiffViewModelTests
 
         Assert.NotNull(vm.StatsFor("/good.cs"));
         Assert.Null(vm.StatsFor("/bad.cs"));
+    }
+
+    // ---- FilesLoaded hook (frozen contract): raised once Files is assigned, for earlier prefetch ----
+
+    [Fact]
+    public async Task FilesLoaded_Fires_Once_With_Files_Populated_Before_The_Diff_Publishes()
+    {
+        var source = new GatedThreadsSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        var raises = 0;
+        var filesAtRaise = -1;
+        var diffAtRaise = true;
+        vm.FilesLoaded += () =>
+        {
+            raises++;
+            filesAtRaise = vm.Files.Count;
+            diffAtRaise = vm.CurrentDiff is not null;
+        };
+
+        var load = vm.LoadAsync(TestContext.Current.CancellationToken);
+        // The threads (and hence the diff publish) are still gated when FilesLoaded fires, so a
+        // consumer can start prefetch off this hook rather than waiting for the whole load.
+        Assert.Equal(1, raises);
+        Assert.Equal(2, filesAtRaise);
+        Assert.False(diffAtRaise);
+
+        source.ReleaseThreads([]);
+        await load;
+        Assert.Equal(1, raises);
+    }
+
+    // ---- RENDER-4 (VM half): chrome-only BusyChanged seam ----
+
+    [Fact]
+    public async Task Entering_A_Busy_Mutation_Raises_BusyChanged_Not_The_Content_Level_Changed()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var busy = 0;
+        var changedWhileBusy = 0;
+        vm.BusyChanged += () => busy++;
+        vm.Changed += () => { if (vm.IsBusy) { changedWhileBusy++; } };
+
+        // Block the mutation so we can observe the view-model at the busy=true instant, before the
+        // threads refresh lands. The busy flip must be chrome-only (BusyChanged), so the diff pane
+        // is not re-tokenized on every keystroke that starts an operation.
+        source.StatusGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var mutation = vm.ResolveThreadAsync(1, TestContext.Current.CancellationToken);
+
+        Assert.True(vm.IsBusy);
+        Assert.Equal(1, busy);
+        Assert.Equal(0, changedWhileBusy);
+
+        source.StatusGate.SetResult();
+        await mutation;
     }
 
     // ---- RENDER-2 (VM half): UnresolvedFilePaths, computed once per Threads write ----
