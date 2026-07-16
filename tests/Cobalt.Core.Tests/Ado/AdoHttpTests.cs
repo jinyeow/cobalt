@@ -130,4 +130,50 @@ public class AdoHttpTests : IDisposable
         Assert.Equal(HttpStatusCode.Unauthorized, ex.StatusCode);
         Assert.DoesNotContain("<html>", ex.Message);
     }
+
+    // ---- NET-1: stream-deserialize the success path; string only on the error path ----
+
+    [Fact]
+    public async Task Success_Body_Is_Deserialized()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """{"authenticatedUser":{"id":"5e2c1a2b-0000-1111-2222-333344445555","providerDisplayName":"Jin"}}""");
+
+        var data = await Client(handler).GetJsonAsync(
+            "_apis/connectionData", AdoJsonContext.Default.ConnectionData, TestContext.Current.CancellationToken);
+
+        Assert.Equal("Jin", data.AuthenticatedUser?.ProviderDisplayName);
+    }
+
+    [Fact]
+    public async Task Non_Authoritative_203_Maps_To_Unauthorized()
+    {
+        // ADO answers 203 + an HTML sign-in page (not 401) when the token is bad; that mapping
+        // must survive the stream refactor and never try to JSON-parse the HTML.
+        var handler = new FakeHttpHandler().Respond(_ =>
+            new HttpResponseMessage(HttpStatusCode.NonAuthoritativeInformation)
+            {
+                Content = new StringContent("<html>Sign in</html>"),
+            });
+
+        var ex = await Assert.ThrowsAsync<AdoApiException>(() =>
+            Client(handler).GetJsonAsync(
+                "_apis/x", AdoJsonContext.Default.ConnectionData, TestContext.Current.CancellationToken));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task Empty_Success_Body_Throws_Empty_Response()
+    {
+        // A 200 whose body deserializes to null (a literal JSON null) is an empty response, not a
+        // valid value; the stream path must keep surfacing it as such rather than returning null.
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, "null");
+
+        var ex = await Assert.ThrowsAsync<AdoApiException>(() =>
+            Client(handler).GetJsonAsync(
+                "_apis/x", AdoJsonContext.Default.ConnectionData, TestContext.Current.CancellationToken));
+
+        Assert.Contains("empty response body", ex.Message);
+    }
 }
