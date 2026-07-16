@@ -336,6 +336,32 @@ public class WorkItemsApiTests : IDisposable
         Assert.Contains("My%20Project/_apis/wit/workitems/42", handler.Requests[0].RequestUri!.AbsoluteUri);
     }
 
+    // ---- NET-7: JSON bodies serialize straight to UTF-8 bytes; wire Content-Type stays charset=utf-8 ----
+
+    [Fact]
+    public async Task SendJson_Body_Is_Utf8_With_Charset_And_Round_Trips_Non_Ascii()
+    {
+        System.Net.Http.Headers.MediaTypeHeaderValue? contentType = null;
+        var handler = new FakeHttpHandler().Respond(req =>
+        {
+            contentType = req.Content!.Headers.ContentType;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"id":3,"text":"ok","createdBy":{"displayName":"Jin"},"createdDate":"2026-01-03T10:00:00Z"}""",
+                    Encoding.UTF8, "application/json"),
+            };
+        });
+
+        await Api(handler).AddCommentAsync(42, "ship it 🚀", cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal("application/json", contentType?.MediaType);
+        Assert.Equal("utf-8", contentType?.CharSet);
+        // The emoji survives the serialize -> UTF-8 -> deserialize wire round-trip.
+        using var doc = JsonDocument.Parse(handler.RequestBodies[0]!);
+        Assert.Contains("🚀", doc.RootElement.GetProperty("text").GetString());
+    }
+
     // ---- NET-6: WIQL is capped with $top so an unbounded assigned-items list can't blow up ----
 
     [Fact]

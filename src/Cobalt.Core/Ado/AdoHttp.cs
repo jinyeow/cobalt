@@ -55,11 +55,11 @@ public sealed class AdoHttp(HttpClient client)
         string contentType = "application/json",
         CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(method, new Uri(path, UriKind.Relative))
-        {
-            Content = new StringContent(
-                JsonSerializer.Serialize(body, requestType), Encoding.UTF8, contentType),
-        };
+        // Serialize straight to UTF-8 bytes (no intermediate string) and set an explicit
+        // charset=utf-8 so the wire Content-Type stays byte-identical to the old StringContent.
+        var payload = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(body, requestType));
+        payload.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType, "utf-8");
+        using var request = new HttpRequestMessage(method, new Uri(path, UriKind.Relative)) { Content = payload };
         using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
         return await ReadAsync(response, responseType, cancellationToken).ConfigureAwait(false);
     }
