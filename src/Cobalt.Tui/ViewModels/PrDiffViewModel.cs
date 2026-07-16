@@ -154,8 +154,14 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     public (int Additions, int Deletions)? StatsFor(string path) =>
         _diffCache.TryGetValue(path, out var diff) ? (diff.Additions, diff.Deletions) : null;
 
-    public int TotalAdditions => _diffCache.Values.Sum(d => d.Additions);
-    public int TotalDeletions => _diffCache.Values.Sum(d => d.Deletions);
+    // Running totals bumped once per unique file added to _diffCache (see ComputeDiffForFileAsync),
+    // so the header totals are an O(1) read on every render instead of re-summing the whole cache.
+    // Volatile.Read pairs with the Interlocked.Add writer on background prefetch continuations.
+    private int _totalAdditions;
+    private int _totalDeletions;
+
+    public int TotalAdditions => Volatile.Read(ref _totalAdditions);
+    public int TotalDeletions => Volatile.Read(ref _totalDeletions);
 
     /// <summary>
     /// Computes every file's diff into the cache (so <see cref="StatsFor"/> and the totals fill
@@ -592,8 +598,13 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         {
             var diff = await inflight.Value.ConfigureAwait(false);
             // Published before the eviction below, so a caller that misses the result cache still
-            // finds the in-flight entry rather than starting a second fetch.
-            _diffCache[file.Path] = diff;
+            // finds the in-flight entry rather than starting a second fetch. TryAdd (not the indexer)
+            // so the running totals are bumped exactly once per file, never once per joining caller.
+            if (_diffCache.TryAdd(file.Path, diff))
+            {
+                Interlocked.Add(ref _totalAdditions, diff.Additions);
+                Interlocked.Add(ref _totalDeletions, diff.Deletions);
+            }
             return diff;
         }
         finally

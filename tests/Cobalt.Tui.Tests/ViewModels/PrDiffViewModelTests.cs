@@ -1540,6 +1540,38 @@ public class PrDiffViewModelTests
         Assert.Null(vm.StatsFor("/bad.cs"));
     }
 
+    // ---- STATE-2: running totals count each file once, even under concurrent joiners ----
+
+    [Fact]
+    public async Task Totals_Count_Each_File_Once_When_Concurrent_Callers_Share_One_Fetch()
+    {
+        var source = new GatedBlobSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";           // 0 additions
+        source.Blobs[("/b.cs", "base")] = "1\n";
+        source.Blobs[("/b.cs", "src")] = "1\n2\n3\n";      // 2 additions
+        var vm = new PrDiffViewModel(source, Pr());
+
+        source.Release();
+        await vm.LoadAsync(TestContext.Current.CancellationToken); // caches /a.cs
+        source.Rearm();
+        var before = source.BlobCalls;
+
+        // Two callers land on the same uncached /b.cs and share one fetch. Its 2 additions must be
+        // added to the running total exactly once, not once per joining caller.
+        var first = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        var second = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        Assert.True(await source.WaitForBlobCallsAsync(before + 2, TimeSpan.FromSeconds(5)));
+        source.Release();
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(2, vm.TotalAdditions);
+        Assert.Equal(0, vm.TotalDeletions);
+    }
+
     // ---- FilesLoaded hook (frozen contract): raised once Files is assigned, for earlier prefetch ----
 
     [Fact]
