@@ -32,6 +32,15 @@ public class SyntaxTokenizerTests
     }
 
     [Fact]
+    public void SyntaxToken_Is_A_Value_Type()
+    {
+        // ALGO-2: a per-token heap object on every code line is pure churn; the token is a
+        // tiny immutable (Start, Length, Kind) triple, so it lives inline in the backing
+        // array as a struct. Value equality (used across the suite) is preserved.
+        Assert.True(typeof(SyntaxToken).IsValueType);
+    }
+
+    [Fact]
     public void Empty_Line_Yields_No_Tokens()
     {
         Assert.Empty(SyntaxTokenizer.Tokenize("", Language.CSharp));

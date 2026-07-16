@@ -12,7 +12,7 @@ public enum TokenKind
     Punctuation,
 }
 
-public sealed record SyntaxToken(int Start, int Length, TokenKind Kind);
+public readonly record struct SyntaxToken(int Start, int Length, TokenKind Kind);
 
 /// <summary>
 /// A single-pass, strictly line-local syntax tokenizer for C#, JS/TS, JSON and
@@ -75,9 +75,11 @@ public static class SyntaxTokenizer
         }
 
         var spec = SpecFor(language);
-        var tokens = new List<SyntaxToken>();
-        var i = 0;
         var n = line.Length;
+        // Pre-size to the token-count upper bound (one token per char) so a dense line never
+        // pays a resize; typical code lines tokenize well under this.
+        var tokens = new List<SyntaxToken>(n);
+        var i = 0;
 
         while (i < n)
         {
