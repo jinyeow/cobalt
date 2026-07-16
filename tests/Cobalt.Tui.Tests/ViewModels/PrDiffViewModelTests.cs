@@ -1535,4 +1535,57 @@ public class PrDiffViewModelTests
         Assert.NotNull(vm.StatsFor("/good.cs"));
         Assert.Null(vm.StatsFor("/bad.cs"));
     }
+
+    // ---- RENDER-2 (VM half): UnresolvedFilePaths, computed once per Threads write ----
+
+    [Fact]
+    public async Task UnresolvedFilePaths_Lists_Only_Files_With_An_Active_NonSystem_Thread()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+            Threads =
+            [
+                new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null),
+                new PrThread(2, PrThreadStatus.Fixed, [new PrComment(1, "Sam", "resolved", false)], "/b.cs", 3, null),
+                new PrThread(3, PrThreadStatus.Active, [new PrComment(1, "System", "system", true)], "/b.cs", 4, null),
+            ],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        source.Blobs[("/b.cs", "base")] = "y\n";
+        source.Blobs[("/b.cs", "src")] = "y\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // Only /a.cs carries an unresolved (Active, non-system) thread; /b.cs's are resolved/system.
+        Assert.Equal(["/a.cs"], vm.UnresolvedFilePaths.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task UnresolvedFilePaths_Is_A_Stable_Snapshot_Recomputed_On_Each_Threads_Write()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // One O(threads) pass per Threads write, not one per read: repeated reads return the
+        // identical snapshot instance (the render probes it per file).
+        var first = vm.UnresolvedFilePaths;
+        Assert.Same(first, vm.UnresolvedFilePaths);
+        Assert.Equal(["/a.cs"], first.Order(StringComparer.Ordinal));
+
+        // A threads refresh (resolve) rewrites Threads, so the snapshot is recomputed.
+        source.Threads = [new PrThread(1, PrThreadStatus.Fixed, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null)];
+        await vm.ResolveThreadAsync(1, TestContext.Current.CancellationToken);
+
+        Assert.NotSame(first, vm.UnresolvedFilePaths);
+        Assert.Empty(vm.UnresolvedFilePaths);
+    }
 }

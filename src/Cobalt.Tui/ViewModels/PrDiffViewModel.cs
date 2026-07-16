@@ -59,6 +59,15 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     public IReadOnlyList<FileChange> Files { get; private set; } = [];
     public IReadOnlyList<PrThread> Threads { get; private set; } = [];
 
+    /// <summary>
+    /// The set of file paths carrying at least one unresolved (Active, non-system) thread.
+    /// Computed once per <see cref="Threads"/> write (in <see cref="HarvestThreadsAsync"/>), so
+    /// the render can decide a file's "has unresolved comments" annotation by an O(1) lookup
+    /// instead of scanning every thread per file. The reference is stable between writes.
+    /// </summary>
+    public IReadOnlySet<string> UnresolvedFilePaths { get; private set; } =
+        new HashSet<string>(StringComparer.Ordinal);
+
     /// <summary>True when the review threads could not be loaded, so comment markers and thread
     /// navigation are unavailable for this dialog session (LoadAsync runs once).</summary>
     public bool ThreadsUnavailable { get; private set; }
@@ -100,11 +109,24 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     /// </summary>
     public IReadOnlyList<FileChange> FilteredFiles =>
         OnlyUnresolvedFiles
-            ? [.. Files.Where(f => Threads.Any(t => IsUnresolved(t) && string.Equals(t.FilePath, f.Path, StringComparison.Ordinal)))]
+            ? [.. Files.Where(f => UnresolvedFilePaths.Contains(f.Path))]
             : Files;
 
     private static bool IsUnresolved(PrThread thread) =>
         thread.Status == PrThreadStatus.Active && !thread.IsSystemOnly;
+
+    private static IReadOnlySet<string> ComputeUnresolvedFilePaths(IReadOnlyList<PrThread> threads)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var thread in threads)
+        {
+            if (IsUnresolved(thread) && thread.FilePath is { } path)
+            {
+                set.Add(path);
+            }
+        }
+        return set;
+    }
 
     public void MarkViewed(string path) => _viewed.Add(path);
 
@@ -305,6 +327,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         try
         {
             Threads = await fetch.ConfigureAwait(false);
+            // Recompute the unresolved-file set once here, on the single Threads write, rather
+            // than scanning every thread per file on each render (RENDER-2).
+            UnresolvedFilePaths = ComputeUnresolvedFilePaths(Threads);
             ThreadsUnavailable = false;
         }
         catch (Exception ex) when (
