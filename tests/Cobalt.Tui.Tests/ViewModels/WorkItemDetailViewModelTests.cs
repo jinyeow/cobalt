@@ -209,6 +209,67 @@ public class WorkItemDetailViewModelTests
             Task.FromException<WorkItemComment>(ex);
     }
 
+    /// <summary>Item resolves immediately; the comments and states reads block until released, so a
+    /// test can observe whether they run concurrently or back-to-back.</summary>
+    private sealed class GatedReadsStore : IWorkItemStore
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _commentsStarted;
+        private int _statesStarted;
+
+        public int CommentsStarted => Volatile.Read(ref _commentsStarted);
+        public int StatesStarted => Volatile.Read(ref _statesStarted);
+
+        public Task<WorkItem> GetWorkItemAsync(long id, string? project, CancellationToken ct) =>
+            Task.FromResult(Item(1, "T", "New"));
+
+        public async Task<IReadOnlyList<WorkItemComment>> GetCommentsAsync(long id, string? project, CancellationToken ct)
+        {
+            Interlocked.Increment(ref _commentsStarted);
+            await _release.Task.ConfigureAwait(false);
+            return [];
+        }
+
+        public async Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, string? project, CancellationToken ct)
+        {
+            Interlocked.Increment(ref _statesStarted);
+            await _release.Task.ConfigureAwait(false);
+            return [];
+        }
+
+        public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, string? project, CancellationToken ct) =>
+            Task.FromResult(Item(1, "T", "New"));
+        public Task<WorkItemComment> AddCommentAsync(long id, string text, string? project, CancellationToken ct) =>
+            Task.FromResult(new WorkItemComment(9, "me", DateTimeOffset.UnixEpoch, text));
+
+        public void Release() => _release.TrySetResult();
+    }
+
+    [Fact]
+    public async Task Load_Fetches_Comments_And_States_Concurrently()
+    {
+        var store = new GatedReadsStore();
+        var vm = new WorkItemDetailViewModel(store, 1);
+
+        var load = vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // Both per-project reads must be in flight at once. Back-to-back awaits would leave the
+        // states read unstarted until the (gated) comments read returned, costing a whole round-trip.
+        var bothStarted = false;
+        for (var i = 0; i < 200 && !bothStarted; i++)
+        {
+            bothStarted = store.CommentsStarted == 1 && store.StatesStarted == 1;
+            if (!bothStarted)
+            {
+                await Task.Delay(10, TestContext.Current.CancellationToken);
+            }
+        }
+        Assert.True(bothStarted, "comments and states must be fetched concurrently");
+
+        store.Release();
+        await load;
+    }
+
     [Fact]
     public async Task Threads_The_Items_Own_Project_Through_Detail_And_Mutation_Calls()
     {
