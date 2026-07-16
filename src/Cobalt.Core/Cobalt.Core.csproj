@@ -1,5 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <InternalsVisibleTo Include="Cobalt.Core.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Azure.Identity" />
     <PackageReference Include="DiffPlex" />
     <PackageReference Include="Markdig" />
