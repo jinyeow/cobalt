@@ -149,6 +149,25 @@ public class IntraLineDiffTests
         }
     }
 
+    [Theory]
+    // bound == (longer-shorter)/longer == 0.60 exactly (4 vs 10): the strict `>` must NOT
+    // early-out, and the real diff returns a span — a `>=` mutant would wrongly return empty.
+    [InlineData("ab c", "ab c defgh")]
+    // bound == 0.50 (6 vs 12), inside (0.40, 0.60]: a `> 0.40` mutant would wrongly early-out.
+    [InlineData("abc de", "abc de fghij")]
+    public void Early_Out_Respects_The_Threshold_Boundary_And_Keeps_Real_Spans(string oldLine, string newLine)
+    {
+        var actual = IntraLineDiff.Compute(oldLine, newLine);
+        var reference = IntraLineDiff.ComputeWithoutEarlyOut(oldLine, newLine);
+
+        Assert.Equal(reference.OldSpans, actual.OldSpans);
+        Assert.Equal(reference.NewSpans, actual.NewSpans);
+        // The reference must actually produce a span, or the parity assertion above is vacuous
+        // (both empty) and an off-by-one threshold mutant would survive.
+        Assert.True(reference.OldSpans.Count > 0 || reference.NewSpans.Count > 0,
+            "boundary fixture must yield a real intra-line span");
+    }
+
     private static string RandomLine(Random rng, string alphabet)
     {
         var length = rng.Next(0, 40);

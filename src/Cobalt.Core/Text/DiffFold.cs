@@ -71,10 +71,11 @@ public sealed class DiffFoldState
     }
 
     /// <summary>Projects the current fold state into display rows. The state is immutable, so the
-    /// projection is built once and reused across renders.</summary>
-    public IReadOnlyList<DiffFoldRow> Rows() => _rows ??= BuildRows();
+    /// projection is built once and reused across renders; the cached list is read-only so an
+    /// escaped reference cannot corrupt a later render.</summary>
+    public IReadOnlyList<DiffFoldRow> Rows() => _rows ??= BuildRows().AsReadOnly();
 
-    private IReadOnlyList<DiffFoldRow> BuildRows()
+    private List<DiffFoldRow> BuildRows()
     {
         var rows = new List<DiffFoldRow>();
         foreach (var block in _blocks)

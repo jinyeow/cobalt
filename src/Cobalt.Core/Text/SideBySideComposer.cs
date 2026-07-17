@@ -28,9 +28,9 @@ public static class SideBySideComposer
     private static readonly ConditionalWeakTable<IReadOnlyList<DiffLine>, IReadOnlyList<SideBySideRow>> PairCache = new();
 
     public static IReadOnlyList<SideBySideRow> Pair(IReadOnlyList<DiffLine> lines) =>
-        PairCache.GetValue(lines, static l => BuildPairs(l));
+        PairCache.GetValue(lines, static l => (IReadOnlyList<SideBySideRow>)BuildPairs(l).AsReadOnly());
 
-    private static IReadOnlyList<SideBySideRow> BuildPairs(IReadOnlyList<DiffLine> lines)
+    private static List<SideBySideRow> BuildPairs(IReadOnlyList<DiffLine> lines)
     {
         var rows = new List<SideBySideRow>();
         var i = 0;

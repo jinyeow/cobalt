@@ -83,7 +83,10 @@ public class SyntaxTokenizerTests
         });
 
         var perCall = (double)allocated / iterations;
-        Assert.True(perCall < 96, $"per-call allocation {perCall:F1} bytes suggests the spec is rebuilt each call");
+        // The token list for a 2-char line measures ~80 B/call; a rebuilt LangSpec + quotes array
+        // added ~62 B (~142 B total). 128 sits clear of both, so a struct-layout tweak to the list
+        // cost won't false-positive while a rebuilt spec still trips it.
+        Assert.True(perCall < 128, $"per-call allocation {perCall:F1} bytes suggests the spec is rebuilt each call");
     }
 
     [Fact]
