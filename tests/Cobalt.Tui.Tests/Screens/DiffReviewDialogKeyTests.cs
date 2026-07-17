@@ -1326,6 +1326,32 @@ public class DiffReviewDialogKeyTests
         Assert.Contains("/a.cs", detail.DiffHeader.Text);  // header still refreshed (a cleared error repaints)
     }
 
+    [Fact]
+    public async Task Busy_Refresh_Clears_A_Stale_Error_Header_When_There_Is_No_Diff()
+    {
+        // A mutation's busy flip nulls vm.Error, so the chrome-only render must remove a header that
+        // was showing an error — otherwise a cleared "vote failed" error stays on screen. With no
+        // diff on screen the header falls to its final else, which must clear rather than retain.
+        var source = new FakeDiffSource { Iteration = null }; // no iteration → Error set, no diff
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.NotNull(vm.Error);
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        Assert.Contains("error", detail.DiffHeader.Text); // the stale error is on screen
+
+        // The busy flip a successful retry raises nulls Error before it throws on the headless
+        // Invoke; catch that so we are left in the (Error == null, no diff) state to render.
+        try { await vm.VoteAsync(PrVote.Approved, TestContext.Current.CancellationToken); }
+        catch (NotInitializedException) { }
+        Assert.Null(vm.Error); // the flip cleared the error
+
+        detail.RunBusyRefresh();
+
+        Assert.Equal("", detail.DiffHeader.Text.Trim()); // the cleared error disappeared
+    }
+
     // ---- RENDER-1: diff-only paths skip the file-tree re-flatten ----
 
     [Fact]
@@ -1413,15 +1439,63 @@ public class DiffReviewDialogKeyTests
         Assert.Equal(before, detail.SelectedDiffLineIndex); // same unified line, resolved via the map
     }
 
-    // ---- ASYNC-3: the background prefetch launches exactly once ----
+    // ---- ASYNC-3: the FilesLoaded handler and the LoadAsync fallback each launch the prefetch ----
+    //
+    // The dialog's LoadAsync cannot be driven headless: vm.LoadAsync's opening Changed?.Invoke()
+    // routes through app.Invoke, which throws NotInitializedException without Application.Init (the
+    // same limitation the Unloadable_Threads test relies on). So these drive the real handler
+    // (OnFilesLoaded, the target of the vm.FilesLoaded += wiring) and the real fallback call
+    // (StartPrefetch) directly. Empty Files keeps the launched prefetch a no-op, so it never raises
+    // StatsChanged → app.Invoke on a background thread (which would throw + write the crash log).
+
+    private static async Task WaitForAsync(Func<bool> condition)
+    {
+        for (var i = 0; i < 200 && !condition(); i++)
+        {
+            await Task.Delay(5, TestContext.Current.CancellationToken);
+        }
+    }
 
     [Fact]
-    public async Task Prefetch_Launches_Exactly_Once_Across_FilesLoaded_And_The_Fallback()
+    public async Task FilesLoaded_Handler_Launches_The_Prefetch_Once()
     {
-        // FilesLoaded starts the prefetch the instant the changed-file list lands, and LoadAsync
-        // keeps a fallback launch for the early-return path — the guard makes the two paths launch
-        // the background wave once, never twice (ADR 0008: one shared token, one wave).
-        var source = new FakeDiffSource(); // empty changes → the prefetch no-ops (no StatsChanged/Invoke)
+        var source = new FakeDiffSource(); // empty changes → the launched prefetch no-ops
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        detail.Build();
+        Assert.Equal(0, detail.PrefetchLaunches);
+
+        detail.OnFilesLoaded(); // the handler vm.FilesLoaded is wired to (posts StartPrefetch)
+
+        await WaitForAsync(() => detail.PrefetchLaunches == 1);
+        Assert.Equal(1, detail.PrefetchLaunches);
+    }
+
+    [Fact]
+    public async Task Prefetch_Does_Not_Relaunch_When_FilesLoaded_And_The_Fallback_Both_Fire()
+    {
+        // FilesLoaded and the LoadAsync fallback can both fire; the guard launches the wave once,
+        // never twice (ADR 0008: one shared token, one wave).
+        var source = new FakeDiffSource();
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        detail.Build();
+
+        detail.OnFilesLoaded(); // FilesLoaded path
+        await WaitForAsync(() => detail.PrefetchLaunches == 1);
+        detail.StartPrefetch(); // the LoadAsync fallback
+
+        Assert.Equal(1, detail.PrefetchLaunches);
+    }
+
+    [Fact]
+    public async Task The_Fallback_Launches_The_Prefetch_When_FilesLoaded_Never_Fired()
+    {
+        // The early-return path (no iteration) never assigns Files, so FilesLoaded never fires; the
+        // LoadAsync fallback (StartPrefetch) must still launch the wave exactly once.
+        var source = new FakeDiffSource { Iteration = null };
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
         var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
@@ -1429,9 +1503,7 @@ public class DiffReviewDialogKeyTests
         Assert.Equal(0, detail.PrefetchLaunches);
 
         detail.StartPrefetch();
-        Assert.Equal(1, detail.PrefetchLaunches);
 
-        detail.StartPrefetch();
-        Assert.Equal(1, detail.PrefetchLaunches); // idempotent — the second call is a no-op
+        Assert.Equal(1, detail.PrefetchLaunches);
     }
 }

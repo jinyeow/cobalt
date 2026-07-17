@@ -138,14 +138,15 @@ public class DiffListDataSourceTests
         var listView = new ListView { SchemeName = "Base", Width = 40, Height = 1 };
 
         source.Render(listView, selected: false, item: 0, col: 0, row: 0, width: 40, viewportX: 0);
-        var first = source.RunSlicesFor(0);
+        // Capture the string instance now — reading the slot again after render 2 would alias the
+        // live array, so a ??=→= regression (re-Substring every frame) would still look "Same".
+        var sliceAfterFirst = source.RunSlicesFor(0)?[1];
         source.Render(listView, selected: false, item: 0, col: 0, row: 0, width: 40, viewportX: 0);
-        var second = source.RunSlicesFor(0);
+        var sliceAfterSecond = source.RunSlicesFor(0)?[1];
 
-        Assert.NotNull(first);
-        Assert.Same(first, second);          // the per-line slice array persisted across renders
-        Assert.Same(first![1], second![1]);  // the identifier run's slice was reused, not re-cut
-        Assert.Equal("abcdef", second[1]);   // and it is exactly the run's text
+        Assert.NotNull(sliceAfterFirst);
+        Assert.Same(sliceAfterFirst, sliceAfterSecond); // reused the cached substring, not re-cut
+        Assert.Equal("abcdef", sliceAfterSecond);       // and it is exactly the run's text
     }
 
     [Fact]

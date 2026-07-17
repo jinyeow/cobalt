@@ -285,8 +285,11 @@ public sealed class DiffReviewDialog(
     private void OnBusyChanged() => app.Invoke(RunBusyRefresh);
 
     // FilesLoaded fires once, the instant the changed-file list is assigned — before the threads
-    // and first diff settle — so the background diff prefetch starts earlier (ASYNC-3).
-    private void OnFilesLoaded() => StartPrefetch();
+    // and first diff settle — so the background diff prefetch starts earlier (ASYNC-3). Posted off
+    // the LoadAsync call stack (Task.Run) so LoadAsync issues its interactive threads + first-diff
+    // requests before the prefetch blob wave, protecting first-paint latency on constrained links.
+    // Still the dialog token / single-flight cache (ADR 0008). Internal so the wiring is testable.
+    internal void OnFilesLoaded() => _ = Task.Run(StartPrefetch);
 
     private void OnViewportChanged(object? sender, Terminal.Gui.ViewBase.DrawEventArgs e)
     {
@@ -1019,8 +1022,10 @@ public sealed class DiffReviewDialog(
     /// <summary>
     /// The header above the diff pane: which file is on screen and its stats. Keyed on the diff's
     /// own path so it never labels one file's diff with another's name. Precedence matches what a
-    /// full render has always produced — a diff on screen wins, then loading, then an error, and
-    /// with none of those the header keeps whatever it last said.
+    /// full render has always produced — a diff on screen wins, then loading, then an error. With
+    /// none of those the header is cleared: a chrome-only render (a mutation's busy flip) nulls
+    /// <see cref="PrDiffViewModel.Error"/>, so retaining the prior text would leave a stale "vote
+    /// failed" error on screen after the error was cleared (RENDER-4).
     /// </summary>
     private void WriteDiffHeader()
     {
@@ -1037,6 +1042,10 @@ public sealed class DiffReviewDialog(
         else if (vm.Error is { } e)
         {
             _diffHeader.Text = $" error: {e}";
+        }
+        else
+        {
+            _diffHeader.Text = "";
         }
     }
 
