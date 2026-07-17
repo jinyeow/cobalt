@@ -27,6 +27,13 @@ public sealed class PrListView : View
     private int _lastWidth = -1;
     private PrListFilter? _renderedTab;
     private bool _disposed;
+    // MISSED-A: the (rows, width, counts) a render last actually formatted for. A render whose
+    // inputs match these skips the O(rows) re-format + SetSource. _countsSeen is bumped by every
+    // landed comment count so a count arrival always busts the guard and repaints its badge.
+    private IReadOnlyList<PullRequest>? _formattedRows;
+    private int _formattedWidth = -2;
+    private int _formattedCountsSeen = -1;
+    private int _countsSeen;
 
     public PrListView(IApplication app, PrListViewModel vm, PrCommentCountEnricher? comments = null, Func<DateTimeOffset>? now = null)
     {
@@ -169,7 +176,14 @@ public sealed class PrListView : View
 
     private void OnCountAvailable(int prId)
     {
-        if (_disposed || Interlocked.Exchange(ref _countRenderQueued, 1) == 1)
+        if (_disposed)
+        {
+            return;
+        }
+        // Bump before the coalescing guard so a count that lands while a render is already queued
+        // still busts the render's MISSED-A skip check (its badge must repaint).
+        Interlocked.Increment(ref _countsSeen);
+        if (Interlocked.Exchange(ref _countRenderQueued, 1) == 1)
         {
             return;
         }
@@ -188,6 +202,10 @@ public sealed class PrListView : View
     internal string RowText(int index) =>
         index >= 0 && index < _rendered.Count ? _rendered[index] : "";
 
+    /// <summary>Test seam: the formatted-row list, whose reference changes only when a render
+    /// actually re-formats the rows (MISSED-A). A skipped render leaves it untouched.</summary>
+    internal IReadOnlyList<string> RenderedRows => _rendered;
+
     internal void Render()
     {
         var tab = _vm.ActiveTab switch
@@ -205,8 +223,6 @@ public sealed class PrListView : View
 
         var width = _list.Viewport.Width;
         _lastWidth = width;
-        var now = _now();
-        var cols = PrColumns.For(_vm.Rows);
 
         // On a tab/scope change the row set is different, so the previous tab's row index
         // must not carry over — reset the selection to the top. A same-tab background reload
@@ -217,6 +233,22 @@ public sealed class PrListView : View
         {
             _vm.SelectedIndex = 0;
         }
+
+        // MISSED-A: skip the O(rows) re-format + SetSource when nothing that feeds the rows
+        // changed — same row set (by reference), same width, same landed counts. The header above
+        // still refreshes loading/error/count, so a spurious Changed only repaints chrome.
+        var countsSeen = Volatile.Read(ref _countsSeen);
+        if (!tabChanged
+            && ReferenceEquals(_vm.Rows, _formattedRows)
+            && width == _formattedWidth
+            && countsSeen == _formattedCountsSeen)
+        {
+            SetNeedsDraw();
+            return;
+        }
+
+        var now = _now();
+        var cols = PrColumns.For(_vm.Rows);
 
         // SetSource nulls SelectedItem in 2.4.16, so capture the reviewer's current
         // row first and restore it (clamped) — otherwise a background reload snaps
@@ -236,6 +268,10 @@ public sealed class PrListView : View
         {
             _comments.Enqueue(_vm.Rows, _loadCts.Token);
         }
+
+        _formattedRows = _vm.Rows;
+        _formattedWidth = width;
+        _formattedCountsSeen = countsSeen;
         SetNeedsDraw();
     }
 

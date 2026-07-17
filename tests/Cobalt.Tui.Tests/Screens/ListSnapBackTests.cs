@@ -118,6 +118,25 @@ public class ListSnapBackTests
         Assert.Equal(items[^1].PullRequestId, view.SelectedPr?.PullRequestId);
     }
 
+    // ---- MISSED-A: skip the row re-format when rows/width/counts are unchanged ----
+
+    [Fact]
+    public async Task PrList_Render_Skips_Reformat_When_Nothing_Changed()
+    {
+        var items = Enumerable.Range(1, 5).Select(Pr).ToList();
+        var vm = new PrListViewModel(new FakePrSource(items));
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var view = new PrListView(App, vm);
+
+        view.Render();
+        var formatted = view.RenderedRows;
+        view.Render(); // identical rows, width, and (no enricher) counts
+
+        // A redundant render must not re-format every row: the formatted-row list is reused, not
+        // rebuilt, so a burst of no-op renders is not O(rows) each.
+        Assert.Same(formatted, view.RenderedRows);
+    }
+
     // ---- (3) enrichment cancellation on tab switch (M2 / ADR 0012) ----
 
     [Fact]
