@@ -8,7 +8,7 @@ stages.
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear
 chain that means top to bottom.
 
-## 1. Always-visible context keybar
+## 1. Always-visible context keybar ✅ done
 
 **What to build:** a bottom keybar line, always visible, showing the highest-value
 keys for the focused context (like lazygit's bottom line / gitui's footer). Generated
@@ -19,12 +19,12 @@ the focused pane) changes.
 
 **Blocked by:** None — can start immediately.
 
-- [ ] A keybar renders at the bottom of the shell in both sections, listing key → action pairs for the current scope
-- [ ] Content comes from the binding table (a new binding appears without touching the keybar)
-- [ ] Entries are prioritized and truncated to width with a trailing `? more` hint; never wraps
-- [ ] Formatter is a pure function covered by table-driven unit tests (scope × width)
+- [x] A keybar renders at the bottom of the shell in both sections, listing key → action pairs for the current scope
+- [x] Content comes from the binding table (a new binding appears without touching the keybar)
+- [x] Entries are prioritized and truncated to width with a trailing `? more` hint; never wraps
+- [x] Formatter is a pure function covered by table-driven unit tests (scope × width)
 
-## 2. Showcmd: pending sequence and count indicator
+## 2. Showcmd: pending sequence and count indicator ✅ done
 
 **What to build:** vim's showcmd for cobalt — while a multi-key sequence or count
 prefix is armed (`5`, `g`, `]` …), the pending tokens render at the right edge of the
@@ -33,11 +33,11 @@ state as observable data; nothing else re-implements sequencing.
 
 **Blocked by:** Always-visible context keybar (shares the chrome row layout).
 
-- [ ] Typing `5` then `j` shows `5` (then clears) in the status area; `g` shows `g` until the chord resolves
-- [ ] `Esc` clears the indicator along with the pending sequence
-- [ ] Router pending-state exposure is unit-tested; the status-line composition is unit-tested
+- [x] Typing `5` then `j` shows `5` (then clears) in the status area; `g` shows `g` until the chord resolves
+- [x] `Esc` clears the indicator along with the pending sequence
+- [x] Router pending-state exposure is unit-tested; the status-line composition is unit-tested
 
-## 3. Real tab strip with jump hints and `[`/`]` sub-tabs
+## 3. Real tab strip with jump hints and `[`/`]` sub-tabs ✅ done
 
 **What to build:** replace the fake text tab label with a rendered tab strip: section
 tabs carry their jump chords (`g1`/`g2`), and in the PR section the four sub-tabs
@@ -48,10 +48,10 @@ until the preview workspace lands.
 
 **Blocked by:** None — can start immediately.
 
-- [ ] Section tabs show jump hints; active section is visually distinct in both themes
-- [ ] PR sub-tabs are visible as a tab row with the active tab highlighted (no longer only header prose)
-- [ ] `[`/`]` cycle PR sub-tabs; `Tab`/`S-Tab` still work; work-item section unaffected
-- [ ] Tab-strip formatting is pure and unit-tested; sub-tab key routing covered at router/view-model level
+- [x] Section tabs show jump hints; active section is visually distinct in both themes
+- [x] PR sub-tabs are visible as a tab row with the active tab highlighted (no longer only header prose)
+- [x] `[`/`]` cycle PR sub-tabs; `Tab`/`S-Tab` still work; work-item section unaffected
+- [x] Tab-strip formatting is pure and unit-tested; sub-tab key routing covered at router/view-model level
 
 ## 4. PR list + live preview workspace (flagship)
 
