@@ -37,12 +37,18 @@ verb menus, saved-query sections):
   + pending tokens, as typed) — the router already owns sequencing state, so nothing
   re-implements it. `StatusLineComposer` (pure) right-aligns it on the status row;
   the shell re-renders the row after every fed key.
-- **Real tab strips.** `TabStripFormatter` (pure) renders the section tabs with
-  their jump chords (`[g1:Work Items]  g2:Pull Requests `) and the PR sub-tabs as a
-  visible tab row in cycle order with the active tab bracketed + counted
-  (` review queue │ [team 7] │ mine │ active`). `[` / `]` now cycle the PR sub-tabs
+- **Real tab strips.** `TabStripFormatter` (pure) renders the section tabs
+  (`[Work Items]  Pull Requests `) and the PR sub-tabs as a visible tab row in
+  cycle order with the active tab bracketed + counted
+  (` [team 7] │ mine │ active`). `[` / `]` now cycle the PR sub-tabs
   (lazygit's panel-tab keys), scoped to `PullRequestList`; `Tab`/`S-Tab` remain as
   aliases until the preview workspace (ADR 0022, stage B) claims `Tab` for pane focus.
+  UAT amendments: jump chords (g1/g2) stay out of the tab labels — they're
+  discoverable via `?` help and the keybar; and the personal **review queue left
+  the cycle** (Team → Mine → Active, Team default) because orgs that request
+  reviews via teams always see the personal `reviewerId={me}` queue empty — the
+  Team tab is the real queue there. `PrListFilter.ReviewQueue` and its
+  awaiting-my-vote client filter remain supported for a future config-enabled view.
 - **Chrome layout.** The bottom of the shell is now status / message (palette
   overlays it) / keybar, with the keybar owning the last row like lazygit's bottom
   line. The chrome re-fits on terminal resize (same width-change guard the list

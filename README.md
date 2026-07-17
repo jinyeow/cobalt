@@ -89,8 +89,10 @@ Pull Requests · `Tab` next tab · `:` command palette
 `:help`, `:messages`) · `?` help ·
 `r` refresh. On a work item (the highlighted list row or its detail): `s` state ·
 `c` comment · `a` assign · `t` tags; the detail additionally has `e` edit
-description in `$EDITOR`. In the PR section: `[`/`]` (or `Tab`) cycle the review queue / team /
-mine / active sub-tabs; on a PR (the highlighted list row or its detail): `v` vote; the
+description in `$EDITOR`. In the PR section: `[`/`]` (or `Tab`) cycle the team /
+mine / active sub-tabs (team — PRs your teams are reviewing or teammates authored —
+is the default; a personal "awaiting my vote" queue is org-setup-dependent and no
+longer a tab); on a PR (the highlighted list row or its detail): `v` vote; the
 detail additionally has `c` reply · `g c` add a PR-level comment · `g b` open the source
 branch in the browser · `x` resolve thread · `u` reactivate · `C` complete · `A` abandon ·
 `d` open diff review, and shows the PR's **branch-policy / build status** (pass/fail, blocking).

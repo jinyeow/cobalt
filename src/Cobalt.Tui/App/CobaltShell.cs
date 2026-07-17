@@ -589,7 +589,7 @@ public sealed class CobaltShell : Window
     /// </summary>
     private void RefreshChrome()
     {
-        _tabs.Text = TabStripFormatter.Sections(_vm.ActiveSection, _bindings);
+        _tabs.Text = TabStripFormatter.Sections(_vm.ActiveSection);
         _lastChromeWidth = Viewport.Width;
         _keybar.Text = KeybarFormatter.Render(_bindings, ActiveScope, ChromeWidth);
         RefreshStatus();

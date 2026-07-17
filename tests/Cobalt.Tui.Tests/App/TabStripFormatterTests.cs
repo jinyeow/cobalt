@@ -1,6 +1,5 @@
 using Cobalt.Core.Models;
 using Cobalt.Tui.App;
-using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
 
 namespace Cobalt.Tui.Tests.App;
@@ -13,37 +12,25 @@ namespace Cobalt.Tui.Tests.App;
 public class TabStripFormatterTests
 {
     [Fact]
-    public void Sections_Show_Jump_Chords_And_Bracket_The_Active_One()
+    public void Sections_Bracket_The_Active_One_Without_Chord_Noise()
     {
-        var strip = TabStripFormatter.Sections(AppSection.WorkItems, KeyBindingTable.Default());
+        // Jump chords (g1/g2) live in `?` help and the keybar, not the tab labels.
+        var strip = TabStripFormatter.Sections(AppSection.WorkItems);
 
-        Assert.Contains("[g1:Work Items]", strip);
-        Assert.Contains("g2:Pull Requests", strip);
-        Assert.DoesNotContain("[g2:Pull Requests]", strip);
+        Assert.Contains("[Work Items]", strip);
+        Assert.Contains("Pull Requests", strip);
+        Assert.DoesNotContain("[Pull Requests]", strip);
+        Assert.DoesNotContain("g1", strip);
+        Assert.DoesNotContain("g2", strip);
     }
 
     [Fact]
     public void Sections_Move_The_Brackets_With_The_Active_Section()
     {
-        var strip = TabStripFormatter.Sections(AppSection.PullRequests, KeyBindingTable.Default());
+        var strip = TabStripFormatter.Sections(AppSection.PullRequests);
 
-        Assert.Contains("[g2:Pull Requests]", strip);
-        Assert.DoesNotContain("[g1:Work Items]", strip);
-    }
-
-    [Fact]
-    public void Sections_Read_The_Jump_Chords_From_The_Live_Table()
-    {
-        // A rebound section jump must change the advertised chord — the strip is
-        // generated from the table, never a hardcoded label.
-        var table = new KeyBindingTable();
-        table.Bind(KeyScope.Global, "g w", AppCommand.SectionWorkItems);
-
-        var strip = TabStripFormatter.Sections(AppSection.WorkItems, table);
-
-        Assert.Contains("[gw:Work Items]", strip);
-        Assert.Contains("Pull Requests", strip); // unbound: plain name, no dead chord
-        Assert.DoesNotContain("g2:Pull Requests", strip);
+        Assert.Contains("[Pull Requests]", strip);
+        Assert.DoesNotContain("[Work Items]", strip);
     }
 
     [Fact]
@@ -52,7 +39,6 @@ public class TabStripFormatterTests
         var row = TabStripFormatter.PrTabs(PrListFilter.Team, 7);
 
         Assert.Contains("[team 7]", row);
-        Assert.Contains("review queue", row);
         Assert.Contains("mine", row);
         Assert.Contains("active", row);
         // Only the active tab is bracketed.
@@ -62,20 +48,22 @@ public class TabStripFormatterTests
     [Fact]
     public void PrTabs_Without_A_Count_Still_Highlight_The_Active_Tab()
     {
-        var row = TabStripFormatter.PrTabs(PrListFilter.ReviewQueue, null);
+        var row = TabStripFormatter.PrTabs(PrListFilter.Team, null);
 
-        Assert.Contains("[review queue]", row);
+        Assert.Contains("[team]", row);
     }
 
     [Fact]
-    public void PrTabs_Render_In_The_Cycle_Order()
+    public void PrTabs_Render_In_The_Cycle_Order_Without_ReviewQueue()
     {
+        // The personal review queue is out of the cycle (review-via-team orgs
+        // always see it empty); Team leads as the default tab.
         var row = TabStripFormatter.PrTabs(PrListFilter.Active, 0);
 
-        var queue = row.IndexOf("review queue", StringComparison.Ordinal);
+        Assert.DoesNotContain("review queue", row);
         var team = row.IndexOf("team", StringComparison.Ordinal);
         var mine = row.IndexOf("mine", StringComparison.Ordinal);
         var active = row.IndexOf("[active 0]", StringComparison.Ordinal);
-        Assert.True(queue < team && team < mine && mine < active);
+        Assert.True(team >= 0 && team < mine && mine < active);
     }
 }
