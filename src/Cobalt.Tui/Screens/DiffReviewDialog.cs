@@ -45,6 +45,7 @@ public sealed class DiffReviewDialog(
     private int _diffContentWidth = 1;
     private readonly DiffStyleCache _styleCache = new();
     private readonly CoalescingGate _statsRefresh = new();
+    private int _prefetchLaunched;
 
     private CancellationToken Token => _cts.Token;
 
@@ -128,6 +129,8 @@ public sealed class DiffReviewDialog(
             _closed = true;
             vm.Changed -= OnChanged;
             vm.StatsChanged -= OnStatsChanged;
+            vm.BusyChanged -= OnBusyChanged;
+            vm.FilesLoaded -= OnFilesLoaded;
             dialog.ViewportChanged -= OnViewportChanged;
             _cts.Cancel();
             _cts.Dispose();
@@ -236,6 +239,12 @@ public sealed class DiffReviewDialog(
 
         vm.Changed += OnChanged;
         vm.StatsChanged += OnStatsChanged;
+        // A mutation's busy flip repaints chrome only (busy indicator + error header); the
+        // trailing Changed does the full content rebuild (RENDER-4). FilesLoaded starts the
+        // background diff prefetch the instant the changed-file list lands, before the threads
+        // and first diff settle (ASYNC-3).
+        vm.BusyChanged += OnBusyChanged;
+        vm.FilesLoaded += OnFilesLoaded;
         dialog.KeyDown += HandleKey;
         // Re-apply the responsive layout when the terminal (and so the dialog) is resized.
         dialog.ViewportChanged += OnViewportChanged;
@@ -264,6 +273,16 @@ public sealed class DiffReviewDialog(
             app.Invoke(RunQueuedStatsRefresh);
         }
     }
+
+    // A mutation flips IsBusy at its start, when the diff content and threads are unchanged, so
+    // repaint the chrome (busy indicator + error header) without re-tokenizing the open file or
+    // re-flattening the file tree. The mutation's trailing Changed still fully rebuilds when the
+    // refreshed threads land (RENDER-4). Without this the mutation-start repaint was dropped.
+    private void OnBusyChanged() => app.Invoke(RunBusyRefresh);
+
+    // FilesLoaded fires once, the instant the changed-file list is assigned — before the threads
+    // and first diff settle — so the background diff prefetch starts earlier (ASYNC-3).
+    private void OnFilesLoaded() => StartPrefetch();
 
     private void OnViewportChanged(object? sender, Terminal.Gui.ViewBase.DrawEventArgs e)
     {
@@ -471,13 +490,33 @@ public sealed class DiffReviewDialog(
         }
     }
 
-    private async Task LoadAsync()
+    internal async Task LoadAsync()
     {
         await vm.LoadAsync(Token).IgnoreCancellationAsync();
-        // Fill per-file diff stats (StatsFor / totals) in the background so file rows and the
-        // header totals populate; each computed file raises Changed → a re-render.
+        // Fallback: FilesLoaded already started the prefetch the instant the changed-file list
+        // landed (ASYNC-3), so this is a no-op on the happy path. It still covers the early-return
+        // path (no iteration), where Files is empty and FilesLoaded never fired — the guard makes
+        // the launch fire exactly once either way.
+        StartPrefetch();
+    }
+
+    /// <summary>
+    /// Starts the background diff prefetch exactly once (StatsFor / totals fill in so file rows
+    /// and the header totals populate). Idempotent so FilesLoaded and the LoadAsync fallback can
+    /// both call it without racing two prefetch waves. On the dialog token (ADR 0008: one token —
+    /// the prefetch and any select share it, so no caller cancels a fetch another is awaiting).
+    /// </summary>
+    internal void StartPrefetch()
+    {
+        if (Interlocked.Exchange(ref _prefetchLaunched, 1) != 0)
+        {
+            return;
+        }
         _ = FireAndForget.Observe(vm.PrefetchAllDiffsAsync(Token).IgnoreCancellationAsync(), app, log);
     }
+
+    /// <summary>Test seam: how many times the background prefetch has actually been launched (fire-once).</summary>
+    internal int PrefetchLaunches => _prefetchLaunched;
 
     private async Task SelectFile(int index)
     {
@@ -942,6 +981,21 @@ public sealed class DiffReviewDialog(
         });
 
     /// <summary>
+    /// The chrome-only repaint <see cref="OnBusyChanged"/> posts: refresh the busy indicator
+    /// (title) and error header on a mutation's busy flip, without re-tokenizing the unchanged
+    /// diff or re-flattening the file tree — the mutation's trailing <c>Changed</c> does the full
+    /// rebuild. Internal so tests can run it directly — a headless <c>Application</c> never drains
+    /// Invoke.
+    /// </summary>
+    internal void RunBusyRefresh()
+    {
+        if (!_closed)
+        {
+            Render(includeDiffPane: false, includeFileList: false);
+        }
+    }
+
+    /// <summary>
     /// The header above the diff pane: which file is on screen and its stats. Keyed on the diff's
     /// own path so it never labels one file's diff with another's name. Precedence matches what a
     /// full render has always produced — a diff on screen wins, then loading, then an error, and
@@ -970,7 +1024,14 @@ public sealed class DiffReviewDialog(
     /// skip rebuilding the diff pane — used by the background stats prefetch, whose updates never
     /// change the displayed diff content, so the open file is not re-tokenized on every file.
     /// </param>
-    private void Render(bool includeDiffPane = true)
+    /// <param name="includeFileList">
+    /// When <see langword="false"/>, skip re-flattening the changed-file tree and re-formatting its
+    /// rows — used by paths that change only what the diff pane shows (fold expand, mode toggle,
+    /// search, cross-fold n/N) or only the chrome (a mutation's busy flip), never a file's
+    /// annotation (RENDER-1/RENDER-4). Annotation-changing paths (comment resolve, mark-viewed,
+    /// the T filter, the stats refresh) leave it <see langword="true"/> so the tree stays current.
+    /// </param>
+    private void Render(bool includeDiffPane = true, bool includeFileList = true)
     {
         ApplyResponsiveLayout();
         if (_dialog is not null)
@@ -984,9 +1045,12 @@ public sealed class DiffReviewDialog(
         // reaches the reviewer through the message bar (ADR 0013), which is its surface.
         WriteDiffHeader();
 
-        // Rebuild the file tree, keeping the highlight on the displayed file's row.
-        RepointIfFilteredOut();
-        RebuildFileList(SelectedFileNodePath());
+        if (includeFileList)
+        {
+            // Rebuild the file tree, keeping the highlight on the displayed file's row.
+            RepointIfFilteredOut();
+            RebuildFileList(SelectedFileNodePath());
+        }
 
         // Everything below describes the diff on screen, so it keys off the path that diff came
         // from — never the file-tree cursor. SelectFileAsync moves the cursor to the new file and
@@ -1174,20 +1238,19 @@ public sealed class DiffReviewDialog(
     /// <summary>Per-file review metadata (diff stat, viewed, unresolved) keyed by path for the tree.</summary>
     private IReadOnlyDictionary<string, FileAnnotation> BuildAnnotations()
     {
+        // The unresolved-file set is recomputed once per Threads write in the view-model
+        // (HarvestThreadsAsync), so a file's "has unresolved comments" dot is an O(1) lookup
+        // here instead of scanning every thread per file on each file-tree rebuild (RENDER-2).
+        var unresolved = vm.UnresolvedFilePaths;
         var map = new Dictionary<string, FileAnnotation>(StringComparer.Ordinal);
         foreach (var file in vm.Files)
         {
             var stats = vm.StatsFor(file.Path);
             map[file.Path] = new FileAnnotation(
-                stats?.Additions, stats?.Deletions, vm.IsViewed(file.Path), HasUnresolvedThread(file.Path));
+                stats?.Additions, stats?.Deletions, vm.IsViewed(file.Path), unresolved.Contains(file.Path));
         }
         return map;
     }
-
-    private bool HasUnresolvedThread(string path) =>
-        vm.Threads.Any(t =>
-            t.Status == PrThreadStatus.Active && !t.IsSystemOnly &&
-            string.Equals(t.FilePath, path, StringComparison.Ordinal));
 
     private FileTreeRow? NearestAncestorDir(int rowIndex)
     {

@@ -1277,4 +1277,74 @@ public class DiffReviewDialogKeyTests
 
         Assert.False(detail.SearchBar.Visible); // hidden, not orphaned with stale text
     }
+
+    // ---- RENDER-2: the unresolved dot reads the view-model's precomputed set ----
+
+    [Fact]
+    public async Task File_Row_Unresolved_Dot_Tracks_The_View_Models_Unresolved_File_Set()
+    {
+        // The file-tree "has unresolved comments" dot is driven by vm.UnresolvedFilePaths (one
+        // O(threads) pass per Threads write) rather than a per-file Threads.Any scan on every
+        // tree rebuild. A file in the set gets the dot; one outside it does not.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "fix", false)], "/b.cs", RightLine: 1, LeftLine: null)],
+        };
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        source.Blobs[("/b.cs", "src")] = "y\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("/b.cs", vm.UnresolvedFilePaths); // fixture gate
+        Assert.DoesNotContain("/a.cs", vm.UnresolvedFilePaths);
+
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+
+        var fileRows = detail.Rows.Where(r => r.Kind == FileTreeRowKind.File).ToDictionary(r => r.NodePath);
+        Assert.True(fileRows["/b.cs"].HasUnresolved);
+        Assert.False(fileRows["/a.cs"].HasUnresolved);
+    }
+
+    // ---- RENDER-4: a mutation's busy flip repaints chrome only ----
+
+    [Fact]
+    public async Task Busy_Refresh_Repaints_Chrome_Without_Rebuilding_The_Diff_Pane_Or_File_Tree()
+    {
+        // The busy flip at a mutation's start changes neither the displayed diff nor the file
+        // annotations, so it must not re-tokenize the open file (a new DiffListDataSource) nor
+        // re-flatten the tree (a new _rows list) — only the trailing Changed does a full rebuild.
+        var (detail, _) = await BuiltDialog();
+        var beforeSource = detail.DiffPane.Source;
+        var beforeRows = detail.Rows;
+
+        detail.RunBusyRefresh();
+
+        Assert.Same(beforeSource, detail.DiffPane.Source); // diff pane not rebuilt
+        Assert.Same(beforeRows, detail.Rows);              // file tree not re-flattened
+        Assert.Contains("/a.cs", detail.DiffHeader.Text);  // header still refreshed (a cleared error repaints)
+    }
+
+    // ---- ASYNC-3: the background prefetch launches exactly once ----
+
+    [Fact]
+    public async Task Prefetch_Launches_Exactly_Once_Across_FilesLoaded_And_The_Fallback()
+    {
+        // FilesLoaded starts the prefetch the instant the changed-file list lands, and LoadAsync
+        // keeps a fallback launch for the early-return path — the guard makes the two paths launch
+        // the background wave once, never twice (ADR 0008: one shared token, one wave).
+        var source = new FakeDiffSource(); // empty changes → the prefetch no-ops (no StatsChanged/Invoke)
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        detail.Build();
+        Assert.Equal(0, detail.PrefetchLaunches);
+
+        detail.StartPrefetch();
+        Assert.Equal(1, detail.PrefetchLaunches);
+
+        detail.StartPrefetch();
+        Assert.Equal(1, detail.PrefetchLaunches); // idempotent — the second call is a no-op
+    }
 }
