@@ -43,9 +43,15 @@ public static class KeyTokenizer
                 break;
         }
 
-        if (key.IsCtrl)
+        // Ctrl (but not Ctrl+Alt): a control chord. Ctrl+Alt is AltGr on European layouts —
+        // it produces printable characters, so it must fall through to the IsAlt guard below
+        // (returns null → Terminal.Gui handles it) rather than fire a vim command.
+        if (key.IsCtrl && !key.IsAlt)
         {
-            return Key.GetIsKeyCodeAtoZ(code) ? CtrlTokens[(int)(code - KeyCode.A)] : null;
+            // GetIsKeyCodeAtoZ is true for BOTH the A-Z codes (0x41-0x5A) and lowercase
+            // codepoints (0x61-0x7A), so fold to lowercase before indexing to keep the
+            // offset in 0-25 (a raw subtract from KeyCode.A overruns the table for 0x61+).
+            return Key.GetIsKeyCodeAtoZ(code) ? CtrlTokens[((int)code | 0x20) - 'a'] : null;
         }
 
         if (key.IsAlt)

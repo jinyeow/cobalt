@@ -72,4 +72,37 @@ public class WorkItemListRenderGuardTests
 
         Assert.NotSame(before, view.ListSource);
     }
+
+    [Fact]
+    public async Task Render_Rebuilds_When_A_Filter_Change_Narrows_The_Rows()
+    {
+        // Pins the contract the guard relies on: ApplyFilter reassigns Rows to a NEW reference
+        // (so ReferenceEquals(_vm.Rows, _renderedRows) is false and the guard rebuilds) even
+        // though the width is unchanged. If ApplyFilter ever kept the same reference, the guard
+        // would wrongly skip the rebuild and the filtered rows would never paint.
+        var items = Enumerable.Range(1, 5).Select(i => Wi(i)).ToList();
+        var vm = new WorkItemListViewModel(new FakeWiSource(items));
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var view = new WorkItemListView(App, vm);
+        var window = new Window();
+        window.Add(view);
+        window.Layout(new System.Drawing.Size(60, 20));
+
+        var before = view.ListSource;
+        // The Filter setter reassigns Rows, then raises Changed → OnVmChanged → app.Invoke,
+        // which throws without Application.Init() (this suite never Inits — the same pattern
+        // as the other view-level tests). Rows is already reassigned by then, so swallow the
+        // marshalling throw and drive Render() directly to observe the guard.
+        try
+        {
+            vm.Filter = "item 1";
+        }
+        catch (Terminal.Gui.App.NotInitializedException)
+        {
+        }
+        view.Render();
+
+        Assert.NotSame(before, view.ListSource);
+    }
 }
