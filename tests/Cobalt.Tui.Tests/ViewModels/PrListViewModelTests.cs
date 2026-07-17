@@ -207,6 +207,80 @@ public class PrListViewModelTests
     }
 
     [Fact]
+    public async Task Revisiting_A_Loaded_Tab_Paints_Cached_Rows_Before_The_Refresh()
+    {
+        var source = new GatedSource();
+        source.Gate(PrListFilter.ReviewQueue).SetResult([Pr(1, "seed")]);
+        var vm = new PrListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken); // ReviewQueue → [1], cached
+        source.Gate(PrListFilter.Mine).SetResult([Pr(2, "mine")]);
+        await vm.SetTabAsync(PrListFilter.Mine, TestContext.Current.CancellationToken); // Mine → [2], cached
+
+        // Switch back to ReviewQueue, but hold the refresh so we can see what paints first.
+        var refresh = source.Gate(PrListFilter.ReviewQueue);
+        var switching = vm.SetTabAsync(PrListFilter.ReviewQueue, TestContext.Current.CancellationToken);
+
+        // The cached rows paint immediately (no blank pane), while the tab shows as refreshing.
+        Assert.True(vm.IsLoading);
+        Assert.Single(vm.Rows);
+        Assert.Equal(1, vm.Rows[0].PullRequestId);
+
+        refresh.SetResult([Pr(1, "seed"), Pr(3, "fresh")]);
+        await switching;
+
+        Assert.False(vm.IsLoading);
+        Assert.Equal([1, 3], vm.Rows.Select(r => r.PullRequestId));
+    }
+
+    [Fact]
+    public async Task InvalidateCache_Stops_A_Revisit_From_Painting_Stale_Rows()
+    {
+        var source = new GatedSource();
+        source.Gate(PrListFilter.ReviewQueue).SetResult([Pr(1, "seed")]);
+        var vm = new PrListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        source.Gate(PrListFilter.Mine).SetResult([Pr(2, "mine")]);
+        await vm.SetTabAsync(PrListFilter.Mine, TestContext.Current.CancellationToken);
+
+        // A scope/context change invalidates every tab's cached rows.
+        vm.InvalidateCache();
+
+        var refresh = source.Gate(PrListFilter.ReviewQueue);
+        var switching = vm.SetTabAsync(PrListFilter.ReviewQueue, TestContext.Current.CancellationToken);
+
+        // No stale paint: the cache was dropped, so the pane blanks and waits for the fresh fetch.
+        Assert.Empty(vm.Rows);
+
+        refresh.SetResult([Pr(1, "seed")]);
+        await switching;
+        Assert.Single(vm.Rows);
+    }
+
+    [Fact]
+    public async Task InvalidateActiveTab_Drops_The_Active_Tab_So_A_Refresh_Does_Not_Paint_Stale()
+    {
+        var source = new GatedSource();
+        source.Gate(PrListFilter.ReviewQueue).SetResult([Pr(1, "seed")]);
+        var vm = new PrListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken); // RQ [1] cached, active = RQ
+        Assert.Single(vm.Rows);
+
+        // A mutation (vote/abandon) drops the active tab's cache so a transient refresh failure
+        // shows a blank pane rather than a stale row that no longer reflects the change.
+        vm.InvalidateActiveTab();
+
+        var refresh = source.Gate(PrListFilter.ReviewQueue);
+        var reload = vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // No stale paint: the active tab's cache was dropped, so the pane blanks and waits.
+        Assert.Empty(vm.Rows);
+
+        refresh.SetResult([Pr(1, "seed")]);
+        await reload;
+        Assert.Single(vm.Rows);
+    }
+
+    [Fact]
     public async Task RepoFilter_Narrows_Active_Rows()
     {
         var source = new FakeSource();

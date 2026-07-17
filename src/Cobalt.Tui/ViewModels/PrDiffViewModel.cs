@@ -59,6 +59,15 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     public IReadOnlyList<FileChange> Files { get; private set; } = [];
     public IReadOnlyList<PrThread> Threads { get; private set; } = [];
 
+    /// <summary>
+    /// The set of file paths carrying at least one unresolved (Active, non-system) thread.
+    /// Computed once per <see cref="Threads"/> write (in <see cref="HarvestThreadsAsync"/>), so
+    /// the render can decide a file's "has unresolved comments" annotation by an O(1) lookup
+    /// instead of scanning every thread per file. The reference is stable between writes.
+    /// </summary>
+    public IReadOnlySet<string> UnresolvedFilePaths { get; private set; } =
+        new HashSet<string>(StringComparer.Ordinal);
+
     /// <summary>True when the review threads could not be loaded, so comment markers and thread
     /// navigation are unavailable for this dialog session (LoadAsync runs once).</summary>
     public bool ThreadsUnavailable { get; private set; }
@@ -87,6 +96,22 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     /// </summary>
     public event Action? StatsChanged;
 
+    /// <summary>
+    /// Raised when only the busy/error chrome changes at the <em>start</em> of a mutation, not the
+    /// diff content or threads. Lets the dialog refresh the busy indicator and error header without
+    /// re-tokenizing the open file on every keystroke that starts an operation (mirror of
+    /// <see cref="StatsChanged"/>). The trailing completion still raises <see cref="Changed"/>,
+    /// because the threads refresh that lands with it is a real content change.
+    /// </summary>
+    public event Action? BusyChanged;
+
+    /// <summary>
+    /// Raised once per load, the instant <see cref="Files"/> is assigned — before the first file's
+    /// diff is published. Lets a consumer start its background prefetch off the changed-file list
+    /// without waiting for the whole load (threads + first diff) to settle (ASYNC-3).
+    /// </summary>
+    public event Action? FilesLoaded;
+
     public FileChange? SelectedFile =>
         Files.Count == 0 ? null : Files[Math.Clamp(_selectedFileIndex, 0, Files.Count - 1)];
 
@@ -100,11 +125,24 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     /// </summary>
     public IReadOnlyList<FileChange> FilteredFiles =>
         OnlyUnresolvedFiles
-            ? [.. Files.Where(f => Threads.Any(t => IsUnresolved(t) && string.Equals(t.FilePath, f.Path, StringComparison.Ordinal)))]
+            ? [.. Files.Where(f => UnresolvedFilePaths.Contains(f.Path))]
             : Files;
 
     private static bool IsUnresolved(PrThread thread) =>
         thread.Status == PrThreadStatus.Active && !thread.IsSystemOnly;
+
+    private static IReadOnlySet<string> ComputeUnresolvedFilePaths(IReadOnlyList<PrThread> threads)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var thread in threads)
+        {
+            if (IsUnresolved(thread) && thread.FilePath is { } path)
+            {
+                set.Add(path);
+            }
+        }
+        return set;
+    }
 
     public void MarkViewed(string path) => _viewed.Add(path);
 
@@ -116,8 +154,14 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     public (int Additions, int Deletions)? StatsFor(string path) =>
         _diffCache.TryGetValue(path, out var diff) ? (diff.Additions, diff.Deletions) : null;
 
-    public int TotalAdditions => _diffCache.Values.Sum(d => d.Additions);
-    public int TotalDeletions => _diffCache.Values.Sum(d => d.Deletions);
+    // Running totals bumped once per unique file added to _diffCache (see ComputeDiffForFileAsync),
+    // so the header totals are an O(1) read on every render instead of re-summing the whole cache.
+    // Volatile.Read pairs with the Interlocked.Add writer on background prefetch continuations.
+    private int _totalAdditions;
+    private int _totalDeletions;
+
+    public int TotalAdditions => Volatile.Read(ref _totalAdditions);
+    public int TotalDeletions => Volatile.Read(ref _totalDeletions);
 
     /// <summary>
     /// Computes every file's diff into the cache (so <see cref="StatsFor"/> and the totals fill
@@ -233,6 +277,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 
             Files = await source.GetIterationChangesAsync(
                 pr.ProjectName, pr.RepositoryId, pr.PullRequestId, _iteration.Id, ct).ConfigureAwait(false);
+            // Signal the changed-file list is ready so a consumer can start prefetch now, before
+            // the threads fetch and first diff below complete (ASYNC-3).
+            FilesLoaded?.Invoke();
 
             // Threads need only the PR id and the first file's blobs need only the iteration, so
             // both round-trips start here and are harvested below: an open costs ~3 round-trips
@@ -305,6 +352,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         try
         {
             Threads = await fetch.ConfigureAwait(false);
+            // Recompute the unresolved-file set once here, on the single Threads write, rather
+            // than scanning every thread per file on each render (RENDER-2).
+            UnresolvedFilePaths = ComputeUnresolvedFilePaths(Threads);
             ThreadsUnavailable = false;
         }
         catch (Exception ex) when (
@@ -415,7 +465,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
 
         IsBusy = true;
         Error = null;
-        Changed?.Invoke();
+        // Chrome-only signal: the diff content and threads are unchanged at the busy flip, so this
+        // must not re-tokenize the open file. The trailing Changed (below) covers the real refresh.
+        BusyChanged?.Invoke();
         try
         {
             await source.AddLineCommentAsync(
@@ -460,7 +512,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     {
         IsBusy = true;
         Error = null;
-        Changed?.Invoke();
+        // Chrome-only signal: the diff content and threads are unchanged at the busy flip, so this
+        // must not re-tokenize the open file. The trailing Changed (below) covers the real refresh.
+        BusyChanged?.Invoke();
         try
         {
             await source.VoteAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, vote, ct).ConfigureAwait(false);
@@ -486,7 +540,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     {
         IsBusy = true;
         Error = null;
-        Changed?.Invoke();
+        // Chrome-only signal: the diff content and threads are unchanged at the busy flip, so this
+        // must not re-tokenize the open file. The trailing Changed (below) covers the real refresh.
+        BusyChanged?.Invoke();
         try
         {
             await mutate().ConfigureAwait(false);
@@ -542,8 +598,13 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         {
             var diff = await inflight.Value.ConfigureAwait(false);
             // Published before the eviction below, so a caller that misses the result cache still
-            // finds the in-flight entry rather than starting a second fetch.
-            _diffCache[file.Path] = diff;
+            // finds the in-flight entry rather than starting a second fetch. TryAdd (not the indexer)
+            // so the running totals are bumped exactly once per file, never once per joining caller.
+            if (_diffCache.TryAdd(file.Path, diff))
+            {
+                Interlocked.Add(ref _totalAdditions, diff.Additions);
+                Interlocked.Add(ref _totalDeletions, diff.Deletions);
+            }
             return diff;
         }
         finally

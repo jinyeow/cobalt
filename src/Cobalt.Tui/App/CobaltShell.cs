@@ -29,6 +29,10 @@ public sealed class CobaltShell : Window
 
     private WorkItemListView? _workItemList;
     private PrListView? _prList;
+    private Label? _placeholder;
+    // CACHE-1: one enricher for the shell's lifetime so its comment-count cache survives section
+    // toggles (the PR screen is kept alive, but the field makes the shared cache explicit).
+    private PrCommentCountEnricher? _prEnricher;
 
     private readonly Label _tabs;
     private readonly View _content;
@@ -87,6 +91,24 @@ public sealed class CobaltShell : Window
     public KeyScope ActiveScope => _vm.ActiveSection == AppSection.WorkItems
         ? KeyScope.WorkItemList
         : KeyScope.PullRequestList;
+
+    // With CACHE-1 both list screens are always non-null once built, so the active section — not a
+    // null check on the screen — decides which one a shell command targets.
+    private bool WorkItemsActive => _vm.ActiveSection == AppSection.WorkItems;
+    private bool PullRequestsActive => _vm.ActiveSection == AppSection.PullRequests;
+
+    /// <summary>
+    /// Test seam (INPUT-1): how a vim-movement repaint is issued, so a headless test can observe the
+    /// force flag without a full <see cref="IApplication"/> fake. Defaults to a non-forced
+    /// <see cref="IApplication.LayoutAndDraw(bool)"/>; production never sets it.
+    /// </summary>
+    internal Action<bool>? MovementRedrawOverride { get; set; }
+
+    /// <summary>Test seam: the persistent PR list screen (kept alive across section switches, CACHE-1).</summary>
+    internal PrListView? PrListScreen => _prList;
+
+    /// <summary>Test seam: the persistent work-item list screen (kept alive across section switches, CACHE-1).</summary>
+    internal WorkItemListView? WorkItemListScreen => _workItemList;
 
     private void WireViewModel()
     {
@@ -172,10 +194,11 @@ public sealed class CobaltShell : Window
 
     private void Dispatch(AppCommand command, int? count = null)
     {
-        // In the PR section, Tab/S-Tab cycle the PR sub-tabs (review queue/team/mine/active)
-        // rather than switching top-level sections; section switches go through the
-        // g-chords (gt/gT/g1/g2), handled by _vm.HandleCommand below.
-        if (_prList is not null && command is AppCommand.NextTab or AppCommand.PrevTab)
+        // In the PR section (with a built list), Tab/S-Tab cycle the PR sub-tabs (review
+        // queue/team/mine/active) rather than switching top-level sections; section switches go
+        // through the g-chords (gt/gT/g1/g2), handled by _vm.HandleCommand below. When the PR list
+        // isn't built (no connection → placeholder), fall through so Tab still toggles sections.
+        if (PullRequestsActive && _prList is not null && command is AppCommand.NextTab or AppCommand.PrevTab)
         {
             if (command == AppCommand.NextTab)
             {
@@ -189,17 +212,28 @@ public sealed class CobaltShell : Window
         }
 
         // Vim movement: the router matched and consumed the key, so forward it to the
-        // active list (ListView only navigates on arrow keys natively).
+        // active section's list only (both are kept alive now, so a null check no longer
+        // identifies the visible one). ListView only navigates on arrow keys natively.
         if (VimScroll.Applies(command))
         {
-            _workItemList?.Navigate(command, count);
-            _prList?.Navigate(command, count);
-            // Force a full redraw now (true, not false): a programmatic InvokeCommand move
-            // may not flag the view dirty on every driver, so LayoutAndDraw(false) could
-            // skip it and the move would only paint on the next event. (The "needs a second
-            // press" symptom under a multiplexer is actually the Win32-console driver dropping
-            // input, not a missed paint — see ADR 0016; this forced paint is still correct.)
-            _app.LayoutAndDraw(true);
+            View? moved = null;
+            if (WorkItemsActive)
+            {
+                _workItemList?.Navigate(command, count);
+                moved = _workItemList;
+            }
+            else if (PullRequestsActive)
+            {
+                _prList?.Navigate(command, count);
+                moved = _prList;
+            }
+            // INPUT-1: dirty only the moved list and issue a non-forced layout+draw, instead of
+            // forcing a full-app repaint on every keystroke. A programmatic InvokeCommand move may
+            // not flag the view dirty on its own, so SetNeedsDraw supplies that flag explicitly —
+            // which is what the old force:true was compensating for (ADR 0016). UAT-gated on both
+            // the windows and dotnet drivers.
+            moved?.SetNeedsDraw();
+            (MovementRedrawOverride ?? _app.LayoutAndDraw)(false);
             return;
         }
 
@@ -214,15 +248,32 @@ public sealed class CobaltShell : Window
                 OpenPalette();
                 break;
             case AppCommand.Refresh:
-                _workItemList?.OnRefresh();
-                _prList?.Load();
+                // `r` forces a fresh load of the visible section only (CACHE-1 keeps the other's
+                // rows as-is until it is next shown or refreshed).
+                if (WorkItemsActive)
+                {
+                    _workItemList?.OnRefresh();
+                }
+                else if (PullRequestsActive)
+                {
+                    _prList?.Refresh();
+                }
                 break;
             case AppCommand.FilterStart:
-                _workItemList?.StartFiltering();
+                if (WorkItemsActive)
+                {
+                    _workItemList?.StartFiltering();
+                }
                 break;
             case AppCommand.Open:
-                _workItemList?.OnOpen();
-                _prList?.OnOpen();
+                if (WorkItemsActive)
+                {
+                    _workItemList?.OnOpen();
+                }
+                else if (PullRequestsActive)
+                {
+                    _prList?.OnOpen();
+                }
                 break;
             case AppCommand.YankId:
                 CopyCurrentUrl();
@@ -296,7 +347,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var actions = new PrActions(_app, _vm.Messages.Info);
-        _ = RunThenRefreshAsync(actions.RunVoteAsync(_pullRequests, pr.PullRequestId, CancellationToken.None), () => _prList?.Load());
+        _ = RunThenRefreshAsync(actions.RunVoteAsync(_pullRequests, pr.PullRequestId, CancellationToken.None), () => _prList?.RefreshAfterMutation());
     }
 
     private async Task RunThenRefreshAsync(Task action, Action refresh)
@@ -311,11 +362,12 @@ public sealed class CobaltShell : Window
         {
             return null;
         }
-        if (_workItemList?.SelectedId is { } wid)
+        // Both screens are kept alive, so yank/open the selection in the visible section only.
+        if (WorkItemsActive && _workItemList?.SelectedId is { } wid)
         {
             return AdoUrls.WorkItem(_context, wid, _workItemList.SelectedProject);
         }
-        if (_prList?.SelectedPr is { } pr)
+        if (PullRequestsActive && _prList?.SelectedPr is { } pr)
         {
             return AdoUrls.PullRequest(_context, pr.ProjectName, pr.RepositoryName, pr.PullRequestId);
         }
@@ -364,7 +416,7 @@ public sealed class CobaltShell : Window
         }
         var detailVm = new PrDetailViewModel(_pullRequests, id);
         new PrDetailDialog(_app, detailVm, _textInput, _vm.Messages.Info, _pullRequests, _context).Show();
-        _prList?.Load(); // reflect any votes/edits back into the list
+        _prList?.RefreshAfterMutation(); // reflect any votes/edits back into the list, dropping stale cache
     }
 
     private void OpenWorkItemDetail(long id, string? project)
@@ -476,73 +528,91 @@ public sealed class CobaltShell : Window
 
     private void ShowSection()
     {
+        // CACHE-1: keep the list screens alive across section switches — remove the current one
+        // from the content host but do NOT dispose it, so switching back reuses it (rows stay as
+        // last loaded until an explicit refresh) instead of refetching. The screens are built
+        // lazily once and disposed with the shell.
         if (_activeScreen is not null)
         {
             _content.Remove(_activeScreen);
-            _activeScreen.Dispose();
             _activeScreen = null;
-            _workItemList = null;
-            _prList = null;
         }
 
         if (_vm.ActiveSection == AppSection.WorkItems && _workItems is not null)
         {
-            // Seed the fresh view-model with the shell's active filters so switching away
-            // and back doesn't silently drop :done / :project.
-            var listVm = new WorkItemListViewModel(_workItems, _vm.IncludeCompletedWorkItems, _vm.ProjectFilter);
-            _workItemList = new WorkItemListView(_app, listVm);
-            _workItemList.ItemActivated += OpenWorkItemDetail;
-            _activeScreen = _workItemList;
-            _content.Add(_activeScreen);
-            _workItemList.Load();
+            _activeScreen = _workItemList ??= BuildWorkItemList(_workItems);
         }
         else if (_vm.ActiveSection == AppSection.PullRequests && _pullRequests is not null)
         {
-            var listVm = new PrListViewModel(_pullRequests) { ProjectFilter = _vm.ProjectFilter ?? "" };
-            var store = _pullRequests;
-            var enricher = new PrCommentCountEnricher(async (pr, ct) =>
-            {
-                var threads = await store.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct)
-                    .ConfigureAwait(false);
-                return threads.Sum(t => t.Comments.Count(c => !c.IsSystem));
-            });
-            _prList = new PrListView(_app, listVm, enricher);
-            _prList.ItemActivated += OpenPrDetail;
-            _activeScreen = _prList;
-            _content.Add(_activeScreen);
-            _prList.Load();
+            _activeScreen = _prList ??= BuildPrList(_pullRequests);
         }
         else
         {
             // No connection: show a hint instead of an empty pane.
-            _activeScreen = new Label
+            _activeScreen = _placeholder ??= new Label
             {
                 X = 1,
                 Y = 1,
                 Width = Dim.Fill(),
                 Text = "no Azure DevOps connection — run: cobalt auth login",
             };
-            _content.Add(_activeScreen);
         }
 
-        // Re-establish focus: disposing the previously-focused screen leaves focus
-        // dangling, which stops Window.KeyDown from routing subsequent keys.
+        _content.Add(_activeScreen);
+        // Re-establish focus: swapping the shown screen leaves focus dangling, which stops
+        // Window.KeyDown from routing subsequent keys.
         _activeScreen.SetFocus();
+    }
+
+    private WorkItemListView BuildWorkItemList(WorkItemStoreAdapter workItems)
+    {
+        // Seed the view-model with the shell's active filters so the first load honours :done / :project.
+        var listVm = new WorkItemListViewModel(workItems, _vm.IncludeCompletedWorkItems, _vm.ProjectFilter);
+        var view = new WorkItemListView(_app, listVm);
+        view.ItemActivated += OpenWorkItemDetail;
+        view.Load();
+        return view;
+    }
+
+    private PrListView BuildPrList(PullRequestStoreAdapter pullRequests)
+    {
+        var listVm = new PrListViewModel(pullRequests) { ProjectFilter = _vm.ProjectFilter ?? "" };
+        _prEnricher ??= new PrCommentCountEnricher(async (pr, ct) =>
+        {
+            var threads = await pullRequests.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct)
+                .ConfigureAwait(false);
+            return threads.Sum(t => t.Comments.Count(c => !c.IsSystem));
+        });
+        var view = new PrListView(_app, listVm, _prEnricher);
+        view.ItemActivated += OpenPrDetail;
+        view.Load();
+        return view;
     }
 
     private void RefreshChrome()
     {
         var wi = _vm.ActiveSection == AppSection.WorkItems ? "[Work Items]" : " Work Items ";
         var pr = _vm.ActiveSection == AppSection.PullRequests ? "[Pull Requests]" : " Pull Requests ";
-        _tabs.Text = $" {wi} {pr}";
-        _status.Text = _vm.StatusLine;
         var current = _vm.Messages.Current;
-        _message.Text = current is null ? "" : $" {current.Text}";
-        // Only the fixed-layout chrome labels changed text — mark them dirty and let the run loop
-        // repaint them, instead of a whole-app LayoutAndDraw on every routine status/log message.
-        _tabs.SetNeedsDraw();
-        _status.SetNeedsDraw();
-        _message.SetNeedsDraw();
+        // SHELL-2: set + dirty each fixed-layout chrome label only when its text actually changed,
+        // instead of dirtying all three on every routine status/log message. Most messages change
+        // only the message line, so the tab strip and status line usually stay clean.
+        SetIfChanged(_tabs, $" {wi} {pr}");
+        SetIfChanged(_status, _vm.StatusLine);
+        SetIfChanged(_message, current is null ? "" : $" {current.Text}");
+    }
+
+    /// <summary>Sets a chrome label's text and marks it dirty only when it changed; returns whether
+    /// it changed. Keeps <see cref="RefreshChrome"/> from repainting labels whose text is identical.</summary>
+    internal static bool SetIfChanged(Label label, string text)
+    {
+        if (string.Equals(label.Text, text, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        label.Text = text;
+        label.SetNeedsDraw();
+        return true;
     }
 
     private void ShowHelp() => TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope));
@@ -569,6 +639,17 @@ public sealed class CobaltShell : Window
             {
                 _themeMonitor.Changed -= OnOsThemeChanged;
             }
+            // CACHE-1: the persistent list screens are kept alive across section switches, so the
+            // hidden one is not in the view tree and would not be disposed by the base Window.
+            // Remove the visible one first (base disposes the tree), then dispose both once.
+            if (_activeScreen is not null)
+            {
+                _content.Remove(_activeScreen);
+                _activeScreen = null;
+            }
+            _workItemList?.Dispose();
+            _prList?.Dispose();
+            _placeholder?.Dispose();
         }
         base.Dispose(disposing);
     }

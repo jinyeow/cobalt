@@ -24,6 +24,21 @@ public sealed class PrCommentCountEnricher(
     /// <summary>Raised (with the PR id) whenever a fresh count is cached.</summary>
     public event Action<int>? CountAvailable;
 
+    /// <summary>
+    /// Drops the cached counts and the failed-key set so a subsequent enqueue refetches them. Used
+    /// on an explicit refresh (<c>r</c> / <c>:scope</c>) since the enricher outlives the list screen
+    /// (CACHE-1), otherwise a new comment made without a re-push would keep its stale badge all
+    /// session. In-flight fetches are left to complete and repopulate the cache.
+    /// </summary>
+    public void Invalidate()
+    {
+        lock (_lock)
+        {
+            _counts.Clear();
+            _failed.Clear();
+        }
+    }
+
     /// <summary>The cached count for a PR, or <c>null</c> if it hasn't arrived yet.</summary>
     public int? TryGet(PullRequest pr)
     {

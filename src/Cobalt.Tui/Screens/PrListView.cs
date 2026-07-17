@@ -27,6 +27,13 @@ public sealed class PrListView : View
     private int _lastWidth = -1;
     private PrListFilter? _renderedTab;
     private bool _disposed;
+    // MISSED-A: the (rows, width, counts) a render last actually formatted for. A render whose
+    // inputs match these skips the O(rows) re-format + SetSource. _countsSeen is bumped by every
+    // landed comment count so a count arrival always busts the guard and repaints its badge.
+    private IReadOnlyList<PullRequest>? _formattedRows;
+    private int _formattedWidth = -2;
+    private int _formattedCountsSeen = -1;
+    private int _countsSeen;
 
     public PrListView(IApplication app, PrListViewModel vm, PrCommentCountEnricher? comments = null, Func<DateTimeOffset>? now = null)
     {
@@ -65,7 +72,16 @@ public sealed class PrListView : View
 
     public event Action<int>? ItemActivated;
 
-    public void Load() => _ = Observe(_vm.LoadAsync(CycleLoadToken()));
+    /// <summary>Test seam: how many times a fresh load of the list was triggered — the only refetch
+    /// path. Lets a headless test assert keep-alive (no re-load on section toggle) without depending
+    /// on the fire-and-forget HTTP landing.</summary>
+    internal int LoadCount { get; private set; }
+
+    public void Load()
+    {
+        LoadCount++;
+        _ = Observe(_vm.LoadAsync(CycleLoadToken()));
+    }
 
     public void NextTab() => _ = Observe(_vm.NextTabAsync(CycleLoadToken()));
 
@@ -81,7 +97,34 @@ public sealed class PrListView : View
     /// </summary>
     public void ReloadFromTop()
     {
+        // A :scope change (or context switch) alters the server query for every tab, so drop the
+        // per-tab result cache and the shell-lifetime comment-count cache — otherwise a later tab
+        // switch would paint rows (or badges) from the old scope (CACHE-3 / CACHE-1 invalidation).
+        _vm.InvalidateCache();
+        _comments?.Invalidate();
         _renderedTab = null; // make the next render treat this as a fresh set → reset to row 0
+        Load();
+    }
+
+    /// <summary>
+    /// Forces a fresh load of the current tab (the <c>r</c> key): also drops the comment-count cache
+    /// so badges reflect new comments, since the enricher outlives the screen (CACHE-1 / #7).
+    /// </summary>
+    public void Refresh()
+    {
+        _comments?.Invalidate();
+        Load();
+    }
+
+    /// <summary>
+    /// Refreshes the current tab after a mutation (vote/abandon/complete): invalidates the tab's
+    /// cached rows first so a transient refresh failure shows a blank pane, not a stale row that no
+    /// longer reflects the change (CACHE-3 / #3), and drops the comment-count cache.
+    /// </summary>
+    public void RefreshAfterMutation()
+    {
+        _vm.InvalidateActiveTab();
+        _comments?.Invalidate();
         Load();
     }
 
@@ -113,6 +156,9 @@ public sealed class PrListView : View
         // The list is the source of truth for the cursor; mirror it back so a
         // background reload restores where the user actually is, not a stale index.
         _vm.SelectedIndex = _list.SelectedItem ?? 0;
+        // Top up enrichment for the current viewport: a move within the visible window doesn't raise
+        // ViewportChanged, so cover that edge here (the enricher dedupes already-fetched rows).
+        EnqueueVisible();
     }
 
     public PullRequest? SelectedPr
@@ -153,11 +199,18 @@ public sealed class PrListView : View
 
     private void OnViewportChanged(object? sender, Terminal.Gui.ViewBase.DrawEventArgs e)
     {
-        if (_disposed || _list.Viewport.Width == _lastWidth)
+        if (_disposed)
         {
             return;
         }
-        Render();
+        if (_list.Viewport.Width != _lastWidth)
+        {
+            Render(); // width changed: reflow columns + widths (also enqueues the visible slice)
+            return;
+        }
+        // A vertical scroll (ViewportChanged fires on Viewport.Y in 2.4.16, confirmed) brought new
+        // rows into view — enrich just those, without re-formatting the unchanged row set (CACHE-2).
+        EnqueueVisible();
     }
 
     // Coalesce a burst of per-PR comment-count arrivals into a single re-render. Each count
@@ -169,7 +222,14 @@ public sealed class PrListView : View
 
     private void OnCountAvailable(int prId)
     {
-        if (_disposed || Interlocked.Exchange(ref _countRenderQueued, 1) == 1)
+        if (_disposed)
+        {
+            return;
+        }
+        // Bump before the coalescing guard so a count that lands while a render is already queued
+        // still busts the render's MISSED-A skip check (its badge must repaint).
+        Interlocked.Increment(ref _countsSeen);
+        if (Interlocked.Exchange(ref _countRenderQueued, 1) == 1)
         {
             return;
         }
@@ -183,10 +243,47 @@ public sealed class PrListView : View
         });
     }
 
+    /// <summary>
+    /// The loaded rows currently on screen, padded by a small margin above and below so a short
+    /// scroll finds counts already warm. Returns <see cref="PrListViewModel.Rows"/> whole when the
+    /// whole list fits, so a small list keeps enriching every row (CACHE-2).
+    /// </summary>
+    private IReadOnlyList<PullRequest> VisibleSlice()
+    {
+        var rows = _vm.Rows;
+        const int margin = 10;
+        var height = Math.Max(1, _list.Viewport.Height);
+        var top = Math.Max(0, _list.Viewport.Y - margin);
+        var end = Math.Min(rows.Count, _list.Viewport.Y + height + margin);
+        if (top == 0 && end == rows.Count)
+        {
+            return rows;
+        }
+        var slice = new List<PullRequest>(Math.Max(0, end - top));
+        for (var i = top; i < end; i++)
+        {
+            slice.Add(rows[i]);
+        }
+        return slice;
+    }
+
+    /// <summary>Enqueues the on-screen slice for background comment-count enrichment (no-op with no rows).</summary>
+    private void EnqueueVisible()
+    {
+        if (_comments is not null && _vm.Rows.Count > 0)
+        {
+            _comments.Enqueue(VisibleSlice(), _loadCts.Token);
+        }
+    }
+
     internal int ListWidth => _list.Viewport.Width;
 
     internal string RowText(int index) =>
         index >= 0 && index < _rendered.Count ? _rendered[index] : "";
+
+    /// <summary>Test seam: the formatted-row list, whose reference changes only when a render
+    /// actually re-formats the rows (MISSED-A). A skipped render leaves it untouched.</summary>
+    internal IReadOnlyList<string> RenderedRows => _rendered;
 
     internal void Render()
     {
@@ -205,8 +302,6 @@ public sealed class PrListView : View
 
         var width = _list.Viewport.Width;
         _lastWidth = width;
-        var now = _now();
-        var cols = PrColumns.For(_vm.Rows);
 
         // On a tab/scope change the row set is different, so the previous tab's row index
         // must not carry over — reset the selection to the top. A same-tab background reload
@@ -217,6 +312,22 @@ public sealed class PrListView : View
         {
             _vm.SelectedIndex = 0;
         }
+
+        // MISSED-A: skip the O(rows) re-format + SetSource when nothing that feeds the rows
+        // changed — same row set (by reference), same width, same landed counts. The header above
+        // still refreshes loading/error/count, so a spurious Changed only repaints chrome.
+        var countsSeen = Volatile.Read(ref _countsSeen);
+        if (!tabChanged
+            && ReferenceEquals(_vm.Rows, _formattedRows)
+            && width == _formattedWidth
+            && countsSeen == _formattedCountsSeen)
+        {
+            SetNeedsDraw();
+            return;
+        }
+
+        var now = _now();
+        var cols = PrColumns.For(_vm.Rows);
 
         // SetSource nulls SelectedItem in 2.4.16, so capture the reviewer's current
         // row first and restore it (clamped) — otherwise a background reload snaps
@@ -230,12 +341,14 @@ public sealed class PrListView : View
             _list.SelectedItem = Math.Clamp(target, 0, _vm.Rows.Count - 1);
         }
 
-        // Lazily fill comment counts for the loaded rows in the background; cached and
-        // capped, so it never blocks this render and re-renders each row as counts land.
-        if (_comments is not null && _vm.Rows.Count > 0)
-        {
-            _comments.Enqueue(_vm.Rows, _loadCts.Token);
-        }
+        // Lazily fill comment counts for the on-screen rows in the background; cached and capped,
+        // so it never blocks this render and re-renders each row as counts land. Only the visible
+        // slice (+margin) is enqueued (CACHE-2); scrolling tops up the rest via ViewportChanged.
+        EnqueueVisible();
+
+        _formattedRows = _vm.Rows;
+        _formattedWidth = width;
+        _formattedCountsSeen = countsSeen;
         SetNeedsDraw();
     }
 

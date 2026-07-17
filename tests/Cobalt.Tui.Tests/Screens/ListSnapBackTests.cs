@@ -118,6 +118,81 @@ public class ListSnapBackTests
         Assert.Equal(items[^1].PullRequestId, view.SelectedPr?.PullRequestId);
     }
 
+    // ---- MISSED-A: skip the row re-format when rows/width/counts are unchanged ----
+
+    [Fact]
+    public async Task PrList_Render_Skips_Reformat_When_Nothing_Changed()
+    {
+        var items = Enumerable.Range(1, 5).Select(Pr).ToList();
+        var vm = new PrListViewModel(new FakePrSource(items));
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var view = new PrListView(App, vm);
+
+        view.Render();
+        var formatted = view.RenderedRows;
+        view.Render(); // identical rows, width, and (no enricher) counts
+
+        // A redundant render must not re-format every row: the formatted-row list is reused, not
+        // rebuilt, so a burst of no-op renders is not O(rows) each.
+        Assert.Same(formatted, view.RenderedRows);
+    }
+
+    // ---- CACHE-2: enrich only the visible slice (+margin), not every loaded row ----
+
+    private static async Task WaitForStableAsync(Func<int> count)
+    {
+        var last = -1;
+        for (var i = 0; i < 100; i++)
+        {
+            var now = count();
+            if (now == last && now > 0)
+            {
+                return;
+            }
+            last = now;
+            await Task.Delay(20);
+        }
+    }
+
+    [Fact]
+    public async Task PrList_Enriches_Only_The_Visible_Slice_Not_Every_Row()
+    {
+        var items = Enumerable.Range(1, 100).Select(Pr).ToList();
+        var vm = new PrListViewModel(new FakePrSource(items));
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var fetched = new List<int>();
+        var enricher = new PrCommentCountEnricher((pr, _) =>
+        {
+            lock (fetched) { fetched.Add(pr.PullRequestId); }
+            return Task.FromResult(0);
+        });
+
+        var view = new PrListView(App, vm, enricher);
+        var window = new Window();
+        window.Add(view);
+        window.Layout(new System.Drawing.Size(60, 12)); // small viewport → most rows off-screen
+        view.Render();
+
+        await WaitForStableAsync(() => { lock (fetched) { return fetched.Count; } });
+
+        int total;
+        bool hasTop, hasBottom;
+        lock (fetched)
+        {
+            total = fetched.Count;
+            hasTop = fetched.Contains(1);
+            hasBottom = fetched.Contains(100);
+        }
+
+        // Only the top of the list is on screen: enrich those (+ a small margin), never all 100.
+        Assert.True(total < 100, $"expected a viewport slice, enriched {total}/100");
+        Assert.True(hasTop, "the visible top rows must be enriched");
+        Assert.False(hasBottom, "far-off-screen rows must not be enriched until scrolled to");
+
+        view.Dispose();
+    }
+
     // ---- (3) enrichment cancellation on tab switch (M2 / ADR 0012) ----
 
     [Fact]

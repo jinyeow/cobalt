@@ -62,10 +62,14 @@ public class PrDiffViewModelTests
             return Task.CompletedTask;
         }
 
+        /// <summary>When set, <see cref="SetThreadStatusAsync"/> blocks on it, so a test can observe
+        /// the view-model while a mutation is mid-flight (IsBusy true, before the threads refresh).</summary>
+        public TaskCompletionSource? StatusGate { get; set; }
+
         public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct)
         {
             LastStatusChange = (project, repo, prId, threadId, status);
-            return Task.CompletedTask;
+            return StatusGate is { } gate ? gate.Task : Task.CompletedTask;
         }
 
         public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct)
@@ -1534,5 +1538,159 @@ public class PrDiffViewModelTests
 
         Assert.NotNull(vm.StatsFor("/good.cs"));
         Assert.Null(vm.StatsFor("/bad.cs"));
+    }
+
+    // ---- STATE-2: running totals count each file once, even under concurrent joiners ----
+
+    [Fact]
+    public async Task Totals_Count_Each_File_Once_When_Concurrent_Callers_Share_One_Fetch()
+    {
+        var source = new GatedBlobSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";           // 0 additions
+        source.Blobs[("/b.cs", "base")] = "1\n";
+        source.Blobs[("/b.cs", "src")] = "1\n2\n3\n";      // 2 additions
+        var vm = new PrDiffViewModel(source, Pr());
+
+        source.Release();
+        await vm.LoadAsync(TestContext.Current.CancellationToken); // caches /a.cs
+        source.Rearm();
+        var before = source.BlobCalls;
+
+        // Two callers land on the same uncached /b.cs and share one fetch. Its 2 additions must be
+        // added to the running total exactly once, not once per joining caller.
+        var first = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        var second = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        Assert.True(await source.WaitForBlobCallsAsync(before + 2, TimeSpan.FromSeconds(5)));
+        source.Release();
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(2, vm.TotalAdditions);
+        Assert.Equal(0, vm.TotalDeletions);
+    }
+
+    // ---- FilesLoaded hook (frozen contract): raised once Files is assigned, for earlier prefetch ----
+
+    [Fact]
+    public async Task FilesLoaded_Fires_Once_With_Files_Populated_Before_The_Diff_Publishes()
+    {
+        var source = new GatedThreadsSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\nadded\n";
+        var vm = new PrDiffViewModel(source, Pr());
+
+        var raises = 0;
+        var filesAtRaise = -1;
+        var diffAtRaise = true;
+        vm.FilesLoaded += () =>
+        {
+            raises++;
+            filesAtRaise = vm.Files.Count;
+            diffAtRaise = vm.CurrentDiff is not null;
+        };
+
+        var load = vm.LoadAsync(TestContext.Current.CancellationToken);
+        // The threads (and hence the diff publish) are still gated when FilesLoaded fires, so a
+        // consumer can start prefetch off this hook rather than waiting for the whole load.
+        Assert.Equal(1, raises);
+        Assert.Equal(2, filesAtRaise);
+        Assert.False(diffAtRaise);
+
+        source.ReleaseThreads([]);
+        await load;
+        Assert.Equal(1, raises);
+    }
+
+    // ---- RENDER-4 (VM half): chrome-only BusyChanged seam ----
+
+    [Fact]
+    public async Task Entering_A_Busy_Mutation_Raises_BusyChanged_Not_The_Content_Level_Changed()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var busy = 0;
+        var changedWhileBusy = 0;
+        vm.BusyChanged += () => busy++;
+        vm.Changed += () => { if (vm.IsBusy) { changedWhileBusy++; } };
+
+        // Block the mutation so we can observe the view-model at the busy=true instant, before the
+        // threads refresh lands. The busy flip must be chrome-only (BusyChanged), so the diff pane
+        // is not re-tokenized on every keystroke that starts an operation.
+        source.StatusGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var mutation = vm.ResolveThreadAsync(1, TestContext.Current.CancellationToken);
+
+        Assert.True(vm.IsBusy);
+        Assert.Equal(1, busy);
+        Assert.Equal(0, changedWhileBusy);
+
+        source.StatusGate.SetResult();
+        await mutation;
+    }
+
+    // ---- RENDER-2 (VM half): UnresolvedFilePaths, computed once per Threads write ----
+
+    [Fact]
+    public async Task UnresolvedFilePaths_Lists_Only_Files_With_An_Active_NonSystem_Thread()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit), new FileChange("/b.cs", FileChangeKind.Edit)],
+            Threads =
+            [
+                new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null),
+                new PrThread(2, PrThreadStatus.Fixed, [new PrComment(1, "Sam", "resolved", false)], "/b.cs", 3, null),
+                new PrThread(3, PrThreadStatus.Active, [new PrComment(1, "System", "system", true)], "/b.cs", 4, null),
+            ],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        source.Blobs[("/b.cs", "base")] = "y\n";
+        source.Blobs[("/b.cs", "src")] = "y\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // Only /a.cs carries an unresolved (Active, non-system) thread; /b.cs's are resolved/system.
+        Assert.Equal(["/a.cs"], vm.UnresolvedFilePaths.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task UnresolvedFilePaths_Is_A_Stable_Snapshot_Recomputed_On_Each_Threads_Write()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Edit)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null)],
+        };
+        source.Blobs[("/a.cs", "base")] = "x\n";
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // One O(threads) pass per Threads write, not one per read: repeated reads return the
+        // identical snapshot instance (the render probes it per file).
+        var first = vm.UnresolvedFilePaths;
+        Assert.Same(first, vm.UnresolvedFilePaths);
+        Assert.Equal(["/a.cs"], first.Order(StringComparer.Ordinal));
+
+        // A threads refresh (resolve) rewrites Threads, so the snapshot is recomputed.
+        source.Threads = [new PrThread(1, PrThreadStatus.Fixed, [new PrComment(1, "Sam", "note", false)], "/a.cs", 2, null)];
+        await vm.ResolveThreadAsync(1, TestContext.Current.CancellationToken);
+
+        Assert.NotSame(first, vm.UnresolvedFilePaths);
+        Assert.Empty(vm.UnresolvedFilePaths);
     }
 }
