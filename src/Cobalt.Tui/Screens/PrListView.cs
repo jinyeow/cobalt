@@ -88,6 +88,10 @@ public sealed class PrListView : View
     /// </summary>
     public void ReloadFromTop()
     {
+        // A :scope change (or context switch) alters the server query for every tab, so drop the
+        // per-tab result cache — otherwise a later tab switch would paint rows from the old scope
+        // (CACHE-3 invalidation).
+        _vm.InvalidateCache();
         _renderedTab = null; // make the next render treat this as a fresh set → reset to row 0
         Load();
     }

@@ -20,6 +20,12 @@ public sealed class PrListViewModel(IPullRequestSource source)
     private int _selectedIndex;
     private int _loadSeq;
 
+    // CACHE-3: the last successful raw (unfiltered) result per tab, so revisiting a tab paints
+    // instantly then refreshes. Holds server results; the client-side repo/project filters are
+    // reapplied on paint, so a filter change never needs to invalidate this. Cleared on a
+    // scope/context change (InvalidateCache), which alters the underlying query.
+    private readonly Dictionary<PrListFilter, IReadOnlyList<PullRequest>> _tabCache = [];
+
     public PrListFilter ActiveTab { get; private set; } = PrListFilter.ReviewQueue;
     public bool IsLoading { get; private set; }
     public string? Error { get; private set; }
@@ -82,12 +88,14 @@ public sealed class PrListViewModel(IPullRequestSource source)
         ActiveTab = tab;
         IsLoading = true;
         Error = null;
-        // Blank the pane the instant Tab is pressed instead of showing the previous
-        // tab's PRs during the network round-trip (D1).
-        Rows = [];
-        Changed?.Invoke();
+        // CACHE-3: paint the tab's last-known rows immediately, then refresh under the _loadSeq
+        // guard below. A tab not visited this session (or after InvalidateCache) has no cache, so
+        // the pane still blanks the instant Tab is pressed instead of showing the previous tab's
+        // PRs during the round-trip (the original D1 behaviour, now only for a cold tab).
+        _all = _tabCache.GetValueOrDefault(tab, []);
+        ApplyFilter();
 
-        IReadOnlyList<PullRequest> result;
+        IReadOnlyList<PullRequest>? result = null;
         string? error = null;
         try
         {
@@ -102,7 +110,6 @@ public sealed class PrListViewModel(IPullRequestSource source)
             // A cancellation reaching here carries a foreign token → an HttpClient timeout,
             // surfaced as an expected error rather than a silent no-data pane (L2).
             error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
-            result = [];
         }
 
         // A newer load superseded this one while it was in flight; drop its results
@@ -113,10 +120,23 @@ public sealed class PrListViewModel(IPullRequestSource source)
         }
 
         Error = error;
-        _all = result;
+        if (result is not null)
+        {
+            // Only a successful fetch updates the cache and rows; on a transient error the painted
+            // rows (cached, or the cold-start empty) stay put so the tab isn't blanked under an error.
+            _tabCache[tab] = result;
+            _all = result;
+        }
         IsLoading = false;
         ApplyFilter();
     }
+
+    /// <summary>
+    /// Drops every tab's cached rows so the next visit refetches from the server rather than
+    /// painting stale rows. Called when the underlying query changes (a <c>:scope</c> or context
+    /// switch); the client-side repo/project filters do not need it (they narrow the raw cache).
+    /// </summary>
+    public void InvalidateCache() => _tabCache.Clear();
 
     private void ApplyFilter()
     {
