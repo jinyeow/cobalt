@@ -76,6 +76,41 @@ called out in the plan as the riskiest single item.
   decoupled from fetch-cancel — which in turn needs the orphaned shared task's
   fault observed, or it reaches the crash-log hook.
 
+### Background prefetch start (round 2, ASYNC-3)
+
+- `PrDiffViewModel` raises a `FilesLoaded` signal the instant `Files` is assigned, before the
+  threads fetch and the first file's diff are even requested. The dialog starts its background
+  diff prefetch off this signal instead of waiting for the whole load to settle, so prefetch of
+  the remaining files begins earlier.
+- The dialog posts the prefetch start (`Task.Run`) rather than calling it inline from the
+  `FilesLoaded` handler, so `LoadAsync` still issues its interactive threads-and-first-diff
+  requests before the prefetch's blob wave competes for the connection — the earlier start must
+  not cost first-paint latency to get there.
+- Prefetch still runs through the single-flight `Lazy<Task<FileDiff>>` cache on the dialog's own
+  token (above), so an earlier start changes nothing about which caller "wins" a file or which
+  token governs cancellation — the single-flight and publish-order invariants are unchanged.
+
+### PR-tab cached-then-refresh paint (round 2, CACHE-3)
+
+- **Decision reversed:** the PR list's per-tab load used to blank the pane the instant a tab was
+  pressed and repaint only once the fetch landed (call this the original "blank on switch"
+  behaviour — see the `LoadTabAsync` code comment, which now documents both the old and new
+  behaviour in place). `PrListViewModel` now caches each tab's last successful result and paints
+  it immediately on revisit, then refreshes it under the existing `_loadSeq` guard — a tab
+  visited earlier in the session goes straight from "loading" to its last-known rows instead of
+  to blank.
+- **Why:** switching tabs is the single most frequent action in the PR section, and re-fetching
+  every time made every revisit pay a round-trip the user had already paid once this session,
+  for rows that are usually still correct.
+- **Tradeoff:** a revisited tab can show up to a few seconds of stale data while the background
+  refresh is in flight — the same class of staleness the CACHE-1 shell-lifetime screens accept.
+  `r` still forces a fresh fetch, and any of `:scope` change, project/context switch, or a
+  mutation on the active tab invalidates that tab's (or every tab's) cache so a stale row is
+  never left uncorrected. A tab not yet visited this session (or invalidated) still blanks and
+  waits, matching the original behaviour for that one case.
+- This does not touch the diff pane's own single-flight/publish-order invariants above; it is a
+  separate cache one layer up, in the PR list rather than the diff view.
+
 ## Consequences
 
 The diff surface is fully testable without a live service and independent of any

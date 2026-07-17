@@ -214,6 +214,8 @@ or `%LOCALAPPDATA%\cobalt\crash.log` on Windows. See
   [ADR 0010](docs/adr/0010-diff-pane-colored-listview-data-source.md).
 - Line comments anchor to the latest PR iteration only; the diff is computed
   client-side (see [ADR 0008](docs/adr/0008-client-side-diff-and-line-comments.md)).
+- The work-item list shows only the first 200 items assigned to you, matching the existing
+  pull-request-list cap; a heavier assignee's items past that cut are not shown.
 - `$EDITOR` needs a real interactive terminal (it suspends Terminal.Gui and hands
   over the tty — see [ADR 0009](docs/adr/0009-editor-suspend-resume.md)).
 - `:context` switching updates the status bar but does not yet reconnect the data

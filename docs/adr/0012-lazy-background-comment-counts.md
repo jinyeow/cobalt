@@ -54,8 +54,23 @@ the list immediately with no counts, then fill badges in asynchronously.
 - The list is fast even against a slow ADO: the network cost of counts is paid off
   the critical path, bounded by the concurrency cap, and paid once per PR tip.
 - Badges appear progressively rather than all at once — acceptable for decoration.
-- v1 enriches *all currently loaded rows* rather than tracking the precise visible
-  range; the cap and cache keep that cheap, and tightening to the visible window is a
-  localized follow-up behind the same enricher API.
 - The enricher is pure of Terminal.Gui, matching the view-model boundary of ADR 0004,
   and is unit-tested directly (fetch-only-requested, cap, cache, event, cancellation).
+
+### Viewport-scoped enrichment (round 2, CACHE-2) — the pre-blessed follow-up, now done
+
+v1 enriched *all currently loaded rows* rather than tracking the precise visible range,
+flagged above as a follow-up. That follow-up is done:
+
+- Only the on-screen rows (plus a small margin) are enqueued for enrichment, rather than every
+  row the list has loaded.
+- The view re-enqueues on the list's `ViewportChanged` event, confirmed by probe to fire on
+  vertical scroll in Terminal.Gui 2.4.16, with a top-up on plain selection moves for the case a
+  move doesn't itself change the viewport.
+- The enricher's existing dedupe (cached/in-flight/failed keys are skipped) means scrolling back
+  over already-enriched rows never re-fetches; this changes only which rows are *queued*, not the
+  cap, cache keying, or failure handling above.
+- The comment-count cache itself is now shell-lifetime rather than per-load: it survives a
+  section switch (see CACHE-1) and is invalidated on `r` (refresh), a `:scope`/project/context
+  change, or a mutation — the same invalidation points the per-tab PR cache uses (ADR 0008,
+  CACHE-3), so a count never outlives the event that could have changed it.

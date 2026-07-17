@@ -65,6 +65,22 @@ was dropped before any handler ran. The record is corrected here and in the code
   misses, set `COBALT_DRIVER=dotnet`. And `COBALT_DRIVER` always wins — including
   `COBALT_DRIVER=windows` to force the Win32 driver back inside a multiplexer.
 
+### Targeted redraw on vim movement (round 2, INPUT-1) — needs both-driver UAT
+
+The earlier `LayoutAndDraw(false)→(true)` change (`fb5b777`, see Context above) forced a full
+`Application.LayoutAndDraw(true)` on every vim move to dodge a driver dirty-flag quirk, even
+though only the moved list actually changed. Round 2 replaces that with a targeted repaint: the
+moved list view calls `SetNeedsDraw()` on itself, and the app then runs
+`Application.LayoutAndDraw(false)` — no forced full-app repaint — relying on the explicit dirty
+flag to cover what `force:true` was compensating for on a programmatic `InvokeCommand` move.
+
+This is **not yet confirmed safe on both drivers** and must be UAT'd on the `windows` driver and
+the `dotnet` driver before it can be trusted — a headless test can assert `SetNeedsDraw()` was
+called, but not that the real driver actually repaints the moved row without the old `force:true`
+backstop, which is exactly the class of defect this ADR exists to catch (dropped input/redraw
+behaviour that only reproduces against a real console or pty). Until that UAT runs, treat the
+change as at-risk of resurrecting the redraw side of the original driver quirk.
+
 ## Consequences
 
 - Multiplexer users need one line of config (`$env:COBALT_DRIVER='dotnet'` /
