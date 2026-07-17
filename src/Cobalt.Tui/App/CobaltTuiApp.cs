@@ -39,20 +39,19 @@ public static class CobaltTuiApp
 
         using var connection = AdoConnection.Create(context, tokens);
 
-        // Open the connection while the UI builds, so the first real call skips the ~700ms cold
-        // DNS + TCP + TLS. Dropped on the floor deliberately rather than routed through
-        // FireAndForget: WarmUpAsync is silent by contract, and FireAndForget would report a
-        // warm-up fault to the message bar and the crash log — the two things it must never do.
-        _ = connection.Http.WarmUpAsync();
+        // Prime the shared identity cache while the UI builds, so the first real call skips
+        // the ~700ms cold DNS + TCP + TLS. Dropped on the floor deliberately rather than routed
+        // through FireAndForget: priming is silent by contract, and FireAndForget would report
+        // a warm-up fault to the message bar and the crash log — the two things it must never
+        // do. Everything below reads the same cache through GetIdentityAsync, so cold start
+        // makes one connectionData call, not a separate warm-up ping plus an identity read.
+        _ = connection.PrimeIdentityAsync();
 
         var workItems = new WorkItemStoreAdapter(new WorkItemsApi(connection.Http, context), context.PrScope);
 
-        // Resolve the signed-in user once and share it: the status bar and the PR
-        // reviewer/creator filters both consume this single cached call.
-        var identity = new Lazy<Task<AdoUser>>(() => connection.Identity.GetAuthenticatedUserAsync());
         var pullRequests = new PullRequestStoreAdapter(
             new GitApi(connection.Http, context),
-            async ct => (await identity.Value.WaitAsync(ct).ConfigureAwait(false)).Id,
+            async ct => (await connection.GetIdentityAsync(ct).ConfigureAwait(false)).Id,
             ct => BuildTeamDirectoryAsync(connection.Teams, ct),
             context.Project,
             context.PrScope,
@@ -73,7 +72,7 @@ public static class CobaltTuiApp
         using var shell = new CobaltShell(
             app, vm, workItems, pullRequests, editor: null, context: context, themeMonitor: monitor);
 
-        ResolveIdentityInBackground(app, vm, identity);
+        ResolveIdentityInBackground(app, vm, connection.GetIdentityAsync);
 
         app.Run(shell);
         return 0;
@@ -204,26 +203,51 @@ public static class CobaltTuiApp
 
     /// <summary>Fills the status bar with who we are; failures land in the message bar, never block startup.</summary>
     private static void ResolveIdentityInBackground(
-        IApplication app, ShellViewModel vm, Lazy<Task<AdoUser>> identity)
+        IApplication app, ShellViewModel vm, Func<CancellationToken, Task<AdoUser>> getIdentity)
     {
         _ = Task.Run(async () =>
         {
-            try
+            var outcome = await ResolveIdentityAsync(getIdentity).ConfigureAwait(false);
+            app.Invoke(() =>
             {
-                var user = await identity.Value.ConfigureAwait(false);
-                app.Invoke(() => vm.OnUserResolved(user.DisplayName));
-            }
-            catch (Exception ex) when (ex is AdoApiException
-                or Azure.Identity.AuthenticationFailedException
-                or HttpRequestException
-                or OperationCanceledException
-                or System.Text.Json.JsonException)
-            {
-                var message = ex.Message;
-                app.Invoke(() => vm.Messages.Error($"not signed in — {FirstLine(message)} (run: cobalt auth login)"));
-            }
+                if (outcome.DisplayName is { } name)
+                {
+                    vm.OnUserResolved(name);
+                }
+                else
+                {
+                    vm.Messages.Error(outcome.ErrorMessage!);
+                }
+            });
         });
     }
+
+    /// <summary>
+    /// The pure half of the background identity resolve: expected auth/network faults (ADR 0013)
+    /// become an actionable message rather than propagating. Split out from
+    /// <see cref="ResolveIdentityInBackground"/> so it is testable without a running Terminal.Gui
+    /// application (<c>IApplication.Invoke</c> requires <c>Init</c>).
+    /// </summary>
+    internal static async Task<IdentityOutcome> ResolveIdentityAsync(
+        Func<CancellationToken, Task<AdoUser>> getIdentity, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var user = await getIdentity(cancellationToken).ConfigureAwait(false);
+            return new IdentityOutcome(user.DisplayName, null);
+        }
+        catch (Exception ex) when (ex is AdoApiException
+            or Azure.Identity.AuthenticationFailedException
+            or HttpRequestException
+            or OperationCanceledException
+            or System.Text.Json.JsonException)
+        {
+            return new IdentityOutcome(null, $"not signed in — {FirstLine(ex.Message)} (run: cobalt auth login)");
+        }
+    }
+
+    /// <summary>Result of a background identity resolve: exactly one of the two members is set.</summary>
+    internal readonly record struct IdentityOutcome(string? DisplayName, string? ErrorMessage);
 
     private static string FirstLine(string message)
     {
