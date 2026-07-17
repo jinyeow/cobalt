@@ -592,15 +592,26 @@ public sealed class CobaltShell : Window
     {
         var wi = _vm.ActiveSection == AppSection.WorkItems ? "[Work Items]" : " Work Items ";
         var pr = _vm.ActiveSection == AppSection.PullRequests ? "[Pull Requests]" : " Pull Requests ";
-        _tabs.Text = $" {wi} {pr}";
-        _status.Text = _vm.StatusLine;
         var current = _vm.Messages.Current;
-        _message.Text = current is null ? "" : $" {current.Text}";
-        // Only the fixed-layout chrome labels changed text — mark them dirty and let the run loop
-        // repaint them, instead of a whole-app LayoutAndDraw on every routine status/log message.
-        _tabs.SetNeedsDraw();
-        _status.SetNeedsDraw();
-        _message.SetNeedsDraw();
+        // SHELL-2: set + dirty each fixed-layout chrome label only when its text actually changed,
+        // instead of dirtying all three on every routine status/log message. Most messages change
+        // only the message line, so the tab strip and status line usually stay clean.
+        SetIfChanged(_tabs, $" {wi} {pr}");
+        SetIfChanged(_status, _vm.StatusLine);
+        SetIfChanged(_message, current is null ? "" : $" {current.Text}");
+    }
+
+    /// <summary>Sets a chrome label's text and marks it dirty only when it changed; returns whether
+    /// it changed. Keeps <see cref="RefreshChrome"/> from repainting labels whose text is identical.</summary>
+    internal static bool SetIfChanged(Label label, string text)
+    {
+        if (string.Equals(label.Text, text, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        label.Text = text;
+        label.SetNeedsDraw();
+        return true;
     }
 
     private void ShowHelp() => TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope));
