@@ -37,6 +37,16 @@ public static class VimScroll
             return;
         }
 
+        // A ListView moves a visible SelectedItem bar. Rather than replay N InvokeCommand(Down)
+        // calls (each re-clamping and re-ensuring visibility), compute the target index once, clamp
+        // it, set SelectedItem directly, then ensure it is on screen — same landing, one pass
+        // (RENDER-6). EnsureSelectedItemVisible is the verified TG 2.4.16 scroll-into-view API.
+        if (target is ListView listView)
+        {
+            ScrollListView(listView, command, count);
+            return;
+        }
+
         switch (command)
         {
             case AppCommand.MoveDown:
@@ -96,6 +106,30 @@ public static class VimScroll
         target = Math.Clamp(target, 0, maxTop);
         view.InsertionPoint = new Point(0, target);
         view.ScrollTo(new Point(0, target));
+    }
+
+    private static void ScrollListView(ListView view, AppCommand command, int? count)
+    {
+        var total = view.Source?.Count ?? 0;
+        if (total == 0)
+        {
+            return;
+        }
+        var current = view.SelectedItem ?? 0;
+        var half = HalfPage(view);
+        var target = command switch
+        {
+            AppCommand.MoveDown => current + (count ?? 1),
+            AppCommand.MoveUp => current - (count ?? 1),
+            AppCommand.HalfPageDown => current + (half * (count ?? 1)),
+            AppCommand.HalfPageUp => current - (half * (count ?? 1)),
+            // "gg" → top; "Ngg" → line N (1-based). "G" → last row; "NG" → line N.
+            AppCommand.MoveTop => (count ?? 1) - 1,
+            AppCommand.MoveBottom => count is { } line ? line - 1 : total - 1,
+            _ => current,
+        };
+        view.SelectedItem = Math.Clamp(target, 0, total - 1);
+        view.EnsureSelectedItemVisible();
     }
 
     private static int HalfPage(View target) => Math.Max(1, target.Viewport.Height / 2);
