@@ -10,10 +10,20 @@ namespace Cobalt.Tui.App;
 /// </summary>
 public static class KeyTokenizer
 {
+    private const KeyCode ModifierMask = KeyCode.ShiftMask | KeyCode.AltMask | KeyCode.CtrlMask;
+
+    // INPUT-3: precomputed so a steady-state keystroke never allocates a token string.
+    private static readonly string[] CtrlTokens = BuildCtrlTokens();
+    private static readonly string[] AsciiTokens = BuildAsciiTokens();
+
     public static string? ToToken(Key key)
     {
-        // Match named keys on the base code, ignoring modifier bits OR'd into KeyCode.
-        switch (key.NoShift.NoAlt.NoCtrl.KeyCode)
+        // Mask the modifier bits directly on the KeyCode value instead of chaining
+        // Key.NoShift/.NoAlt/.NoCtrl — each of those allocates a new Key object (it's a
+        // class, not a struct), which a per-keystroke hot path can't afford.
+        var code = key.KeyCode & ~ModifierMask;
+
+        switch (code)
         {
             case KeyCode.Esc:
                 return "Esc";
@@ -35,12 +45,7 @@ public static class KeyTokenizer
 
         if (key.IsCtrl)
         {
-            var plain = key.NoCtrl.NoShift;
-            if (plain.IsKeyCodeAtoZ)
-            {
-                return $"C-{char.ToLowerInvariant((char)plain.AsRune.Value)}";
-            }
-            return null;
+            return Key.GetIsKeyCodeAtoZ(code) ? CtrlTokens[(int)(code - KeyCode.A)] : null;
         }
 
         if (key.IsAlt)
@@ -48,6 +53,32 @@ public static class KeyTokenizer
             return null;
         }
 
-        return key.TryGetPrintableRune(out var rune) ? rune.ToString() : null;
+        if (!key.TryGetPrintableRune(out var rune))
+        {
+            return null;
+        }
+
+        var value = rune.Value;
+        return value is >= 0x20 and < 0x7F ? AsciiTokens[value - 0x20] : rune.ToString();
+    }
+
+    private static string[] BuildCtrlTokens()
+    {
+        var tokens = new string[26];
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            tokens[i] = $"C-{(char)('a' + i)}";
+        }
+        return tokens;
+    }
+
+    private static string[] BuildAsciiTokens()
+    {
+        var tokens = new string[0x7F - 0x20];
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            tokens[i] = ((char)(0x20 + i)).ToString();
+        }
+        return tokens;
     }
 }

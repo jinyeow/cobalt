@@ -49,4 +49,38 @@ public class KeyTokenizerTests
     {
         Assert.Null(KeyTokenizer.ToToken(new Key('x').WithAlt));
     }
+
+    // ---- INPUT-3: steady-state tokenizing shouldn't allocate ----
+
+    [Fact]
+    public void Steady_State_Ascii_Key_Allocates_Nothing()
+    {
+        var key = new Key('j');
+        KeyTokenizer.ToToken(key); // warm up JIT
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+        {
+            KeyTokenizer.ToToken(key);
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(allocated == 0, $"steady-state ASCII tokenizing must not allocate, but allocated {allocated} bytes");
+    }
+
+    [Fact]
+    public void Steady_State_Control_Chord_Allocates_Nothing()
+    {
+        var key = new Key('d').WithCtrl;
+        KeyTokenizer.ToToken(key); // warm up JIT
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+        {
+            KeyTokenizer.ToToken(key);
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(allocated == 0, $"steady-state control-chord tokenizing must not allocate, but allocated {allocated} bytes");
+    }
 }
