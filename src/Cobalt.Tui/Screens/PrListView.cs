@@ -120,6 +120,9 @@ public sealed class PrListView : View
         // The list is the source of truth for the cursor; mirror it back so a
         // background reload restores where the user actually is, not a stale index.
         _vm.SelectedIndex = _list.SelectedItem ?? 0;
+        // Top up enrichment for the current viewport: a move within the visible window doesn't raise
+        // ViewportChanged, so cover that edge here (the enricher dedupes already-fetched rows).
+        EnqueueVisible();
     }
 
     public PullRequest? SelectedPr
@@ -160,11 +163,18 @@ public sealed class PrListView : View
 
     private void OnViewportChanged(object? sender, Terminal.Gui.ViewBase.DrawEventArgs e)
     {
-        if (_disposed || _list.Viewport.Width == _lastWidth)
+        if (_disposed)
         {
             return;
         }
-        Render();
+        if (_list.Viewport.Width != _lastWidth)
+        {
+            Render(); // width changed: reflow columns + widths (also enqueues the visible slice)
+            return;
+        }
+        // A vertical scroll (ViewportChanged fires on Viewport.Y in 2.4.16, confirmed) brought new
+        // rows into view — enrich just those, without re-formatting the unchanged row set (CACHE-2).
+        EnqueueVisible();
     }
 
     // Coalesce a burst of per-PR comment-count arrivals into a single re-render. Each count
@@ -195,6 +205,39 @@ public sealed class PrListView : View
                 Render();
             }
         });
+    }
+
+    /// <summary>
+    /// The loaded rows currently on screen, padded by a small margin above and below so a short
+    /// scroll finds counts already warm. Returns <see cref="PrListViewModel.Rows"/> whole when the
+    /// whole list fits, so a small list keeps enriching every row (CACHE-2).
+    /// </summary>
+    private IReadOnlyList<PullRequest> VisibleSlice()
+    {
+        var rows = _vm.Rows;
+        const int margin = 10;
+        var height = Math.Max(1, _list.Viewport.Height);
+        var top = Math.Max(0, _list.Viewport.Y - margin);
+        var end = Math.Min(rows.Count, _list.Viewport.Y + height + margin);
+        if (top == 0 && end == rows.Count)
+        {
+            return rows;
+        }
+        var slice = new List<PullRequest>(Math.Max(0, end - top));
+        for (var i = top; i < end; i++)
+        {
+            slice.Add(rows[i]);
+        }
+        return slice;
+    }
+
+    /// <summary>Enqueues the on-screen slice for background comment-count enrichment (no-op with no rows).</summary>
+    private void EnqueueVisible()
+    {
+        if (_comments is not null && _vm.Rows.Count > 0)
+        {
+            _comments.Enqueue(VisibleSlice(), _loadCts.Token);
+        }
     }
 
     internal int ListWidth => _list.Viewport.Width;
@@ -262,12 +305,10 @@ public sealed class PrListView : View
             _list.SelectedItem = Math.Clamp(target, 0, _vm.Rows.Count - 1);
         }
 
-        // Lazily fill comment counts for the loaded rows in the background; cached and
-        // capped, so it never blocks this render and re-renders each row as counts land.
-        if (_comments is not null && _vm.Rows.Count > 0)
-        {
-            _comments.Enqueue(_vm.Rows, _loadCts.Token);
-        }
+        // Lazily fill comment counts for the on-screen rows in the background; cached and capped,
+        // so it never blocks this render and re-renders each row as counts land. Only the visible
+        // slice (+margin) is enqueued (CACHE-2); scrolling tops up the rest via ViewportChanged.
+        EnqueueVisible();
 
         _formattedRows = _vm.Rows;
         _formattedWidth = width;
