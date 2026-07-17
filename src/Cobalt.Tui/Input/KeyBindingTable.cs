@@ -9,6 +9,13 @@ public sealed class KeyBindingTable
 {
     private readonly Dictionary<KeyScope, List<(string[] Sequence, AppCommand Command)>> _bindings = [];
 
+    /// <summary>
+    /// The one process-wide default table (INPUT-4): treated as immutable once built, so call
+    /// sites that only ever want the default binding set can share it instead of each building
+    /// (and re-validating) a fresh <see cref="Default"/> instance.
+    /// </summary>
+    public static KeyBindingTable Shared { get; } = Default();
+
     public static KeyBindingTable Default()
     {
         var table = new KeyBindingTable();

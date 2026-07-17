@@ -31,4 +31,19 @@ public class KeyBindingTableTests
 
         Assert.Throws<InvalidOperationException>(table.Validate);
     }
+
+    // ---- INPUT-4: a shared immutable default, so call sites needn't each build their own ----
+
+    [Fact]
+    public void Shared_Returns_The_Same_Instance_Every_Time()
+    {
+        Assert.Same(KeyBindingTable.Shared, KeyBindingTable.Shared);
+    }
+
+    [Fact]
+    public void Shared_Is_A_Valid_Default_Table()
+    {
+        Assert.Equal(AppCommand.MoveDown, KeyBindingTable.Shared.Visible(KeyScope.Global)
+            .First(b => b.Sequence is ["j"]).Command);
+    }
 }
