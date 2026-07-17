@@ -1,4 +1,6 @@
 using System.Net;
+using System.Text;
+using System.Text.Json;
 using Cobalt.Core.Ado;
 using Cobalt.Core.Config;
 using Cobalt.Core.Tests.Fakes;
@@ -332,5 +334,137 @@ public class WorkItemsApiTests : IDisposable
         await Api(handler).GetWorkItemAsync(42, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains("My%20Project/_apis/wit/workitems/42", handler.Requests[0].RequestUri!.AbsoluteUri);
+    }
+
+    // ---- NET-8: known fields are projected once in the ctor; the dict stays for detail reads ----
+
+    [Fact]
+    public async Task WorkItem_Projects_Known_Fields_Once()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """
+            {"id":42,"fields":{"System.Title":"Fix login","System.State":"Active","System.WorkItemType":"Bug",
+              "System.Tags":"ui; auth","System.Description":"<p>steps</p>","Microsoft.VSTS.Common.Priority":2}}
+            """);
+
+        var item = await Api(handler).GetWorkItemAsync(42, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Same(item.Title, item.Title); // materialized once, not recomputed per access
+        Assert.Same(item.Tags, item.Tags);
+        Assert.Equal(["ui", "auth"], item.Tags);
+        Assert.Equal("Fix login", item.Title);
+        Assert.Equal("Active", item.State);
+        Assert.Equal("Bug", item.WorkItemType);
+        // Detail fields still read through the retained raw dict, and the GetString hatch works.
+        Assert.Equal("<p>steps</p>", item.DescriptionHtml);
+        Assert.Equal(2, item.Priority);
+        Assert.Equal("Fix login", item.GetString("System.Title"));
+    }
+
+    // ---- NET-7: JSON bodies serialize straight to UTF-8 bytes; wire Content-Type stays charset=utf-8 ----
+
+    [Fact]
+    public async Task SendJson_Body_Is_Utf8_With_Charset_And_Round_Trips_Non_Ascii()
+    {
+        System.Net.Http.Headers.MediaTypeHeaderValue? contentType = null;
+        var handler = new FakeHttpHandler().Respond(req =>
+        {
+            contentType = req.Content!.Headers.ContentType;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"id":3,"text":"ok","createdBy":{"displayName":"Jin"},"createdDate":"2026-01-03T10:00:00Z"}""",
+                    Encoding.UTF8, "application/json"),
+            };
+        });
+
+        await Api(handler).AddCommentAsync(42, "ship it 🚀", cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal("application/json", contentType?.MediaType);
+        Assert.Equal("utf-8", contentType?.CharSet);
+        // The emoji survives the serialize -> UTF-8 -> deserialize wire round-trip.
+        using var doc = JsonDocument.Parse(handler.RequestBodies[0]!);
+        Assert.Contains("🚀", doc.RootElement.GetProperty("text").GetString());
+    }
+
+    // ---- NET-6: WIQL is capped with $top so an unbounded assigned-items list can't blow up ----
+
+    [Fact]
+    public async Task QueryMyWorkItems_Caps_The_Wiql_With_Top()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"workItems":[]}""");
+
+        await Api(handler).QueryMyWorkItemsAsync(
+            new WorkItemQuery(), PrScope.Org, TestContext.Current.CancellationToken);
+
+        Assert.Contains("$top=200", handler.Requests[0].RequestUri!.AbsoluteUri);
+    }
+
+    // ---- NET-5: batch pages are dispatched concurrently ----
+
+    [Fact]
+    public async Task QueryMyWorkItems_Dispatches_Batch_Pages_Concurrently()
+    {
+        // 250 ids -> two workitemsbatch pages. If the pages were awaited one at a time, the second
+        // page would not be issued until the first (gated) call returned, so SecondBatchArrived
+        // would never complete. Concurrent dispatch issues both before either responds.
+        var wiqlIds = string.Join(",", Enumerable.Range(1, 250).Select(i => $"{{\"id\":{i}}}"));
+        var handler = new GatedBatchHandler($"{{\"workItems\":[{wiqlIds}]}}");
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
+        _disposables.Add(httpClient);
+        var api = new WorkItemsApi(new AdoHttp(httpClient), Context);
+
+        var query = api.QueryMyWorkItemsAsync(TestContext.Current.CancellationToken);
+        await handler.SecondBatchArrived.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        handler.Release();
+        var items = await query;
+
+        Assert.Equal(2, handler.BatchCount);
+        Assert.Equal(250, items.Count);
+        Assert.Equal(1, items[0].Id);     // WIQL order preserved across concurrent pages
+        Assert.Equal(250, items[^1].Id);
+    }
+
+    /// <summary>Answers the WIQL immediately, then gates every workitemsbatch call so pages overlap.</summary>
+    private sealed class GatedBatchHandler(string wiqlJson) : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _secondBatch = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _batchCount;
+
+        public int BatchCount => Volatile.Read(ref _batchCount);
+        public Task SecondBatchArrived => _secondBatch.Task;
+        public void Release() => _release.TrySetResult();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var uri = request.RequestUri!.AbsoluteUri;
+            if (uri.Contains("wiql", StringComparison.Ordinal))
+            {
+                return Ok(wiqlJson);
+            }
+
+            var body = await request.Content!.ReadAsStringAsync(ct).ConfigureAwait(false);
+            if (Interlocked.Increment(ref _batchCount) == 2)
+            {
+                _secondBatch.TrySetResult();
+            }
+
+            await _release.Task.WaitAsync(ct).ConfigureAwait(false);
+            return Ok(EchoRequestedIds(body));
+        }
+
+        // Echo the ids this page asked for back as work items, so the merge is correct regardless
+        // of which page's gated response completes first.
+        private static string EchoRequestedIds(string requestBody)
+        {
+            using var doc = JsonDocument.Parse(requestBody);
+            var items = doc.RootElement.GetProperty("ids").EnumerateArray()
+                .Select(e => $"{{\"id\":{e.GetInt64()},\"fields\":{{\"System.Title\":\"t\",\"System.State\":\"New\",\"System.WorkItemType\":\"Task\"}}}}");
+            return $"{{\"value\":[{string.Join(",", items)}]}}";
+        }
+
+        private static HttpResponseMessage Ok(string json) =>
+            new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
     }
 }
