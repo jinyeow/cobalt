@@ -190,18 +190,16 @@ public sealed class PrListView : View
 
     internal void Render()
     {
-        var tab = _vm.ActiveTab switch
-        {
-            PrListFilter.ReviewQueue => "review queue",
-            PrListFilter.Team => "team",
-            PrListFilter.Mine => "mine",
-            _ => "active",
-        };
+        // The sub-tabs render as a visible tab row ([ / ] or Tab cycles them); the
+        // count only makes sense once the active tab's rows have loaded cleanly.
+        var tabs = Cobalt.Tui.App.TabStripFormatter.PrTabs(
+            _vm.ActiveTab,
+            _vm.IsLoading || _vm.Error is not null ? null : _vm.Rows.Count);
         _header.Text = _vm.IsLoading
-            ? $" pull requests · {tab} · loading…"
+            ? $"{tabs} · loading…"
             : _vm.Error is { } e
-                ? $" pull requests · {tab} · error: {e}"
-                : $" pull requests · {tab} ({_vm.Rows.Count})   [Tab] switch";
+                ? $"{tabs} · error: {e}"
+                : tabs;
 
         var width = _list.Viewport.Width;
         _lastWidth = width;

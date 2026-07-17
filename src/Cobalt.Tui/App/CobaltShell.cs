@@ -34,8 +34,10 @@ public sealed class CobaltShell : Window
     private readonly View _content;
     private readonly Label _status;
     private readonly Label _message;
+    private readonly Label _keybar;
     private readonly Label _palettePrompt;
     private readonly TextField _palette;
+    private int _lastChromeWidth = -1;
 
     private View? _activeScreen;
 
@@ -67,14 +69,27 @@ public sealed class CobaltShell : Window
         Title = "cobalt";
         BorderStyle = Terminal.Gui.Drawing.LineStyle.None;
 
+        // Bottom chrome, top to bottom: status, message (palette overlays it), keybar.
+        // The keybar owns the last row like lazygit's bottom line — always visible.
         _tabs = new Label { X = 0, Y = 0, Width = Dim.Fill(), Height = 1 };
-        _content = new View { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(2), CanFocus = true };
-        _status = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = Dim.Fill(), Height = 1 };
-        _message = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1 };
-        _palettePrompt = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = 1, Height = 1, Text = ":", Visible = false };
-        _palette = new TextField { X = 1, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1, Visible = false };
+        _content = new View { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(3), CanFocus = true };
+        _status = new Label { X = 0, Y = Pos.AnchorEnd(3), Width = Dim.Fill(), Height = 1 };
+        _message = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = Dim.Fill(), Height = 1 };
+        _keybar = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1 };
+        _palettePrompt = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = 1, Height = 1, Text = ":", Visible = false };
+        _palette = new TextField { X = 1, Y = Pos.AnchorEnd(2), Width = Dim.Fill(), Height = 1, Visible = false };
 
-        Add(_tabs, _content, _status, _message, _palettePrompt, _palette);
+        Add(_tabs, _content, _status, _message, _keybar, _palettePrompt, _palette);
+
+        // The keybar fits itself to the terminal width, so re-render the chrome when
+        // the shell is resized (the list screens do the same for their columns).
+        ViewportChanged += (_, _) =>
+        {
+            if (Viewport.Width != _lastChromeWidth)
+            {
+                RefreshChrome();
+            }
+        };
 
         WireViewModel();
         WireKeys();
@@ -87,6 +102,9 @@ public sealed class CobaltShell : Window
     public KeyScope ActiveScope => _vm.ActiveSection == AppSection.WorkItems
         ? KeyScope.WorkItemList
         : KeyScope.PullRequestList;
+
+    /// <summary>Test seam: the rendered bottom keybar text.</summary>
+    internal string KeybarText => _keybar.Text;
 
     private void WireViewModel()
     {
@@ -152,8 +170,22 @@ public sealed class CobaltShell : Window
             {
                 Dispatch(command, result.Count);
             }
+            // Every key can change the router's pending state (count armed, chord
+            // started, Esc cleared, match consumed) — keep the showcmd current.
+            RefreshStatus();
         };
     }
+
+    /// <summary>Re-renders only the status row (left text + right-aligned showcmd).</summary>
+    private void RefreshStatus()
+    {
+        var width = Viewport.Width > 0 ? Viewport.Width : 80;
+        _status.Text = StatusLineComposer.Compose(_vm.StatusLine, _router.PendingDisplay, width);
+        _status.SetNeedsDraw();
+    }
+
+    /// <summary>Test seam: the rendered status row text.</summary>
+    internal string StatusText => _status.Text;
 
     /// <summary>
     /// Pure decision for a routed key: whether the shell consumes it and which
@@ -532,17 +564,20 @@ public sealed class CobaltShell : Window
 
     private void RefreshChrome()
     {
-        var wi = _vm.ActiveSection == AppSection.WorkItems ? "[Work Items]" : " Work Items ";
-        var pr = _vm.ActiveSection == AppSection.PullRequests ? "[Pull Requests]" : " Pull Requests ";
-        _tabs.Text = $" {wi} {pr}";
-        _status.Text = _vm.StatusLine;
+        _tabs.Text = TabStripFormatter.Sections(_vm.ActiveSection);
         var current = _vm.Messages.Current;
         _message.Text = current is null ? "" : $" {current.Text}";
+        // Pre-layout the viewport is 0-wide; fall back to a standard width so the
+        // first paint still shows a sensible bar (the resize hook re-fits it).
+        var width = Viewport.Width > 0 ? Viewport.Width : 80;
+        _lastChromeWidth = Viewport.Width;
+        _keybar.Text = KeybarFormatter.Render(_bindings, ActiveScope, width);
+        RefreshStatus();
         // Only the fixed-layout chrome labels changed text — mark them dirty and let the run loop
         // repaint them, instead of a whole-app LayoutAndDraw on every routine status/log message.
         _tabs.SetNeedsDraw();
-        _status.SetNeedsDraw();
         _message.SetNeedsDraw();
+        _keybar.SetNeedsDraw();
     }
 
     private void ShowHelp() => TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope));

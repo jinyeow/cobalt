@@ -75,6 +75,12 @@ cobalt --context oss  # launch against a named context
 
 ## Keys (vim layer)
 
+The bottom row is an always-visible **keybar** showing the keys for the current
+context (generated from the live binding table, so it never drifts), and the status
+row shows an armed count or pending chord vim-showcmd-style (`5g` while you type
+`5gg`). The tab strip names its jump chords, and the PR sub-tabs render as a real
+tab row with the active tab highlighted.
+
 `j/k` move · `gg`/`G` top/bottom · `Ctrl-d`/`Ctrl-u` half-page · `/` filter ·
 `Enter`/`o`/`l` open · `h`/`q` back/close · `gt`/`gT` next/prev section · `g1`/`g2` jump to Work Items /
 Pull Requests · `Tab` next tab · `:` command palette
@@ -83,7 +89,7 @@ Pull Requests · `Tab` next tab · `:` command palette
 `:help`, `:messages`) · `?` help ·
 `r` refresh. On a work item (the highlighted list row or its detail): `s` state ·
 `c` comment · `a` assign · `t` tags; the detail additionally has `e` edit
-description in `$EDITOR`. In the PR section: `Tab` cycles the review queue / team /
+description in `$EDITOR`. In the PR section: `[`/`]` (or `Tab`) cycle the review queue / team /
 mine / active sub-tabs; on a PR (the highlighted list row or its detail): `v` vote; the
 detail additionally has `c` reply · `g c` add a PR-level comment · `g b` open the source
 branch in the browser · `x` resolve thread · `u` reactivate · `C` complete · `A` abandon ·
