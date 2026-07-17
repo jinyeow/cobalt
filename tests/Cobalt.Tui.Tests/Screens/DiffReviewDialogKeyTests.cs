@@ -1393,6 +1393,26 @@ public class DiffReviewDialogKeyTests
         Assert.Single(detail.Rows, r => r.Kind == FileTreeRowKind.File);
     }
 
+    // ---- RENDER-7: the unified-line → row map resolves in either mode ----
+
+    [Fact]
+    public async Task Toggling_Diff_Mode_Preserves_The_Cursor_On_The_Same_Unified_Line()
+    {
+        // ToggleDiffMode captures the cursor's unified line, re-renders, then SelectDiffLine's it
+        // back — which resolves through the int→row map. Preserving the added line across the flip
+        // exercises the side-by-side right-index entry, proving the map maps a line to its row.
+        var (detail, dialog) = await BuiltModifiedDialog(); // unified: [context, removed, added]
+        detail.DiffPane.SetFocus();
+        dialog.NewKeyDownEvent(new Key('G')); // cursor on the last (added) line
+        var before = detail.SelectedDiffLineIndex;
+        Assert.True(before > 0); // really on a real line, not row 0
+
+        dialog.NewKeyDownEvent(new Key('s')); // unified → side-by-side
+
+        Assert.True(detail.SideBySide);
+        Assert.Equal(before, detail.SelectedDiffLineIndex); // same unified line, resolved via the map
+    }
+
     // ---- ASYNC-3: the background prefetch launches exactly once ----
 
     [Fact]

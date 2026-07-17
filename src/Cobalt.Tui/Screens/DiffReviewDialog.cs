@@ -38,6 +38,10 @@ public sealed class DiffReviewDialog(
     private bool _sideBySide;
     private DiffFoldState? _foldState;
     private IReadOnlyList<DiffRow> _diffRows = [];
+    // unified line index → the first _diffRows index showing it (any of LineIndex/LeftIndex/
+    // RightIndex), rebuilt with _diffRows so IsLineVisible / SelectDiffLine are O(1) rather than
+    // an O(rows) scan on every n/N, hunk/thread nav and search hop (RENDER-7).
+    private Dictionary<int, int> _lineToRow = new();
     private string? _searchQuery;
     private IReadOnlyList<(int LineIndex, LineSpan Span)> _searchMatches = [];
     private int _searchIndex;
@@ -746,8 +750,34 @@ public sealed class DiffReviewDialog(
         _diffPane.SetNeedsDraw();
     }
 
-    private bool IsLineVisible(int lineIndex) =>
-        _diffRows.Any(r => r.LineIndex == lineIndex || r.LeftIndex == lineIndex || r.RightIndex == lineIndex);
+    private bool IsLineVisible(int lineIndex) => _lineToRow.ContainsKey(lineIndex);
+
+    /// <summary>
+    /// The unified line index → first row showing it, keyed on every side a row exposes
+    /// (unified <see cref="DiffRow.LineIndex"/>, or side-by-side left/right). First row wins, so a
+    /// lookup matches the same row the old first-match scan did. Rebuilt with <c>_diffRows</c>.
+    /// </summary>
+    private static Dictionary<int, int> BuildLineToRow(IReadOnlyList<DiffRow> rows)
+    {
+        var map = new Dictionary<int, int>(rows.Count);
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            if (row.LineIndex is { } li)
+            {
+                map.TryAdd(li, i);
+            }
+            if (row.LeftIndex is { } le)
+            {
+                map.TryAdd(le, i);
+            }
+            if (row.RightIndex is { } ri)
+            {
+                map.TryAdd(ri, i);
+            }
+        }
+        return map;
+    }
 
     /// <summary>]c/[c: move the diff-pane selection to the next/previous change hunk, count-aware.</summary>
     private void NavHunk(bool forward, int count)
@@ -938,16 +968,7 @@ public sealed class DiffReviewDialog(
         {
             return;
         }
-        var target = 0;
-        for (var i = 0; i < _diffRows.Count; i++)
-        {
-            var row = _diffRows[i];
-            if (row.LineIndex == unifiedIndex || row.RightIndex == unifiedIndex || row.LeftIndex == unifiedIndex)
-            {
-                target = i;
-                break;
-            }
-        }
+        var target = _lineToRow.TryGetValue(unifiedIndex, out var row) ? row : 0;
         _diffPane.SelectedItem = Math.Clamp(target, 0, source.Count - 1);
     }
 
@@ -1129,6 +1150,7 @@ public sealed class DiffReviewDialog(
                 }
             }
             _diffRows = rows;
+            _lineToRow = BuildLineToRow(rows);
             _diffPane.Source = new DiffListDataSource(styled);
             if (styled.Count > 0)
             {
