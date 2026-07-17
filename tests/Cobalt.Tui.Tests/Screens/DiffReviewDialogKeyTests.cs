@@ -1326,6 +1326,73 @@ public class DiffReviewDialogKeyTests
         Assert.Contains("/a.cs", detail.DiffHeader.Text);  // header still refreshed (a cleared error repaints)
     }
 
+    // ---- RENDER-1: diff-only paths skip the file-tree re-flatten ----
+
+    [Fact]
+    public async Task Expanding_A_Fold_Does_Not_Reflatten_The_File_Tree()
+    {
+        // 'e' changes only which diff lines are visible — no file annotation changes — so the
+        // file tree must not be re-flattened (RebuildFileList assigns a fresh _rows list).
+        var (detail, dialog) = await FoldedDialog();
+        Assert.Contains(detail.DiffRows, r => r.FoldId is not null); // fixture actually folds
+        var before = detail.Rows;
+
+        dialog.NewKeyDownEvent(new Key('e'));
+
+        Assert.Same(before, detail.Rows);
+    }
+
+    [Fact]
+    public async Task Toggling_Diff_Mode_Does_Not_Reflatten_The_File_Tree()
+    {
+        var (detail, dialog) = await BuiltModifiedDialog();
+        var before = detail.Rows;
+
+        dialog.NewKeyDownEvent(new Key('s'));
+
+        Assert.True(detail.SideBySide);
+        Assert.Same(before, detail.Rows);
+    }
+
+    [Fact]
+    public async Task Applying_A_Search_Does_Not_Reflatten_The_File_Tree()
+    {
+        var (detail, dialog) = await BuiltSearchDialog();
+        detail.SearchPromptAction = () => "needle";
+        var before = detail.Rows;
+
+        dialog.NewKeyDownEvent(new Key('/'));
+
+        Assert.Equal(2, detail.SearchMatchCount); // the search really ran
+        Assert.Same(before, detail.Rows);
+    }
+
+    [Fact]
+    public async Task Toggling_The_Thread_Filter_Still_Reflattens_The_File_Tree()
+    {
+        // The counterpart guard: T changes which files are shown, an annotation-scoped change, so
+        // the tree MUST be rebuilt — the includeFileList gate must not swallow this path.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "fix", false)], "/b.cs", RightLine: 1, LeftLine: null)],
+        };
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        source.Blobs[("/b.cs", "src")] = "y\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        detail.FileList.SetFocus();
+        var before = detail.Rows;
+
+        dialog.NewKeyDownEvent(new Key('T'));
+
+        Assert.NotSame(before, detail.Rows); // filtered → tree rebuilt
+        Assert.Single(detail.Rows, r => r.Kind == FileTreeRowKind.File);
+    }
+
     // ---- ASYNC-3: the background prefetch launches exactly once ----
 
     [Fact]

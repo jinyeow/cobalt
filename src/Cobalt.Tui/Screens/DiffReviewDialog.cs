@@ -613,7 +613,7 @@ public sealed class DiffReviewDialog(
     {
         var focused = SelectedDiffLine();
         _sideBySide = !_sideBySide;
-        Render();
+        Render(includeFileList: false); // mode toggle changes only the diff pane, not file annotations
         SelectDiffLine(focused);
         _diffPane.SetNeedsDraw();
         log(_sideBySide ? "side-by-side diff" : "unified diff");
@@ -632,7 +632,7 @@ public sealed class DiffReviewDialog(
         if (foldId is { } id)
         {
             _foldState = _foldState.Expand(id);
-            Render();
+            Render(includeFileList: false); // fold expand changes only the diff pane
             _diffPane.SetNeedsDraw();
         }
     }
@@ -645,7 +645,7 @@ public sealed class DiffReviewDialog(
             return;
         }
         _foldState = _foldState.ExpandAll();
-        Render();
+        Render(includeFileList: false); // expand-all changes only the diff pane
         _diffPane.SetNeedsDraw();
     }
 
@@ -704,13 +704,13 @@ public sealed class DiffReviewDialog(
         {
             _searchQuery = null;
             _searchMatches = [];
-            Render();
+            Render(includeFileList: false); // clearing the search only re-decorates the diff pane
             return;
         }
         _searchQuery = query.Trim();
         _searchMatches = DiffSearch.Find(diff.Lines, _searchQuery);
         _searchIndex = 0;
-        Render();
+        Render(includeFileList: false); // applying the search only re-decorates the diff pane
         if (_searchMatches.Count > 0)
         {
             EnsureVisibleAndSelect(_searchMatches[_searchIndex].LineIndex);
@@ -740,7 +740,7 @@ public sealed class DiffReviewDialog(
         if (!_sideBySide && _foldState is not null && !IsLineVisible(lineIndex))
         {
             _foldState = _foldState.ExpandContaining(lineIndex);
-            Render();
+            Render(includeFileList: false); // auto-expanding a fold for n/N or hunk/thread nav
         }
         SelectDiffLine(lineIndex);
         _diffPane.SetNeedsDraw();
