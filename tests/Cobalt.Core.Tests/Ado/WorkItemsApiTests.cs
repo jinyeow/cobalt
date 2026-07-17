@@ -336,6 +336,31 @@ public class WorkItemsApiTests : IDisposable
         Assert.Contains("My%20Project/_apis/wit/workitems/42", handler.Requests[0].RequestUri!.AbsoluteUri);
     }
 
+    // ---- NET-8: known fields are projected once in the ctor; the dict stays for detail reads ----
+
+    [Fact]
+    public async Task WorkItem_Projects_Known_Fields_Once()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """
+            {"id":42,"fields":{"System.Title":"Fix login","System.State":"Active","System.WorkItemType":"Bug",
+              "System.Tags":"ui; auth","System.Description":"<p>steps</p>","Microsoft.VSTS.Common.Priority":2}}
+            """);
+
+        var item = await Api(handler).GetWorkItemAsync(42, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Same(item.Title, item.Title); // materialized once, not recomputed per access
+        Assert.Same(item.Tags, item.Tags);
+        Assert.Equal(["ui", "auth"], item.Tags);
+        Assert.Equal("Fix login", item.Title);
+        Assert.Equal("Active", item.State);
+        Assert.Equal("Bug", item.WorkItemType);
+        // Detail fields still read through the retained raw dict, and the GetString hatch works.
+        Assert.Equal("<p>steps</p>", item.DescriptionHtml);
+        Assert.Equal(2, item.Priority);
+        Assert.Equal("Fix login", item.GetString("System.Title"));
+    }
+
     // ---- NET-7: JSON bodies serialize straight to UTF-8 bytes; wire Content-Type stays charset=utf-8 ----
 
     [Fact]
