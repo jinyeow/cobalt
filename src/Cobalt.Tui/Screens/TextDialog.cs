@@ -31,7 +31,7 @@ internal static class TextDialog
     /// </summary>
     internal static Dialog Build(IApplication app, string title, string text, out TextView view, Action? onClose = null)
     {
-        var router = new KeymapRouter(KeyBindingTable.Default());
+        var router = new KeymapRouter(KeyBindingTable.Shared);
         var dialog = new Dialog
         {
             Title = $"{title} — q to close",

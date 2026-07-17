@@ -23,7 +23,7 @@ public sealed class DiffReviewDialog(
     IApplication app, PrDiffViewModel vm, ITextInput textInput, Action<string> log, AdoContext? context = null)
 {
     private readonly CancellationTokenSource _cts = new();
-    private readonly KeymapRouter _router = new(KeyBindingTable.Default());
+    private readonly KeymapRouter _router = new(KeyBindingTable.Shared);
     private bool _closed;
     private Dialog? _dialog;
     private ListView _fileList = null!;

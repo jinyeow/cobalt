@@ -24,7 +24,7 @@ public sealed class CobaltShell : Window
     private readonly PullRequestStoreAdapter? _pullRequests;
     private readonly EditorService _editor;
     private readonly ITextInput _textInput;
-    private readonly KeyBindingTable _bindings = KeyBindingTable.Default();
+    private readonly KeyBindingTable _bindings = KeyBindingTable.Shared;
     private readonly KeymapRouter _router;
 
     private WorkItemListView? _workItemList;
