@@ -97,6 +97,13 @@ public sealed class CobaltShell : Window
     private bool WorkItemsActive => _vm.ActiveSection == AppSection.WorkItems;
     private bool PullRequestsActive => _vm.ActiveSection == AppSection.PullRequests;
 
+    /// <summary>
+    /// Test seam (INPUT-1): how a vim-movement repaint is issued, so a headless test can observe the
+    /// force flag without a full <see cref="IApplication"/> fake. Defaults to a non-forced
+    /// <see cref="IApplication.LayoutAndDraw(bool)"/>; production never sets it.
+    /// </summary>
+    internal Action<bool>? MovementRedrawOverride { get; set; }
+
     /// <summary>Test seam: the persistent PR list screen (kept alive across section switches, CACHE-1).</summary>
     internal PrListView? PrListScreen => _prList;
 
@@ -208,20 +215,24 @@ public sealed class CobaltShell : Window
         // identifies the visible one). ListView only navigates on arrow keys natively.
         if (VimScroll.Applies(command))
         {
+            View? moved = null;
             if (WorkItemsActive)
             {
                 _workItemList?.Navigate(command, count);
+                moved = _workItemList;
             }
             else if (PullRequestsActive)
             {
                 _prList?.Navigate(command, count);
+                moved = _prList;
             }
-            // Force a full redraw now (true, not false): a programmatic InvokeCommand move
-            // may not flag the view dirty on every driver, so LayoutAndDraw(false) could
-            // skip it and the move would only paint on the next event. (The "needs a second
-            // press" symptom under a multiplexer is actually the Win32-console driver dropping
-            // input, not a missed paint — see ADR 0016; this forced paint is still correct.)
-            _app.LayoutAndDraw(true);
+            // INPUT-1: dirty only the moved list and issue a non-forced layout+draw, instead of
+            // forcing a full-app repaint on every keystroke. A programmatic InvokeCommand move may
+            // not flag the view dirty on its own, so SetNeedsDraw supplies that flag explicitly —
+            // which is what the old force:true was compensating for (ADR 0016). UAT-gated on both
+            // the windows and dotnet drivers.
+            moved?.SetNeedsDraw();
+            (MovementRedrawOverride ?? _app.LayoutAndDraw)(false);
             return;
         }
 

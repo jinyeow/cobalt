@@ -68,4 +68,26 @@ public class ShellKeepAliveTests
         // ran a second time, so the rows are reused instead of refetched.
         Assert.Same(first, shell.PrListScreen);
     }
+
+    // ---- INPUT-1: targeted redraw on vim movement (both-driver UAT still required) ----
+
+    [Fact]
+    public void Vim_Move_Dirties_The_Moved_List_And_Uses_A_Non_Forced_Redraw()
+    {
+        var vm = Vm();
+        using var shell = new CobaltShell(App, vm, pullRequests: Adapter(new CountingHandler()));
+        vm.HandleCommand(AppCommand.SectionPullRequests);
+        shell.Layout(new System.Drawing.Size(80, 24));
+        shell.SetFocus();
+
+        bool? forced = null;
+        shell.MovementRedrawOverride = force => forced = force; // observe the redraw kind, don't paint
+
+        shell.NewKeyDownEvent(new Terminal.Gui.Input.Key('j'));
+
+        // The moved list is flagged dirty and the repaint is non-forced (LayoutAndDraw(false)),
+        // instead of forcing a full-app repaint on every keystroke.
+        Assert.True(shell.PrListScreen!.NeedsDraw);
+        Assert.Equal(false, forced);
+    }
 }
