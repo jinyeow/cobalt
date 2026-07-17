@@ -25,7 +25,7 @@ public sealed class PullRequestStoreAdapter(
 {
     private Guid? _me;
     private readonly object _teamsLock = new();
-    private Lazy<Task<TeamDirectory>>? _teamsInflight;
+    private Task<TeamDirectory>? _teamsInflight;
 
     /// <summary>The active PR-list breadth; flipped by the <c>:scope</c> command.</summary>
     public PrScope Scope { get; set; } = initialScope;
@@ -35,36 +35,55 @@ public sealed class PullRequestStoreAdapter(
 
     /// <summary>
     /// The team directory, resolved once and shared. Single-flight and <em>start-detached</em>: the
-    /// first caller builds the task; every caller awaits it via <see cref="Task.WaitAsync(CancellationToken)"/>,
+    /// first caller starts the build; every caller awaits it via <see cref="Task.WaitAsync(CancellationToken)"/>,
     /// so one caller's cancellation cancels only its own await, never the shared build the others are
-    /// joined to (ADR 0008). The shared build itself runs on <see cref="CancellationToken.None"/>. A
-    /// faulted build is evicted so the next caller retries rather than caching the failure.
+    /// joined to (ADR 0008). The shared build runs on <see cref="CancellationToken.None"/>, and its
+    /// eviction is attached to the shared task (not any caller's await), so a build that ends
+    /// unsuccessfully — faulted <em>or</em> canceled, e.g. an HttpClient timeout surfacing as a
+    /// cancelled task — is evicted and retried rather than cached forever.
     /// </summary>
-    private async Task<TeamDirectory> TeamsAsync(CancellationToken ct)
+    private Task<TeamDirectory> TeamsAsync(CancellationToken ct)
     {
-        Lazy<Task<TeamDirectory>> lazy;
+        Task<TeamDirectory> shared;
         lock (_teamsLock)
         {
-            lazy = _teamsInflight ??= new Lazy<Task<TeamDirectory>>(() =>
-                (resolveTeams ?? throw new InvalidOperationException("no team directory resolver configured"))(
-                    CancellationToken.None));
-        }
-        try
-        {
-            return await lazy.Value.WaitAsync(ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // Evict the faulted build (by identity, so a newer build another caller started is kept),
-            // leaving the directory retryable; a joiner's own cancellation (OCE) is not a build fault.
-            lock (_teamsLock)
+            if (_teamsInflight is not { } existing)
             {
-                if (ReferenceEquals(_teamsInflight, lazy))
-                {
-                    _teamsInflight = null;
-                }
+                existing = (resolveTeams ?? throw new InvalidOperationException("no team directory resolver configured"))(
+                    CancellationToken.None);
+                // Assign the field *before* attaching the eviction, so an already-completed build
+                // (e.g. Task.FromCanceled from an HttpClient timeout) evicts itself right here via
+                // the synchronous continuation instead of being cached before eviction can see it.
+                _teamsInflight = existing;
+                // Evict by identity the moment the shared build ends unsuccessfully (faulted OR
+                // canceled), observing any fault so it never reaches the crash-log hook (ADR 0013).
+                // Attached to the shared task, not a caller's WaitAsync, so a cancelled joiner still
+                // leaves the build running for the others and a cancelled build is not cached poison.
+                _ = existing.ContinueWith(
+                    EvictIfUnsuccessful,
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
             }
-            throw;
+            // Local, so the synchronous eviction above nulling the field does not matter here.
+            shared = existing;
+        }
+        return shared.WaitAsync(ct);
+    }
+
+    private void EvictIfUnsuccessful(Task<TeamDirectory> build)
+    {
+        if (build.IsCompletedSuccessfully)
+        {
+            return;
+        }
+        _ = build.Exception; // observe a fault (a canceled task carries none)
+        lock (_teamsLock)
+        {
+            if (ReferenceEquals(_teamsInflight, build))
+            {
+                _teamsInflight = null;
+            }
         }
     }
 

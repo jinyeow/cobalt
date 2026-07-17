@@ -71,6 +71,28 @@ public class PrCommentCountEnricherTests
     }
 
     [Fact]
+    public async Task Invalidate_Drops_Cached_Counts_So_They_Refetch()
+    {
+        var calls = 0;
+        var enricher = new PrCommentCountEnricher((pr, _) =>
+        {
+            Interlocked.Increment(ref calls);
+            return Task.FromResult(3);
+        });
+
+        await enricher.EnrichAsync([Pr(1)], TestContext.Current.CancellationToken);
+        Assert.Equal(3, enricher.TryGet(Pr(1)));
+
+        // The enricher outlives the list screen (CACHE-1), so an explicit refresh must be able to
+        // drop the cache — otherwise a new comment made without a re-push keeps its stale badge.
+        enricher.Invalidate();
+        Assert.Null(enricher.TryGet(Pr(1)));
+
+        await enricher.EnrichAsync([Pr(1)], TestContext.Current.CancellationToken);
+        Assert.Equal(2, calls); // refetched after invalidation, not served from the dropped cache
+    }
+
+    [Fact]
     public async Task Respects_Concurrency_Cap()
     {
         var running = 0;

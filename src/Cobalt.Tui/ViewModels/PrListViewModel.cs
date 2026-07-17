@@ -24,7 +24,11 @@ public sealed class PrListViewModel(IPullRequestSource source)
     // instantly then refreshes. Holds server results; the client-side repo/project filters are
     // reapplied on paint, so a filter change never needs to invalidate this. Cleared on a
     // scope/context change (InvalidateCache), which alters the underlying query.
+    // Guarded by _cacheLock together with _loadSeq: the commit runs on a threadpool continuation
+    // while the UI thread reads/clears, so the cache write, the seq supersede-check, and the clear
+    // must be atomic w.r.t. one another (a :scope flip clearing then a stale write racing in).
     private readonly Dictionary<PrListFilter, IReadOnlyList<PullRequest>> _tabCache = [];
+    private readonly object _cacheLock = new();
 
     public PrListFilter ActiveTab { get; private set; } = PrListFilter.ReviewQueue;
     public bool IsLoading { get; private set; }
@@ -81,9 +85,16 @@ public sealed class PrListViewModel(IPullRequestSource source)
 
     private async Task LoadTabAsync(PrListFilter tab, CancellationToken ct)
     {
-        // Stamp this load; only the newest may commit its results (kills the race
-        // where a slow first fetch lands after a newer tab's fetch — B3/D2).
-        var seq = ++_loadSeq;
+        // Stamp this load; only the newest may commit its results (kills the race where a slow
+        // first fetch lands after a newer tab's fetch — B3/D2). Stamp and read the cache under the
+        // lock so both are consistent with a concurrent invalidation.
+        int seq;
+        IReadOnlyList<PullRequest> cached;
+        lock (_cacheLock)
+        {
+            seq = ++_loadSeq;
+            cached = _tabCache.GetValueOrDefault(tab, []);
+        }
 
         ActiveTab = tab;
         IsLoading = true;
@@ -92,7 +103,7 @@ public sealed class PrListViewModel(IPullRequestSource source)
         // guard below. A tab not visited this session (or after InvalidateCache) has no cache, so
         // the pane still blanks the instant Tab is pressed instead of showing the previous tab's
         // PRs during the round-trip (the original D1 behaviour, now only for a cold tab).
-        _all = _tabCache.GetValueOrDefault(tab, []);
+        _all = cached;
         ApplyFilter();
 
         IReadOnlyList<PullRequest>? result = null;
@@ -112,19 +123,26 @@ public sealed class PrListViewModel(IPullRequestSource source)
             error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
         }
 
-        // A newer load superseded this one while it was in flight; drop its results
-        // so it cannot clobber the current tab.
-        if (seq != _loadSeq)
+        // Commit under the lock so the supersede-check and cache write are atomic w.r.t. a newer
+        // load or an InvalidateCache (a :scope flip): a superseded or invalidated load must neither
+        // paint nor write a stale result.
+        lock (_cacheLock)
         {
-            return;
+            if (seq != _loadSeq)
+            {
+                return; // superseded by a newer load or an invalidation — drop this result
+            }
+            if (result is not null)
+            {
+                // Only a successful fetch updates the cache; on a transient error the painted rows
+                // (cached, or the cold-start empty) stay put so the tab isn't blanked under an error.
+                _tabCache[tab] = result;
+            }
         }
 
         Error = error;
         if (result is not null)
         {
-            // Only a successful fetch updates the cache and rows; on a transient error the painted
-            // rows (cached, or the cold-start empty) stay put so the tab isn't blanked under an error.
-            _tabCache[tab] = result;
             _all = result;
         }
         IsLoading = false;
@@ -133,10 +151,31 @@ public sealed class PrListViewModel(IPullRequestSource source)
 
     /// <summary>
     /// Drops every tab's cached rows so the next visit refetches from the server rather than
-    /// painting stale rows. Called when the underlying query changes (a <c>:scope</c> or context
-    /// switch); the client-side repo/project filters do not need it (they narrow the raw cache).
+    /// painting stale rows, and supersedes any in-flight load so its result cannot land after the
+    /// clear. Called when the underlying query changes (a <c>:scope</c> or context switch); the
+    /// client-side repo/project filters do not need it (they narrow the raw cache).
     /// </summary>
-    public void InvalidateCache() => _tabCache.Clear();
+    public void InvalidateCache()
+    {
+        lock (_cacheLock)
+        {
+            _tabCache.Clear();
+            _loadSeq++; // supersede any in-flight load so a stale write cannot land after the clear
+        }
+    }
+
+    /// <summary>
+    /// Drops only the active tab's cached rows so a mutation refresh (vote/abandon/complete) shows
+    /// fresh data — or, on a transient refresh failure, a blank pane rather than a stale row that no
+    /// longer reflects the change just made.
+    /// </summary>
+    public void InvalidateActiveTab()
+    {
+        lock (_cacheLock)
+        {
+            _tabCache.Remove(ActiveTab);
+        }
+    }
 
     private void ApplyFilter()
     {

@@ -194,18 +194,19 @@ public sealed class CobaltShell : Window
 
     private void Dispatch(AppCommand command, int? count = null)
     {
-        // In the PR section, Tab/S-Tab cycle the PR sub-tabs (review queue/team/mine/active)
-        // rather than switching top-level sections; section switches go through the
-        // g-chords (gt/gT/g1/g2), handled by _vm.HandleCommand below.
-        if (PullRequestsActive && command is AppCommand.NextTab or AppCommand.PrevTab)
+        // In the PR section (with a built list), Tab/S-Tab cycle the PR sub-tabs (review
+        // queue/team/mine/active) rather than switching top-level sections; section switches go
+        // through the g-chords (gt/gT/g1/g2), handled by _vm.HandleCommand below. When the PR list
+        // isn't built (no connection → placeholder), fall through so Tab still toggles sections.
+        if (PullRequestsActive && _prList is not null && command is AppCommand.NextTab or AppCommand.PrevTab)
         {
             if (command == AppCommand.NextTab)
             {
-                _prList?.NextTab();
+                _prList.NextTab();
             }
             else
             {
-                _prList?.PrevTab();
+                _prList.PrevTab();
             }
             return;
         }
@@ -255,7 +256,7 @@ public sealed class CobaltShell : Window
                 }
                 else if (PullRequestsActive)
                 {
-                    _prList?.Load();
+                    _prList?.Refresh();
                 }
                 break;
             case AppCommand.FilterStart:
@@ -346,7 +347,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var actions = new PrActions(_app, _vm.Messages.Info);
-        _ = RunThenRefreshAsync(actions.RunVoteAsync(_pullRequests, pr.PullRequestId, CancellationToken.None), () => _prList?.Load());
+        _ = RunThenRefreshAsync(actions.RunVoteAsync(_pullRequests, pr.PullRequestId, CancellationToken.None), () => _prList?.RefreshAfterMutation());
     }
 
     private async Task RunThenRefreshAsync(Task action, Action refresh)
@@ -415,7 +416,7 @@ public sealed class CobaltShell : Window
         }
         var detailVm = new PrDetailViewModel(_pullRequests, id);
         new PrDetailDialog(_app, detailVm, _textInput, _vm.Messages.Info, _pullRequests, _context).Show();
-        _prList?.Load(); // reflect any votes/edits back into the list
+        _prList?.RefreshAfterMutation(); // reflect any votes/edits back into the list, dropping stale cache
     }
 
     private void OpenWorkItemDetail(long id, string? project)

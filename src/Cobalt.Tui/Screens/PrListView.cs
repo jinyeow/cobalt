@@ -72,7 +72,16 @@ public sealed class PrListView : View
 
     public event Action<int>? ItemActivated;
 
-    public void Load() => _ = Observe(_vm.LoadAsync(CycleLoadToken()));
+    /// <summary>Test seam: how many times a fresh load of the list was triggered — the only refetch
+    /// path. Lets a headless test assert keep-alive (no re-load on section toggle) without depending
+    /// on the fire-and-forget HTTP landing.</summary>
+    internal int LoadCount { get; private set; }
+
+    public void Load()
+    {
+        LoadCount++;
+        _ = Observe(_vm.LoadAsync(CycleLoadToken()));
+    }
 
     public void NextTab() => _ = Observe(_vm.NextTabAsync(CycleLoadToken()));
 
@@ -89,10 +98,33 @@ public sealed class PrListView : View
     public void ReloadFromTop()
     {
         // A :scope change (or context switch) alters the server query for every tab, so drop the
-        // per-tab result cache — otherwise a later tab switch would paint rows from the old scope
-        // (CACHE-3 invalidation).
+        // per-tab result cache and the shell-lifetime comment-count cache — otherwise a later tab
+        // switch would paint rows (or badges) from the old scope (CACHE-3 / CACHE-1 invalidation).
         _vm.InvalidateCache();
+        _comments?.Invalidate();
         _renderedTab = null; // make the next render treat this as a fresh set → reset to row 0
+        Load();
+    }
+
+    /// <summary>
+    /// Forces a fresh load of the current tab (the <c>r</c> key): also drops the comment-count cache
+    /// so badges reflect new comments, since the enricher outlives the screen (CACHE-1 / #7).
+    /// </summary>
+    public void Refresh()
+    {
+        _comments?.Invalidate();
+        Load();
+    }
+
+    /// <summary>
+    /// Refreshes the current tab after a mutation (vote/abandon/complete): invalidates the tab's
+    /// cached rows first so a transient refresh failure shows a blank pane, not a stale row that no
+    /// longer reflects the change (CACHE-3 / #3), and drops the comment-count cache.
+    /// </summary>
+    public void RefreshAfterMutation()
+    {
+        _vm.InvalidateActiveTab();
+        _comments?.Invalidate();
         Load();
     }
 
