@@ -6,7 +6,7 @@ using Cobalt.Tui.ViewModels;
 namespace Cobalt.Tui.App;
 
 /// <summary>
-/// Renders the two tab rows as text (spec: lazygit-inspired redesign, stage A):
+/// Renders the two tab rows as text (ADR 0021):
 /// section tabs carrying their jump chords, and the PR sub-tab row with the active
 /// tab bracketed and its row count inline. Pure string building — the views only
 /// assign the results. Both rows derive from the behavioural sources of truth

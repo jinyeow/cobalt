@@ -4,7 +4,7 @@ namespace Cobalt.Tui.Tests.App;
 
 /// <summary>
 /// Status line = shell status text left, pending-key showcmd right-aligned
-/// (spec: lazygit-inspired redesign, stage A). Pure composition.
+/// (ADR 0021). Pure composition.
 /// </summary>
 public class StatusLineComposerTests
 {

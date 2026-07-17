@@ -4,7 +4,7 @@ using Cobalt.Tui.Input;
 namespace Cobalt.Tui.Tests.App;
 
 /// <summary>
-/// The always-visible bottom keybar (spec: lazygit-inspired redesign, stage A).
+/// The always-visible bottom keybar (ADR 0021).
 /// Pure formatting from the live binding table: prioritized entries, fitted to
 /// width, always ending with the help key so `?` is discoverable even truncated.
 /// </summary>

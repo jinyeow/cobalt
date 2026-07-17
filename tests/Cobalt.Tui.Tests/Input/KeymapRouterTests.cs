@@ -313,7 +313,7 @@ public class KeymapRouterTests
         Assert.Equal(3, next.Count);
     }
 
-    // ---- [ / ] PR sub-tab keys (spec: lazygit-inspired redesign, stage A) ----
+    // ---- [ / ] PR sub-tab keys (ADR 0021) ----
 
     [Fact]
     public void Brackets_Cycle_Pr_SubTabs_In_The_Pr_List_Scope()
@@ -338,7 +338,7 @@ public class KeymapRouterTests
         Assert.Equal(KeyResultKind.None, Router().Feed("[", KeyScope.WorkItemList).Kind);
     }
 
-    // ---- PendingDisplay (vim showcmd; spec: lazygit-inspired redesign, stage A) ----
+    // ---- PendingDisplay (vim showcmd; ADR 0021) ----
 
     [Fact]
     public void PendingDisplay_Is_Empty_When_Idle()

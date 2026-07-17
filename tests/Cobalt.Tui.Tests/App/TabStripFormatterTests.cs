@@ -6,7 +6,7 @@ using Cobalt.Tui.ViewModels;
 namespace Cobalt.Tui.Tests.App;
 
 /// <summary>
-/// The real tab strip (spec: lazygit-inspired redesign, stage A): section tabs
+/// The real tab strip (ADR 0021): section tabs
 /// carry their jump chords, and the PR sub-tabs render as a visible tab row with
 /// the active tab highlighted and its row count shown.
 /// </summary>

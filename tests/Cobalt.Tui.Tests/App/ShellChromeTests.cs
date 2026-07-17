@@ -8,7 +8,7 @@ namespace Cobalt.Tui.Tests.App;
 
 /// <summary>
 /// Headless shell chrome: the keybar renders from the live binding table and
-/// follows the active section's scope (spec: lazygit-inspired redesign, stage A).
+/// follows the active section's scope (ADR 0021).
 /// </summary>
 public class ShellChromeTests
 {

@@ -42,7 +42,7 @@ verb menus, saved-query sections):
   visible tab row in cycle order with the active tab bracketed + counted
   (` review queue │ [team 7] │ mine │ active`). `[` / `]` now cycle the PR sub-tabs
   (lazygit's panel-tab keys), scoped to `PullRequestList`; `Tab`/`S-Tab` remain as
-  aliases until the preview workspace (spec stage B) claims `Tab` for pane focus.
+  aliases until the preview workspace (ADR 0022, stage B) claims `Tab` for pane focus.
 - **Chrome layout.** The bottom of the shell is now status / message (palette
   overlays it) / keybar, with the keybar owning the last row like lazygit's bottom
   line. The chrome re-fits on terminal resize (same width-change guard the list
