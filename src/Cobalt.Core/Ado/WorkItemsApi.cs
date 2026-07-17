@@ -74,16 +74,19 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
             return [];
         }
 
-        // workitemsbatch caps at 200 ids per call; the pages are independent, so dispatch them
-        // concurrently and merge once they all return.
-        var pages = await Task.WhenAll(
-            Chunk(ids, 200).Select(page => BatchAsync(page, ListFields, orgRoute, cancellationToken)))
-            .ConfigureAwait(false);
-
+        // The WIQL above is capped at $top=WiqlTop (200), so ids.Count is always <= 200 in
+        // production and Chunk yields a single page; workitemsbatch itself caps at 200 ids
+        // per call. Chunk stays here defensively in case the $top cap is ever raised, but with
+        // one page in practice there is nothing to gain from dispatching pages concurrently, so
+        // fetch them sequentially.
         var byId = new Dictionary<long, WorkItem>(ids.Count);
-        foreach (var dto in pages.SelectMany(p => p.Value))
+        foreach (var page in Chunk(ids, 200))
         {
-            byId[dto.Id] = WorkItem.From(dto);
+            var batch = await BatchAsync(page, ListFields, orgRoute, cancellationToken).ConfigureAwait(false);
+            foreach (var dto in batch.Value)
+            {
+                byId[dto.Id] = WorkItem.From(dto);
+            }
         }
 
         // WIQL returns ids ordered; the batch endpoint does not, so re-sort by WIQL order.
