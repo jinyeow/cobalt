@@ -34,6 +34,29 @@ public class PrRowFormatterTests
     }
 
     [Fact]
+    public void Author_Column_Shows_The_Pr_Author()
+    {
+        var rows = new[] { Pr(1, "t", "web"), Pr(2, "t", "api") };
+        var cols = PrColumns.For(rows);
+
+        var text = PrRowFormatter.Format(rows[0], 120, cols, Now, null);
+
+        Assert.Contains("Jin", text);
+    }
+
+    [Fact]
+    public void Author_Column_Is_Sized_To_The_Longest_Author_And_Capped()
+    {
+        var withLongAuthor = Pr(1, "t", "web") with { Author = new string('a', 40) };
+        var rows = new[] { withLongAuthor, Pr(2, "t", "api") };
+        var cols = PrColumns.For(rows);
+
+        Assert.Equal(PrColumns.MaxAuthorWidth, cols.AuthorWidth);
+        var text = PrRowFormatter.Format(withLongAuthor, 120, cols, Now, null);
+        Assert.Equal(120, text.Length); // still exactly fills the row
+    }
+
+    [Fact]
     public void Repo_Column_Shows_Full_Name_When_It_Fits()
     {
         var rows = new[] { Pr(1, "t", "payments-service"), Pr(2, "t", "web") };
