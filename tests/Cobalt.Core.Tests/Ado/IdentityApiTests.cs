@@ -124,6 +124,26 @@ public class IdentityApiTests : IDisposable
     }
 
     [Fact]
+    public async Task GetIdentity_Retries_After_A_Canceled_Call()
+    {
+        // An HttpClient timeout surfaces as a *canceled* task (TaskCanceledException) even though
+        // the caller never cancelled. That must be evicted like a fault so a later call retries,
+        // not cached for the whole session.
+        var handler = new FakeHttpHandler()
+            .Respond(_ => throw new TaskCanceledException("simulated HttpClient timeout"))
+            .Respond(HttpStatusCode.OK,
+                """{"authenticatedUser":{"id":"1f2e3d4c-0000-1111-2222-333344445555","providerDisplayName":"Jin"}}""");
+        var api = Api(handler);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => api.GetIdentityAsync(TestContext.Current.CancellationToken));
+        var user = await api.GetIdentityAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("Jin", user.DisplayName);
+        Assert.Equal(2, handler.Requests.Count); // canceled attempt evicted, retry re-fetched
+    }
+
+    [Fact]
     public async Task Prime_Swallows_An_Expected_Fault()
     {
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.Unauthorized, """{"message":"TF400813"}""");

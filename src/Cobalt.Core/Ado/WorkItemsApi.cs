@@ -26,6 +26,13 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
         "Microsoft.VSTS.Common.Priority", "Microsoft.VSTS.Scheduling.StoryPoints",
     ];
 
+    /// <summary>
+    /// The context project name a null/blank <c>project</c> argument resolves to (see
+    /// <see cref="ProjectSeg"/>). Callers that key a cache by project use this to fold a null
+    /// project onto the same key as the explicit context project.
+    /// </summary>
+    public string ContextProject => context.Project;
+
     private string Project => Uri.EscapeDataString(context.Project);
 
     /// <summary>Path segment for a work-item call: the item's own project, or the context's when blank.</summary>

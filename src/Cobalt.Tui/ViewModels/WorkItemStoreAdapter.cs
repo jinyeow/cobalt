@@ -30,7 +30,9 @@ public sealed class WorkItemStoreAdapter(WorkItemsApi api, PrScope initialScope 
 
     public Task<IReadOnlyList<WorkItemStateDto>> GetStatesAsync(string type, string? project, CancellationToken ct)
     {
-        var key = (project ?? "", type);
+        // A null/blank project resolves to the context project on the wire, so fold it onto the
+        // same cache key — otherwise a null-project and a context-project call would duplicate.
+        var key = (string.IsNullOrEmpty(project) ? api.ContextProject : project, type);
         // Lazy so the fetch is started at most once per key even under concurrent opens; the
         // detached start (CancellationToken.None) means a joiner is never bound to a cancelled
         // starter — each caller observes its own token via WaitAsync (ADR 0008).
@@ -50,10 +52,12 @@ public sealed class WorkItemStoreAdapter(WorkItemsApi api, PrScope initialScope 
         }
         catch
         {
-            // Evict only if the shared fetch itself faulted (so a retry re-fetches). A caller
-            // cancel where the fetch is still pending/succeeded must not drop a good entry; and
-            // removing this exact Lazy never evicts a newer attempt.
-            if (lazy.IsValueCreated && lazy.Value.IsFaulted)
+            // Evict if the shared fetch itself faulted OR was cancelled (an HttpClient timeout
+            // surfaces as a canceled task, not a faulted one) so a retry re-fetches. A *caller*
+            // cancel where the fetch is still pending/succeeded leaves the underlying task
+            // un-cancelled, so a good entry is kept; removing this exact Lazy never evicts a newer
+            // attempt.
+            if (lazy.IsValueCreated && (lazy.Value.IsFaulted || lazy.Value.IsCanceled))
             {
                 _statesCache.TryRemove(new KeyValuePair<(string, string), Lazy<Task<IReadOnlyList<WorkItemStateDto>>>>(key, lazy));
             }

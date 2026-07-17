@@ -83,12 +83,14 @@ public sealed class IdentityApi(AdoHttp http)
             var task = GetAuthenticatedUserAsync(CancellationToken.None);
             _identity = task;
 
-            // Reset-on-fault: drop the cached faulted task so the next caller re-fetches, but only
-            // if it is still the one we stored — never evict a newer in-flight attempt.
+            // Reset-on-fault-or-cancel: drop the cached task if the fetch faulted OR was cancelled
+            // (an HttpClient timeout surfaces as a canceled task, not a faulted one) so the next
+            // caller re-fetches. NotOnRanToCompletion fires for both. Only nulls the field if it is
+            // still the one we stored — never evicts a newer in-flight attempt.
             _ = task.ContinueWith(
                 t =>
                 {
-                    _ = t.Exception; // observe: awaiters still see it; a cancelled-away fetch does not crash-log
+                    _ = t.Exception; // observe: awaiters still see it; a fetch nobody awaits does not crash-log
                     lock (_gate)
                     {
                         if (ReferenceEquals(_identity, t))
@@ -98,7 +100,7 @@ public sealed class IdentityApi(AdoHttp http)
                     }
                 },
                 CancellationToken.None,
-                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskContinuationOptions.NotOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
 
             return task;
