@@ -9,6 +9,12 @@ public sealed class KeyBindingTable
 {
     private readonly Dictionary<KeyScope, List<(string[] Sequence, AppCommand Command)>> _bindings = [];
 
+    // INPUT-2: Visible() is on the router's hot path (once per keystroke); cache its per-scope
+    // result so a steady-state Feed() doesn't rebuild the combined (scoped + global) list every
+    // time. Bind() clears the cache, so it stays correct even if bindings are added after an
+    // earlier read (only Default()'s own construction does this in practice).
+    private readonly Dictionary<KeyScope, (string[] Sequence, AppCommand Command)[]> _visibleCache = [];
+
     /// <summary>
     /// The one process-wide default table (INPUT-4): treated as immutable once built, so call
     /// sites that only ever want the default binding set can share it instead of each building
@@ -120,6 +126,10 @@ public sealed class KeyBindingTable
             _bindings[scope] = list = [];
         }
         list.Add((sequence.Split(' ', StringSplitOptions.RemoveEmptyEntries), command));
+        // A scoped or global bind can change what's visible from any scope (global bindings
+        // fall through everywhere); clearing the whole cache is cheap since Bind only runs
+        // during table construction.
+        _visibleCache.Clear();
     }
 
     /// <summary>
@@ -151,22 +161,29 @@ public sealed class KeyBindingTable
     public IEnumerable<(string[] Sequence, AppCommand Command)> ScopedOnly(KeyScope scope) =>
         scope != KeyScope.Global && _bindings.TryGetValue(scope, out var scoped) ? scoped : [];
 
-    /// <summary>All bindings visible from a scope: scoped first, then global fallback.</summary>
-    public IEnumerable<(string[] Sequence, AppCommand Command)> Visible(KeyScope scope)
+    /// <summary>
+    /// All bindings visible from a scope: scoped first, then global fallback. Built once per
+    /// scope and cached (INPUT-2) — see <see cref="Bind"/> for cache invalidation.
+    /// </summary>
+    public (string[] Sequence, AppCommand Command)[] Visible(KeyScope scope)
     {
+        if (_visibleCache.TryGetValue(scope, out var cached))
+        {
+            return cached;
+        }
+
+        List<(string[] Sequence, AppCommand Command)> built = [];
         if (scope != KeyScope.Global && _bindings.TryGetValue(scope, out var scoped))
         {
-            foreach (var b in scoped)
-            {
-                yield return b;
-            }
+            built.AddRange(scoped);
         }
         if (_bindings.TryGetValue(KeyScope.Global, out var global))
         {
-            foreach (var b in global)
-            {
-                yield return b;
-            }
+            built.AddRange(global);
         }
+
+        var array = built.ToArray();
+        _visibleCache[scope] = array;
+        return array;
     }
 }

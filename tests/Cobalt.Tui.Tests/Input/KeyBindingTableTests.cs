@@ -46,4 +46,31 @@ public class KeyBindingTableTests
         Assert.Equal(AppCommand.MoveDown, KeyBindingTable.Shared.Visible(KeyScope.Global)
             .First(b => b.Sequence is ["j"]).Command);
     }
+
+    // ---- INPUT-2: per-scope binding arrays are cached, not rebuilt on every router lookup ----
+
+    [Fact]
+    public void Visible_Returns_The_Same_Array_On_Repeated_Calls()
+    {
+        var table = KeyBindingTable.Default();
+
+        var first = table.Visible(KeyScope.WorkItemList);
+        var second = table.Visible(KeyScope.WorkItemList);
+
+        Assert.Same(first, second);
+    }
+
+    [Fact]
+    public void Binding_After_A_Cached_Read_Invalidates_The_Cache()
+    {
+        var table = new KeyBindingTable();
+        table.Bind(KeyScope.Global, "a", AppCommand.MoveDown);
+        var before = table.Visible(KeyScope.Global); // caches it
+
+        table.Bind(KeyScope.Global, "b", AppCommand.MoveUp);
+        var after = table.Visible(KeyScope.Global);
+
+        Assert.NotSame(before, after);
+        Assert.Contains(after, b => b.Sequence is ["b"]);
+    }
 }
