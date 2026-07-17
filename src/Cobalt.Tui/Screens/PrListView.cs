@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Cobalt.Core.Models;
+using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
@@ -192,7 +193,7 @@ public sealed class PrListView : View
     {
         // The sub-tabs render as a visible tab row ([ / ] or Tab cycles them); the
         // count only makes sense once the active tab's rows have loaded cleanly.
-        var tabs = Cobalt.Tui.App.TabStripFormatter.PrTabs(
+        var tabs = TabStripFormatter.PrTabs(
             _vm.ActiveTab,
             _vm.IsLoading || _vm.Error is not null ? null : _vm.Rows.Count);
         _header.Text = _vm.IsLoading

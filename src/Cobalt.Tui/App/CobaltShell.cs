@@ -109,7 +109,10 @@ public sealed class CobaltShell : Window
     private void WireViewModel()
     {
         _vm.SectionChanged += () => { ShowSection(); RefreshChrome(); };
-        _vm.Messages.Changed += RefreshChrome;
+        // A routine log entry only changes the message row; rebuilding the keybar and
+        // tab strip per message would undo the "no whole-chrome work per status
+        // message" perf posture (see RefreshChrome).
+        _vm.Messages.Changed += RefreshMessage;
         _vm.QuitRequested += _app.RequestStop;
         _vm.HelpRequested += ShowHelp;
         _vm.MessagesRequested += ShowMessages;
@@ -166,22 +169,39 @@ public sealed class CobaltShell : Window
             {
                 key.Handled = true;
             }
+            // Refresh the showcmd before dispatching: the router's pending state is
+            // already final for this key (count armed, chord started, Esc cleared,
+            // match consumed), and a movement dispatch forces a full repaint — the
+            // status row must not show the stale count in that frame.
+            RefreshStatus();
             if (decision.Command is { } command)
             {
                 Dispatch(command, result.Count);
             }
-            // Every key can change the router's pending state (count armed, chord
-            // started, Esc cleared, match consumed) — keep the showcmd current.
-            RefreshStatus();
         };
     }
 
-    /// <summary>Re-renders only the status row (left text + right-aligned showcmd).</summary>
+    /// <summary>Chrome width: the live viewport, or a standard width before first layout.</summary>
+    private int ChromeWidth => Viewport.Width > 0 ? Viewport.Width : 80;
+
+    /// <summary>Re-renders only the status row (left text + right-aligned showcmd), when it changed.</summary>
     private void RefreshStatus()
     {
-        var width = Viewport.Width > 0 ? Viewport.Width : 80;
-        _status.Text = StatusLineComposer.Compose(_vm.StatusLine, _router.PendingDisplay, width);
+        var composed = StatusLineComposer.Compose(_vm.StatusLine, _router.PendingDisplay, ChromeWidth);
+        if (composed == _status.Text)
+        {
+            return; // held j/k fires this per keystroke — don't churn the draw loop
+        }
+        _status.Text = composed;
         _status.SetNeedsDraw();
+    }
+
+    /// <summary>Re-renders only the message row — the only chrome a routine log entry changes.</summary>
+    private void RefreshMessage()
+    {
+        var current = _vm.Messages.Current;
+        _message.Text = current is null ? "" : $" {current.Text}";
+        _message.SetNeedsDraw();
     }
 
     /// <summary>Test seam: the rendered status row text.</summary>
@@ -562,21 +582,21 @@ public sealed class CobaltShell : Window
         _activeScreen.SetFocus();
     }
 
+    /// <summary>
+    /// Full chrome render: tab strip, keybar, status, message. Runs on construction,
+    /// section/scope/context changes, and width changes — NOT per log message
+    /// (Messages.Changed is wired to the lighter <see cref="RefreshMessage"/>).
+    /// </summary>
     private void RefreshChrome()
     {
-        _tabs.Text = TabStripFormatter.Sections(_vm.ActiveSection);
-        var current = _vm.Messages.Current;
-        _message.Text = current is null ? "" : $" {current.Text}";
-        // Pre-layout the viewport is 0-wide; fall back to a standard width so the
-        // first paint still shows a sensible bar (the resize hook re-fits it).
-        var width = Viewport.Width > 0 ? Viewport.Width : 80;
+        _tabs.Text = TabStripFormatter.Sections(_vm.ActiveSection, _bindings);
         _lastChromeWidth = Viewport.Width;
-        _keybar.Text = KeybarFormatter.Render(_bindings, ActiveScope, width);
+        _keybar.Text = KeybarFormatter.Render(_bindings, ActiveScope, ChromeWidth);
         RefreshStatus();
+        RefreshMessage();
         // Only the fixed-layout chrome labels changed text — mark them dirty and let the run loop
-        // repaint them, instead of a whole-app LayoutAndDraw on every routine status/log message.
+        // repaint them, instead of a whole-app LayoutAndDraw.
         _tabs.SetNeedsDraw();
-        _message.SetNeedsDraw();
         _keybar.SetNeedsDraw();
     }
 

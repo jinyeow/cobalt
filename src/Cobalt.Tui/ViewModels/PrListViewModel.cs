@@ -11,7 +11,11 @@ public interface IPullRequestSource
 /// <summary>The PR tabs (review queue / team / mine / active) with async load, error, repo filter.</summary>
 public sealed class PrListViewModel(IPullRequestSource source)
 {
-    private static readonly PrListFilter[] TabOrder =
+    /// <summary>
+    /// The canonical sub-tab cycle order ([ / ] / Tab walk it). The tab strip renders
+    /// from this same array so the visible order can never diverge from the cycle.
+    /// </summary>
+    internal static readonly PrListFilter[] TabOrder =
         [PrListFilter.ReviewQueue, PrListFilter.Team, PrListFilter.Mine, PrListFilter.Active];
 
     private IReadOnlyList<PullRequest> _all = [];

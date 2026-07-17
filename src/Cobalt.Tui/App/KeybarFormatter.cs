@@ -14,9 +14,10 @@ public static class KeybarFormatter
     // what you can do to the selected thing), then navigation extras. Commands not
     // listed here still render, after these, described via the shared help
     // vocabulary, so new bindings surface without touching the formatter.
+    // MoveDown/MoveUp are not listed: the movement pair is emitted first, by hand,
+    // as a single "j/k:move" entry in Render.
     private static readonly (AppCommand Command, string Label)[] Priority =
     [
-        (AppCommand.MoveDown, "move"), // paired with MoveUp as "j/k:move"
         (AppCommand.Open, "open"),
         (AppCommand.Comment, "comment"),
         (AppCommand.ChangeState, "state"),
@@ -62,7 +63,9 @@ public static class KeybarFormatter
         }
 
         var entries = new List<string>();
-        var emitted = new HashSet<AppCommand> { AppCommand.MoveDown, AppCommand.MoveUp };
+        // Seed MoveDown so the fallback loop can't re-emit it; MoveUp stays out of
+        // the bar via Suppressed (its direction is implied by the pair entry).
+        var emitted = new HashSet<AppCommand> { AppCommand.MoveDown };
         if (first.TryGetValue(AppCommand.MoveDown, out var down))
         {
             entries.Add(first.TryGetValue(AppCommand.MoveUp, out var up)
@@ -115,6 +118,7 @@ public static class KeybarFormatter
             sb.Append(help);
         }
         var bar = sb.ToString();
-        return bar.Length <= width ? bar : bar[..Math.Max(0, width)];
+        // Clamp (not a raw slice) so an overflow can never split a surrogate pair.
+        return bar.Length <= width ? bar : Screens.RowText.Clamp(bar, width);
     }
 }

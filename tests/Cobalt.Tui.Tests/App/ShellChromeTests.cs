@@ -1,6 +1,8 @@
 using Cobalt.Tui.App;
+using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
+using Terminal.Gui.Input;
 
 namespace Cobalt.Tui.Tests.App;
 
@@ -34,7 +36,7 @@ public class ShellChromeTests
 
         Assert.Contains("c:comment", shell.KeybarText); // work-item verbs
 
-        vm.HandleCommand(Cobalt.Tui.Input.AppCommand.SectionPullRequests);
+        vm.HandleCommand(AppCommand.SectionPullRequests);
 
         Assert.Contains("v:vote", shell.KeybarText);    // PR verbs
         Assert.DoesNotContain("a:assign", shell.KeybarText);
@@ -45,13 +47,13 @@ public class ShellChromeTests
     {
         using var shell = NewShell(out _);
 
-        shell.NewKeyDownEvent(new Terminal.Gui.Input.Key('5'));
+        shell.NewKeyDownEvent(new Key('5'));
         Assert.EndsWith("5 ", shell.StatusText);
 
-        shell.NewKeyDownEvent(new Terminal.Gui.Input.Key('g'));
+        shell.NewKeyDownEvent(new Key('g'));
         Assert.EndsWith("5g ", shell.StatusText);
 
-        shell.NewKeyDownEvent(Terminal.Gui.Input.Key.Esc);
+        shell.NewKeyDownEvent(Key.Esc);
         Assert.DoesNotContain("5g", shell.StatusText);
     }
 
@@ -60,8 +62,8 @@ public class ShellChromeTests
     {
         using var shell = NewShell(out _);
 
-        shell.NewKeyDownEvent(new Terminal.Gui.Input.Key('3'));
-        shell.NewKeyDownEvent(new Terminal.Gui.Input.Key('j'));
+        shell.NewKeyDownEvent(new Key('3'));
+        shell.NewKeyDownEvent(new Key('j'));
 
         Assert.DoesNotContain("3", shell.StatusText);
     }

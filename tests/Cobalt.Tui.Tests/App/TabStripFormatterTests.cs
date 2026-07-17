@@ -1,6 +1,7 @@
-using Cobalt.Tui.App;
-using Cobalt.Tui.ViewModels;
 using Cobalt.Core.Models;
+using Cobalt.Tui.App;
+using Cobalt.Tui.Input;
+using Cobalt.Tui.ViewModels;
 
 namespace Cobalt.Tui.Tests.App;
 
@@ -14,7 +15,7 @@ public class TabStripFormatterTests
     [Fact]
     public void Sections_Show_Jump_Chords_And_Bracket_The_Active_One()
     {
-        var strip = TabStripFormatter.Sections(AppSection.WorkItems);
+        var strip = TabStripFormatter.Sections(AppSection.WorkItems, KeyBindingTable.Default());
 
         Assert.Contains("[g1:Work Items]", strip);
         Assert.Contains("g2:Pull Requests", strip);
@@ -24,10 +25,25 @@ public class TabStripFormatterTests
     [Fact]
     public void Sections_Move_The_Brackets_With_The_Active_Section()
     {
-        var strip = TabStripFormatter.Sections(AppSection.PullRequests);
+        var strip = TabStripFormatter.Sections(AppSection.PullRequests, KeyBindingTable.Default());
 
         Assert.Contains("[g2:Pull Requests]", strip);
         Assert.DoesNotContain("[g1:Work Items]", strip);
+    }
+
+    [Fact]
+    public void Sections_Read_The_Jump_Chords_From_The_Live_Table()
+    {
+        // A rebound section jump must change the advertised chord — the strip is
+        // generated from the table, never a hardcoded label.
+        var table = new KeyBindingTable();
+        table.Bind(KeyScope.Global, "g w", AppCommand.SectionWorkItems);
+
+        var strip = TabStripFormatter.Sections(AppSection.WorkItems, table);
+
+        Assert.Contains("[gw:Work Items]", strip);
+        Assert.Contains("Pull Requests", strip); // unbound: plain name, no dead chord
+        Assert.DoesNotContain("g2:Pull Requests", strip);
     }
 
     [Fact]

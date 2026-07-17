@@ -5,8 +5,10 @@ Status: Accepted · Date: 2026-07-17
 ## Context
 
 A survey of best-in-class TUIs (lazygit primarily; gh-dash, tig, gitui, k9s,
-magit/transient) against cobalt's shell surfaced three discoverability gaps
-(`.claude/specs/lazygit-inspired-tui-redesign.md` records the full redesign):
+magit/transient) against cobalt's shell surfaced three discoverability gaps —
+this ADR covers the first stage of that larger redesign (keybar, showcmd, tab
+strips; later stages: list + live-preview workspace, executable help menus,
+verb menus, saved-query sections):
 
 - **Keys were invisible.** Nothing on screen said what you can press in the current
   context; `?` was the only route and it interrupts the flow. lazygit/gitui keep a

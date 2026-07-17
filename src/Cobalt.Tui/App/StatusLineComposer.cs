@@ -17,11 +17,11 @@ public static class StatusLineComposer
         var right = pending + " ";
         if (right.Length >= width)
         {
-            return right[..Math.Max(0, width)];
+            return Screens.RowText.Clamp(right, width);
         }
 
-        var available = width - right.Length;
-        var head = left.Length > available ? left[..available] : left.PadRight(available);
-        return head + right;
+        // RowText owns the shared truncate-or-pad cell semantics (ellipsis on cut,
+        // surrogate-safe) — the status row must not grow a second implementation.
+        return Screens.RowText.Fit(left, width - right.Length) + right;
     }
 }
