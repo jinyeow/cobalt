@@ -312,4 +312,72 @@ public class KeymapRouterTests
         Assert.Equal(AppCommand.NextFile, next.Command);
         Assert.Equal(3, next.Count);
     }
+
+    // ---- [ / ] PR sub-tab keys (ADR 0021) ----
+
+    [Fact]
+    public void Brackets_Cycle_Pr_SubTabs_In_The_Pr_List_Scope()
+    {
+        Assert.Equal(AppCommand.NextTab, Router().Feed("]", KeyScope.PullRequestList).Command);
+        Assert.Equal(AppCommand.PrevTab, Router().Feed("[", KeyScope.PullRequestList).Command);
+    }
+
+    [Fact]
+    public void Brackets_Fire_Immediately_Not_Pending()
+    {
+        // Unlike DiffReview's "] f" chords, the PR-list "]" is a complete binding.
+        var result = Router().Feed("]", KeyScope.PullRequestList);
+
+        Assert.Equal(KeyResultKind.Matched, result.Kind);
+    }
+
+    [Fact]
+    public void Brackets_Do_Nothing_In_The_WorkItem_List_Scope()
+    {
+        Assert.Equal(KeyResultKind.None, Router().Feed("]", KeyScope.WorkItemList).Kind);
+        Assert.Equal(KeyResultKind.None, Router().Feed("[", KeyScope.WorkItemList).Kind);
+    }
+
+    // ---- PendingDisplay (vim showcmd; ADR 0021) ----
+
+    [Fact]
+    public void PendingDisplay_Is_Empty_When_Idle()
+    {
+        Assert.Equal("", Router().PendingDisplay);
+    }
+
+    [Fact]
+    public void PendingDisplay_Shows_An_Armed_Count()
+    {
+        var router = Router();
+        router.Feed("1", KeyScope.Global);
+        router.Feed("5", KeyScope.Global);
+
+        Assert.Equal("15", router.PendingDisplay);
+    }
+
+    [Fact]
+    public void PendingDisplay_Shows_Count_Then_Pending_Sequence()
+    {
+        var router = Router();
+        router.Feed("5", KeyScope.Global);
+        router.Feed("g", KeyScope.Global);
+
+        Assert.Equal("5g", router.PendingDisplay);
+    }
+
+    [Fact]
+    public void PendingDisplay_Clears_On_Match_And_On_Esc()
+    {
+        var router = Router();
+        router.Feed("g", KeyScope.Global);
+        router.Feed("g", KeyScope.Global); // matches gg
+
+        Assert.Equal("", router.PendingDisplay);
+
+        router.Feed("5", KeyScope.Global);
+        router.Feed("Esc", KeyScope.Global);
+
+        Assert.Equal("", router.PendingDisplay);
+    }
 }

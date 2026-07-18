@@ -9,7 +9,7 @@ requests, diff review with line comments). The agreed specification lives in
 and design decisions in [docs/adr/](docs/adr/).
 
 Built with a UI-free `Cobalt.Core` and a view-model layer that never references
-Terminal.Gui, so the interesting logic is unit-tested (386 tests). See
+Terminal.Gui, so the interesting logic is unit-tested (808 tests). See
 [docs/adr/0004](docs/adr/0004-terminal-gui-v2-with-viewmodels.md) and
 [0007](docs/adr/0007-vim-input-as-testable-data.md).
 
@@ -22,12 +22,13 @@ Terminal.Gui, so the interesting logic is unit-tested (386 tests). See
 - [Keys (vim layer)](#keys-vim-layer)
 - [Lists](#lists)
 - [Editor](#editor)
-- [Terminal multiplexers (zellij / tmux)](#terminal-multiplexers-zellij--tmux)
+- [Terminal multiplexers (zellij / tmux) and remote sessions](#terminal-multiplexers-zellij--tmux-and-remote-sessions)
 - [Crash logs](#crash-logs)
 - [Known limitations](#known-limitations)
 - [Development](#development)
   - [Testing local changes](#testing-local-changes)
   - [Before pushing](#before-pushing)
+  - [Checks the test suite can't make (UAT)](#checks-the-test-suite-cant-make-uat)
 
 ## Install
 
@@ -91,6 +92,12 @@ cobalt --context oss  # launch against a named context
 
 ## Keys (vim layer)
 
+The bottom row is an always-visible **keybar** showing the keys for the current
+context (generated from the live binding table, so it never drifts), and the status
+row shows an armed count or pending chord vim-showcmd-style (`5g` while you type
+`5gg`). The tab strip names its jump chords, and the PR sub-tabs render as a real
+tab row with the active tab highlighted.
+
 `j/k` move · `gg`/`G` top/bottom · `Ctrl-d`/`Ctrl-u` half-page · `/` filter ·
 `Enter`/`o`/`l` open · `h`/`q` back/close · `gt`/`gT` next/prev section · `g1`/`g2` jump to Work Items /
 Pull Requests · `Tab` next tab · `:` command palette
@@ -99,8 +106,10 @@ Pull Requests · `Tab` next tab · `:` command palette
 `:help`, `:messages`) · `?` help ·
 `r` refresh. On a work item (the highlighted list row or its detail): `s` state ·
 `c` comment · `a` assign · `t` tags; the detail additionally has `e` edit
-description in `$EDITOR`. In the PR section: `Tab` cycles the review queue / team /
-mine / active sub-tabs; on a PR (the highlighted list row or its detail): `v` vote; the
+description in `$EDITOR`. In the PR section: `[`/`]` (or `Tab`) cycle the team /
+mine / active sub-tabs (team — PRs your teams are reviewing or teammates authored —
+is the default; a personal "awaiting my vote" queue is org-setup-dependent and no
+longer a tab); on a PR (the highlighted list row or its detail): `v` vote; the
 detail additionally has `c` reply · `g c` add a PR-level comment · `g b` open the source
 branch in the browser · `x` resolve thread · `u` reactivate · `C` complete · `A` abandon ·
 `d` open diff review, and shows the PR's **branch-policy / build status** (pass/fail, blocking).
@@ -185,7 +194,7 @@ If neither variable is set, description editing and the `Ctrl-E` hatch fall back
 isn't installed you'll see *"could not start editor … set $VISUAL or $EDITOR"*.
 A full-screen editor gets a clean terminal (the TUI suspends while it runs).
 
-## Terminal multiplexers (zellij / tmux)
+## Terminal multiplexers (zellij / tmux) and remote sessions
 
 Inside a multiplexer, cobalt runs against a pseudo-terminal rather than a real Win32
 console, and Terminal.Gui's default `windows` driver (Win32 console APIs) drops
@@ -193,7 +202,15 @@ keystrokes and breaks the `$EDITOR` handoff there. cobalt **auto-detects zellij 
 tmux** (`ZELLIJ`/`TMUX`) and switches to the stdio/ANSI `dotnet` driver, so it works
 there with no configuration.
 
-For any other multiplexer, or to override, set `COBALT_DRIVER`:
+**Remote / RDP sessions** (including a Windows 365 Cloud PC) get the same treatment:
+cobalt detects them via `SESSIONNAME=RDP-*` and switches to `dotnet`. On the `windows`
+driver a remote host paints through the Win32 console API, which ConPTY must re-encode as
+VT for a terminal that renders in software with no GPU — over a latency link that
+translation is what makes navigation feel laggy and pins the terminal process's CPU (not
+cobalt's). The `dotnet` driver writes VT directly and avoids it. A physical console is
+unchanged.
+
+For any environment this misses, or to override, set `COBALT_DRIVER`:
 
 ```sh
 export COBALT_DRIVER=dotnet     # bash/zsh
@@ -247,8 +264,13 @@ dotnet run --project src/Cobalt -c Release -- auth status
 dotnet run --project src/Cobalt -c Release            # launch the TUI
 ```
 
-**Or install your build as the `cobalt` global tool.** **Watch the cache:** the package
-version is fixed (`0.2.0`) and NuGet caches packages *by version*, so `dotnet tool
+**Keep the `-c Release`.** A bare `dotnet run` builds **Debug**, which is measurably slower on the
+render path — a full re-render of a 10k-line diff measures ~35 ms in Debug against ~13 ms in
+Release, so Debug misses the ~16 ms frame budget on every redraw and the UI feels laggy. Judge
+responsiveness only from a Release build; a Debug build tells you nothing about how it will feel.
+
+**Or install your build as the `cobalt` global tool.** **Watch the cache:** an unreleased build
+packs as `0.3.0-alpha` every time and NuGet caches packages *by version*, so `dotnet tool
 update`/`install --add-source` can silently reuse a **stale** cached build — which looks
 exactly like "my change didn't take". Give each build a unique version so the install
 can't hit the cache:
@@ -256,14 +278,19 @@ can't hit the cache:
 ```sh
 dotnet tool uninstall -g cobalt-tui
 dotnet pack src/Cobalt/Cobalt.csproj -c Release -o ./artifacts \
-  -p:PackageVersion=0.2.0-local1 -p:PublishRepositoryUrl=false -p:EmbedUntrackedSources=false
-dotnet tool install -g cobalt-tui --add-source ./artifacts --version 0.2.0-local1
+  -p:PackageVersion=0.3.0-local1 -p:PublishRepositoryUrl=false -p:EmbedUntrackedSources=false
+dotnet tool install -g cobalt-tui --add-source ./artifacts --version 0.3.0-local1
 ```
 
 Bump `local1` → `local2` … on each rebuild. To keep the same version instead, delete the
 cached package first: `rm -rf ~/.nuget/packages/cobalt-tui` (Windows:
-`rmdir /s /q "%USERPROFILE%\.nuget\packages\cobalt-tui"`). Note `cobalt --version` prints
-only `0.2.0` — it can't tell you which commit you're on; use `git log --oneline -1` for that.
+`rmdir /s /q "%USERPROFILE%\.nuget\packages\cobalt-tui"`).
+
+**Check what you're actually running:** `cobalt --version` prints the version *and* the commit —
+`0.3.0-alpha+fd36e1b` for a branch build, a clean `0.3.0+<sha>` only for a tagged release. The
+`-alpha` marks any build that isn't a release, so a dev build can't be mistaken for one. If the
+sha isn't the commit you expect, you're running a stale install — that mistake is invisible
+without this, because every build between two releases carries the same number.
 
 ### Before pushing
 
@@ -275,3 +302,21 @@ dotnet clean Cobalt.slnx -c Release
 dotnet build Cobalt.slnx -c Release -p:ContinuousIntegrationBuild=true --no-incremental  # 0 warnings
 dotnet test Cobalt.slnx
 ```
+
+### Checks the test suite can't make (UAT)
+
+The suite never reaches a real Azure DevOps org, so it verifies the org-wide routes only
+"by shape" and can say nothing about latency. `tools/uat` is a read-only console harness
+that probes the live routes — org-wide lists, cross-project drill-in, the Team tab, the
+diff-review load path, and whether ADO gzips authenticated responses — and prints results
+for a human to read:
+
+```sh
+dotnet run --project tools/uat -- --context <name>
+```
+
+It needs the same `config.toml` + `az login` as cobalt, and is deliberately outside
+`Cobalt.slnx` — **CI never builds it**, so a compile error there stays hidden until you run
+it. Every call is a GET; nothing votes, comments, or mutates. Latency is noisy, so run it a
+few times rather than trusting one sample. What each probe covers, and why, is in
+[tools/uat/README.md](tools/uat/README.md).

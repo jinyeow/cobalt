@@ -48,6 +48,18 @@ was dropped before any handler ran. The record is corrected here and in the code
   driver — so cobalt "just works" under the common multiplexers with no configuration. On a
   bare console (neither var set) the default is unchanged: `null` → TG picks `windows`.
 
+- **Auto-detect a remote/RDP session and default to `dotnet` (amended 2026-07-16).** When
+  `COBALT_DRIVER` is unset and `SESSIONNAME` starts with `RDP-` (e.g. `RDP-Tcp#0`), select
+  `dotnet`. On the `windows` driver a remote session paints via the Win32 console API, and
+  ConPTY must diff that console buffer and re-encode it as VT before the terminal — which
+  renders in software on a GPU-less host — draws it; over a latency link that translation
+  dominates, and the terminal process (not cobalt) becomes the top CPU consumer while cobalt
+  itself sits near 0%. Confirmed on a Windows 365 Cloud PC (2 vCPU / 16 GB, no GPU): with
+  the default driver the terminal ran ~30–44% CPU navigating a diff; `COBALT_DRIVER=dotnet`
+  dropped it sharply and the UI became responsive. The `dotnet` driver writes VT straight to
+  stdout, skipping the console round-trip. A physical console (`SESSIONNAME=Console`) is
+  unchanged: `null` → `windows`.
+
 - **The explicit hatch is the complete backstop.** Auto-detect covers only the multiplexers
   it enumerates (zellij, tmux); screen/ssh/ConEmu/WezTerm-mux users, or anyone the detection
   misses, set `COBALT_DRIVER=dotnet`. And `COBALT_DRIVER` always wins — including

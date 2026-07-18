@@ -11,6 +11,33 @@ namespace Cobalt.Core.Ado;
 /// </summary>
 public sealed class AdoHttp(HttpClient client)
 {
+    /// <summary>
+    /// Best-effort connection warm-up: pays the cold DNS + TCP + TLS cost (~700ms to
+    /// dev.azure.com) on a cheap route so the first real API call does not. Callers
+    /// fire-and-forget it after auth.
+    ///
+    /// <para>Expected failures are swallowed, not surfaced: the warm-up has no user-visible job,
+    /// so an auth/network fault here must not reach the message bar or the crash log — the first
+    /// real request hits the same fault and reports it with proper context. Anything outside the
+    /// expected set is a bug and still propagates (ADR 0013).</para>
+    /// </summary>
+    public async Task WarmUpAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await client.GetAsync(
+                new Uri("_apis/connectionData?api-version=7.2-preview.1", UriKind.Relative),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (
+            ex is OperationCanceledException or ObjectDisposedException || AdoExceptions.IsExpected(ex))
+        {
+            // Not signed in yet, offline, or shutting down. ObjectDisposedException is the quit
+            // race: the app can dispose the connection while this request is still in flight, and
+            // a fire-and-forget fault would then log a crash for a warm-up nobody was waiting on.
+        }
+    }
+
     public async Task<T> GetJsonAsync<T>(
         string path, JsonTypeInfo<T> type, CancellationToken cancellationToken = default)
     {

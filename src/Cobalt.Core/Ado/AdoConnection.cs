@@ -1,3 +1,4 @@
+using System.Net;
 using Cobalt.Core.Auth;
 using Cobalt.Core.Config;
 using Microsoft.Extensions.Http.Resilience;
@@ -35,7 +36,19 @@ public sealed class AdoConnection : IDisposable
         {
             InnerHandler = new BearerTokenHandler(tokens)
             {
-                InnerHandler = new SocketsHttpHandler(),
+                InnerHandler = new SocketsHttpHandler
+                {
+                    // The default 60s idle timeout drops the pooled connection while the reviewer
+                    // reads a single diff, so the next keystroke re-pays the ~700ms cold
+                    // DNS + TCP + TLS. Five minutes spans a realistic reading pause; the finite
+                    // lifetime still recycles connections so DNS changes are eventually picked up
+                    // (the default is infinite).
+                    PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+                    // Default is None, which sends no Accept-Encoding at all. Whether ADO
+                    // compresses authenticated API responses is unverified — free either way.
+                    AutomaticDecompression = DecompressionMethods.All,
+                },
             },
         };
 

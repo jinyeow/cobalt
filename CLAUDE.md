@@ -97,8 +97,15 @@ xunit v3. The suite is the safety net for many headless view-level behaviors, so
 
 `tools/uat` is a separate console harness (deliberately **not** in `Cobalt.slnx`) that hits
 **live** Azure DevOps routes the headless CI build can only verify "by shape" (org-wide
-WI/PR list routes, cross-project drill-in, `reviewerId={teamGuid}`). Run it in a real
-terminal against a real org: `dotnet run --project tools/uat -- --context <name>`.
+WI/PR list routes, cross-project drill-in, `reviewerId={teamGuid}`), plus the two things a
+headless suite structurally cannot see: **round-trip latency** of the diff-review load path,
+and whether ADO **compresses authenticated responses** (`AutomaticDecompression` strips
+`Content-Encoding`, so the shipped client can't observe its own). Read-only — every probe is
+a GET. Run it in a real terminal against a real org:
+`dotnet run --project tools/uat -- --context <name>`.
+
+The split is the point: a green suite proves the load's calls are *concurrent*, never that
+they are *fast*. Perf claims about round-trips belong in UAT, not in an xunit assertion.
 
 ## Terminal.Gui gotchas (pinned 2.4.16)
 
