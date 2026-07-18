@@ -2,7 +2,55 @@
 
 ## Unreleased
 
+### Added
+- **Auto-switch to the `dotnet` driver in remote/RDP sessions.** cobalt now detects a remote
+  session (`SESSIONNAME=RDP-*`, e.g. a Windows 365 Cloud PC), like it already does for
+  zellij/tmux, and selects the stdio/ANSI `dotnet` driver instead of the Win32 `windows`
+  driver. On a remote, GPU-less host the `windows` driver's console painting is translated to
+  VT by ConPTY on every redraw — expensive over a latency link, and it drives the terminal
+  process's CPU high while cobalt itself stays near 0%. The `dotnet` driver writes VT straight
+  to stdout and skips the round-trip, so navigation stays responsive with no configuration. A
+  physical console is unchanged; `COBALT_DRIVER` still overrides. See
+  [ADR 0016](docs/adr/0016-terminal-driver-selection.md).
+
+### Changed
+- **Dev builds are prereleases, and `cobalt --version` now names the commit.** The version is
+  `0.3.0`, and any build that doesn't set `Version` explicitly — every local and branch build —
+  reports `0.3.0-alpha` and packs as `cobalt-tui.0.3.0-alpha.nupkg`. Tagged releases still pack a
+  clean `0.3.0`: the release workflow passes the tag's version, which overrides the suffix.
+  `--version` now keeps the source revision it used to discard (`0.3.0-alpha+fd36e1b`) — the number
+  alone can't identify a build, since every build between two releases shares it, so a stale
+  install was indistinguishable from a fresh one.
+
+### Fixed
+- **Comments, thread replies and mark-viewed could act on the wrong file.** Moving to a file whose
+  diff is still loading left the cursor on the new file while the previous one was still on screen.
+  Anything done in that window — adding a line comment, opening and replying to a thread, marking
+  viewed, jumping with `]t`/`[t` — used the file under the cursor rather than the file being looked
+  at, so a comment could land on a different file than the one it was written about. Everything that
+  acts on the diff now keys off the diff on screen.
+- **A failed review-thread load could look like a PR with no comments.** If fetching the review
+  threads failed while the diff itself loaded, the error was replaced by the normal file header as
+  soon as you moved to another file, and the title read `0 unresolved` — indistinguishable from a
+  clean PR, on a PR that had comments. The threads are only fetched once per diff session, so this
+  persisted silently for the whole review. The title now reads `comments unavailable` for the rest
+  of the session.
+
 ### Performance
+- **Faster PR opens.** Opening a pull request costs about three network round-trips instead of
+  five: the two file blobs are fetched concurrently rather than one after the other, and the
+  review threads are fetched alongside them instead of waiting their turn. Switching to a file
+  that isn't cached yet is one round-trip instead of two, and the background prefetch and your
+  own navigation now share a single fetch when they land on the same file rather than each
+  requesting it. See [ADR 0008](docs/adr/0008-client-side-diff-and-line-comments.md).
+- **No more stutter on large diffs.** The diff pane used to re-syntax-highlight the whole file
+  every time it redrew, so expanding a fold, searching, toggling side-by-side or landing a
+  comment stalled the UI for as long as the file was big — about 64ms on a 10,000-line file,
+  on every one of those keypresses. Each file's highlighting is now computed once and reused
+  (~0.31ms), and only the lines that actually changed are recomposed. Marking a file viewed no
+  longer rebuilds the pane at all, intra-line highlighting is capped on very long (e.g.
+  minified) lines, and the per-file stats arriving in the background now refresh the chrome
+  once per burst instead of once per file.
 - **Snappier UI.** Cut redundant redraws and re-tokenization that made navigation feel laggy:
   the diff-review pane no longer re-tokenizes the open file once per file in the PR while the
   background stats prefetch runs (it now refreshes only the title totals and file-row stats);

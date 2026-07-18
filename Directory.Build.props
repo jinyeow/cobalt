@@ -14,6 +14,11 @@
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <VersionPrefix>0.3.0</VersionPrefix>
+    <!-- Every build is a prerelease unless it sets Version explicitly. release.yml does exactly that on
+         a tag push (/p:Version=${GITHUB_REF_NAME#v}), so a tagged release still packs a clean 0.3.0 while
+         local and branch builds stay 0.3.0-alpha — a dev build can't be mistaken for, or installed over,
+         a released one. -->
+    <VersionSuffix>alpha</VersionSuffix>
     <Authors>jinyeow</Authors>
     <RepositoryUrl>https://github.com/jinyeow/cobalt</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

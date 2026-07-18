@@ -14,11 +14,20 @@ public static class IntraLineDiff
     private static readonly Differ Differ = new();
     private static readonly WordChunker Chunker = new();
     private const double MaxChangedRatio = 0.60;
+    private const int MaxLineLength = 2000;
 
     public static (IReadOnlyList<LineSpan> OldSpans, IReadOnlyList<LineSpan> NewSpans) Compute(
         string oldLine, string newLine)
     {
         if (string.Equals(oldLine, newLine, StringComparison.Ordinal))
+        {
+            return ([], []);
+        }
+
+        // Length guard: Myers is ~quadratic in word count worst case on very long lines
+        // (e.g. minified/generated content). Skip the compute entirely rather than let the
+        // similarity guard below catch it only after paying the full cost.
+        if (oldLine.Length > MaxLineLength || newLine.Length > MaxLineLength)
         {
             return ([], []);
         }

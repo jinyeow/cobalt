@@ -69,6 +69,27 @@ alternate-screen/raw state that Terminal.Gui puts it in.
   caller's own token is a genuine user/dialog cancel (rethrown, silent); any other is a
   timeout, surfaced in the message bar as an expected error instead of a blank pane.
 
+- **A transient `Error` cannot carry a lasting degradation.** `Error` is cleared by the
+  next operation, so it only describes a failure the user is about to see. When a failed
+  fetch leaves a *capability* missing for longer than that, it needs its own state. The
+  diff review's review-thread fetch is the case in hand. It runs on load and again after
+  a comment or thread mutation — but a read-then-approve review triggers neither, so a
+  failed load leaves no comment markers for the whole session. Worse, the next file
+  selection publishes a diff, which overwrites the error header: a clean-looking diff and
+  a `0 unresolved` title on a pull request that *does* carry review comments, with nothing
+  on screen to say otherwise. A reviewer could approve blind.
+  `PrDiffViewModel.ThreadsUnavailable` records the degradation and the title reads
+  `comments unavailable` instead of a count, because **"no comments" and "comments
+  unknown" are different facts and a count cannot express the second**.
+  The state tracks the **most recent** thread fetch, not the first: every thread fetch
+  sets it on failure and clears it on success, so a later refresh recovers the markers and
+  the indicator, while a failed refresh after a successful load still degrades. A failure
+  of the *mutation* itself (a rejected vote, a failed comment post) is not a threads
+  problem and does not set it. The general rule: if a failure removes a capability for
+  longer than the message bar's lifetime, model the capability's absence and keep it
+  honest in both directions — do not rely on `Error` to keep saying it, and do not leave a
+  recovered capability marked absent.
+
 - **Formatting is a pure, injectable unit.** `CrashLog.Write(path, exception,
   timestamp)`/`CrashLog.Format(exception, timestamp)` take the timestamp as a
   parameter (never `DateTime.Now` internally), and the boundary itself

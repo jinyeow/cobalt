@@ -43,6 +43,8 @@ public sealed class DiffReviewDialog(
     private int _searchIndex;
     private int _lastDialogWidth = -1;
     private int _diffContentWidth = 1;
+    private readonly DiffStyleCache _styleCache = new();
+    private readonly CoalescingGate _statsRefresh = new();
 
     private CancellationToken Token => _cts.Token;
 
@@ -81,6 +83,12 @@ public sealed class DiffReviewDialog(
 
     /// <summary>Test seam: the unified-diff pane.</summary>
     internal ListView DiffPane => _diffPane;
+
+    /// <summary>Test seam: the header above the diff pane (file path and stats).</summary>
+    internal Label DiffHeader => _diffHeader;
+
+    /// <summary>Test seam: the dialog title (PR id, totals, thread state, key hints).</summary>
+    internal string Title => _dialog?.Title ?? "";
 
     /// <summary>Test seam: the inline search bar (hidden until '/').</summary>
     internal TextField SearchBar => _searchBar;
@@ -246,14 +254,16 @@ public sealed class DiffReviewDialog(
     });
 
     // Background stats prefetch: only the title totals and file-row stats changed, so refresh the
-    // chrome and skip the diff-pane rebuild — the displayed file's diff is unchanged.
-    private void OnStatsChanged() => app.Invoke(() =>
+    // chrome and skip the diff-pane rebuild — the displayed file's diff is unchanged. The prefetch
+    // raises this once per file and each refresh rebuilds the whole file tree, so a burst collapses
+    // into one queued refresh rather than one per file competing with the reviewer's keys.
+    private void OnStatsChanged()
     {
-        if (!_closed)
+        if (_statsRefresh.TryQueue())
         {
-            Render(includeDiffPane: false);
+            app.Invoke(RunQueuedStatsRefresh);
         }
-    });
+    }
 
     private void OnViewportChanged(object? sender, Terminal.Gui.ViewBase.DrawEventArgs e)
     {
@@ -717,11 +727,15 @@ public sealed class DiffReviewDialog(
     /// <summary>]t/[t: move the diff-pane selection to the next/previous commented line, count-aware.</summary>
     private void NavThread(bool forward, int count)
     {
-        if (vm.CurrentDiff is not { Lines.Count: > 0 } diff)
+        if (vm.CurrentDiff is not { Lines.Count: > 0 } diff || vm.CurrentDiffPath is not { } path)
         {
             return;
         }
-        bool HasThread(int i) => vm.ThreadsForDiffLine(diff.Lines[i]).Count > 0;
+        // Looked up once, then probed by set: the predicate runs on every line of the file, and
+        // scanning every thread per line (allocating a list each time) made ]t/[t cost O(lines ×
+        // threads) per keypress. Keyed on the displayed file, like the pane it navigates.
+        var (commentedLeft, commentedRight) = vm.CommentedLinesFor(path);
+        bool HasThread(int i) => DiffThreadAnchor.HasThread(diff.Lines[i], commentedLeft, commentedRight);
         var from = CurrentUnifiedLine();
         var target = forward
             ? DiffNavigator.NextThread(diff.Lines, from, HasThread, count)
@@ -773,24 +787,26 @@ public sealed class DiffReviewDialog(
     /// <summary>m: mark the file shown in the diff pane viewed (a ✓ in the tree).</summary>
     private void MarkCurrentViewed()
     {
-        if (vm.SelectedFile?.Path is not { } path)
+        // The displayed file, not the selected one: "I have reviewed this" is a claim about what
+        // the reviewer is looking at, and during a select those are different files.
+        if (vm.CurrentDiffPath is not { } path)
         {
             return;
         }
         vm.MarkViewed(path);
-        Render();
+        Render(includeDiffPane: false);
         log($"marked viewed: {path}");
     }
 
     /// <summary>M: mark the file shown in the diff pane unviewed (clears its ✓ in the tree).</summary>
     private void MarkCurrentUnviewed()
     {
-        if (vm.SelectedFile?.Path is not { } path)
+        if (vm.CurrentDiffPath is not { } path)
         {
             return;
         }
         vm.MarkUnviewed(path);
-        Render();
+        Render(includeDiffPane: false);
         log($"marked unviewed: {path}");
     }
 
@@ -896,14 +912,58 @@ public sealed class DiffReviewDialog(
         _diffPane.SelectedItem = Math.Clamp(target, 0, source.Count - 1);
     }
 
-    /// <summary>The dialog title: PR id, running +Σ/-Σ diff totals, unresolved count, then the key hints.</summary>
+    /// <summary>
+    /// The dialog title: PR id, running +Σ/-Σ diff totals, thread state, then the key hints.
+    /// When the review threads could not be loaded they stay unloaded for the session, and every
+    /// file then paints without comment markers — indistinguishable from a file with no comments.
+    /// Reporting "0 unresolved" there would be an outright lie the reviewer could approve on, so
+    /// the count is replaced by the reason: the markers are unknown, not absent. The title carries
+    /// it because it is the one thing on screen on every file, at all times, and it is where the
+    /// false count lived.
+    /// </summary>
     private string TitleFor() =>
-        $"diff review !{vm.PrId}  +{vm.TotalAdditions} -{vm.TotalDeletions}  {vm.UnresolvedThreadCount} unresolved — " +
+        $"diff review !{vm.PrId}  +{vm.TotalAdditions} -{vm.TotalDeletions}  " +
+        $"{(vm.ThreadsUnavailable ? "comments unavailable" : $"{vm.UnresolvedThreadCount} unresolved")} — " +
         "q close · Tab panes · h/l scroll · [f/]f file · [c/]c hunk · [t/]t thread · [v/]v unviewed · / search · n/N · " +
         "z fold · e/E context · s split · c comment · o thread · gb branch · v vote · m viewed · T filter · ? keys";
 
-    /// <summary>Test seam: refresh title totals and file-row stats without re-tokenizing the diff.</summary>
-    internal void RefreshStats() => Render(includeDiffPane: false);
+    /// <summary>
+    /// The refresh <see cref="OnStatsChanged"/> queues: reopen the gate, then repaint the chrome
+    /// (title totals, file-row stats) without re-tokenizing the unchanged diff. Internal so tests
+    /// can run the queued work directly — a headless <c>Application</c> never drains Invoke.
+    /// </summary>
+    internal void RunQueuedStatsRefresh() =>
+        _statsRefresh.Run(() =>
+        {
+            if (!_closed)
+            {
+                Render(includeDiffPane: false);
+            }
+        });
+
+    /// <summary>
+    /// The header above the diff pane: which file is on screen and its stats. Keyed on the diff's
+    /// own path so it never labels one file's diff with another's name. Precedence matches what a
+    /// full render has always produced — a diff on screen wins, then loading, then an error, and
+    /// with none of those the header keeps whatever it last said.
+    /// </summary>
+    private void WriteDiffHeader()
+    {
+        if (vm.CurrentDiff is { } diff && vm.CurrentDiffPath is { } path)
+        {
+            var mode = _sideBySide ? "  (side-by-side)" : "";
+            _diffHeader.Text = $" {path}   +{diff.Additions} -{diff.Deletions}" +
+                (diff.IsBinary ? "  (binary)" : diff.TooLarge ? "  (too large)" : mode);
+        }
+        else if (vm.IsLoading)
+        {
+            _diffHeader.Text = " loading diff…";
+        }
+        else if (vm.Error is { } e)
+        {
+            _diffHeader.Text = $" error: {e}";
+        }
+    }
 
     /// <param name="includeDiffPane">
     /// When <see langword="false"/>, refresh only the chrome (title totals, file-row stats) and
@@ -918,32 +978,27 @@ public sealed class DiffReviewDialog(
             _dialog.Title = TitleFor();
         }
 
-        if (vm.IsLoading)
-        {
-            _diffHeader.Text = " loading diff…";
-        }
-        else if (vm.Error is { } e)
-        {
-            _diffHeader.Text = $" error: {e}";
-        }
+        // Set in one place, on every render: a partial (chrome-only) refresh describes the same
+        // file as a full one, so marking a file viewed cannot leave a stale error where the path
+        // belongs. The error text is the fallback for having no diff to show — an expected failure
+        // reaches the reviewer through the message bar (ADR 0013), which is its surface.
+        WriteDiffHeader();
 
         // Rebuild the file tree, keeping the highlight on the displayed file's row.
         RepointIfFilteredOut();
         RebuildFileList(SelectedFileNodePath());
 
-        if (includeDiffPane && vm.CurrentDiff is { } diff)
+        // Everything below describes the diff on screen, so it keys off the path that diff came
+        // from — never the file-tree cursor. SelectFileAsync moves the cursor to the new file and
+        // publishes its diff only once fetched, so in that window vm.SelectedFile is already the
+        // next file while this is still the previous one; keying on it would anchor this file's
+        // lines to the next file's comment threads.
+        if (includeDiffPane && vm.CurrentDiff is { } diff && vm.CurrentDiffPath is { } diffPath)
         {
-            var file = vm.SelectedFile;
-            var mode = _sideBySide ? "  (side-by-side)" : "";
-            _diffHeader.Text = file is null
-                ? ""
-                : $" {file.Path}   +{diff.Additions} -{diff.Deletions}" +
-                  (diff.IsBinary ? "  (binary)" : diff.TooLarge ? "  (too large)" : mode);
-
             // Rebuild the diff pane (thread markers may have changed after a comment),
             // but preserve the reviewer's line position on a same-file refresh; reset
-            // to the top only when the selected file actually changed.
-            var sameFile = file?.Path == _renderedDiffPath;
+            // to the top only when the displayed file actually changed.
+            var sameFile = diffPath == _renderedDiffPath;
             var keepLine = sameFile ? _diffPane.SelectedItem : 0;
             if (!sameFile)
             {
@@ -951,10 +1006,15 @@ public sealed class DiffReviewDialog(
                 _searchQuery = null;
                 _searchMatches = [];
             }
-            _renderedDiffPath = file?.Path;
+            _renderedDiffPath = diffPath;
 
-            var language = LanguageDetector.FromPath(file?.Path ?? "");
-            bool HasThread(DiffLine l) => vm.ThreadsForDiffLine(l).Count > 0;
+            // Point the style cache at this render's inputs: it reuses every composition whose
+            // line, language and thread marker are unchanged, so a render that only expands a
+            // fold, filters the tree or lands a comment no longer re-tokenizes the whole file.
+            // The commented lines are looked up once here rather than scanned per line.
+            var language = LanguageDetector.FromPath(diffPath);
+            var (commentedLeft, commentedRight) = vm.CommentedLinesFor(diffPath);
+            _styleCache.Prepare(diff.Lines, language, commentedLeft, commentedRight);
             var rows = new List<DiffRow>();
             List<StyledLine> styled;
             if (_sideBySide)
@@ -967,7 +1027,7 @@ public sealed class DiffReviewDialog(
                     rows.Add(new DiffRow(null, r.LeftIndex, r.RightIndex, null, null));
                 }
                 var columnWidth = Math.Max(1, (_diffContentWidth - SideBySideComposer.Separator.Length) / 2);
-                styled = [.. SideBySideComposer.Compose(diff.Lines, sbs, language, HasThread, columnWidth)];
+                styled = [.. _styleCache.SideBySide(sbs, columnWidth)];
             }
             else
             {
@@ -985,10 +1045,12 @@ public sealed class DiffReviewDialog(
                 styled = [];
                 foreach (var foldRow in _foldState.Rows())
                 {
-                    if (foldRow.Line is { } line && foldRow.LineIndex is { } li)
+                    if (foldRow.Line is not null && foldRow.LineIndex is { } li)
                     {
                         rows.Add(new DiffRow(li, null, null, null, null));
-                        var composed = DiffLineStyler.Compose(line, SyntaxTokenizer.Tokenize(line.Text, language), HasThread(line));
+                        // Search hits stay an overlay on the cached composition: a query change
+                        // must not invalidate a line's styling, only decorate it.
+                        var composed = _styleCache.Unified(li);
                         if (hitsByLine is not null && hitsByLine.TryGetValue(li, out var spans))
                         {
                             composed = DiffLineStyler.WithSearchHits(composed, spans, composed.Runs[0].Length);
@@ -1189,4 +1251,30 @@ internal sealed record DiffRow(int? LineIndex, int? LeftIndex, int? RightIndex, 
 {
     /// <summary>The unified diff-line this row anchors to (new/right side preferred); null for a fold marker.</summary>
     public int? Anchor => LineIndex ?? RightIndex ?? LeftIndex;
+}
+
+/// <summary>
+/// Collapses a burst of events into a single queued refresh: the first caller to
+/// <see cref="TryQueue"/> owns the refresh, every caller after it is told one is already coming,
+/// and <see cref="Run"/> reopens the gate before running it. Interlocked because the raising
+/// thread and the running (UI) thread are not the same.
+/// </summary>
+internal sealed class CoalescingGate
+{
+    private int _queued;
+
+    /// <summary>True if the caller should queue the refresh; false if one is already queued.</summary>
+    public bool TryQueue() => Interlocked.CompareExchange(ref _queued, 1, 0) == 0;
+
+    /// <summary>
+    /// Runs the queued refresh, reopening the gate first so an event raised while
+    /// <paramref name="refresh"/> is running queues a new one instead of being dropped. The order
+    /// lives here rather than at the call site because it is the whole point of the gate and
+    /// nothing at the call site would reveal it being wrong.
+    /// </summary>
+    public void Run(Action refresh)
+    {
+        Interlocked.Exchange(ref _queued, 0);
+        refresh();
+    }
 }

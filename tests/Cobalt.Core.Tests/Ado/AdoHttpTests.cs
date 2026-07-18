@@ -25,6 +25,55 @@ public class AdoHttpTests : IDisposable
     }
 
     [Fact]
+    public async Task WarmUp_Requests_The_ConnectionData_Route()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"authenticatedUser":{}}""");
+
+        await Client(handler).WarmUpAsync(TestContext.Current.CancellationToken);
+
+        // The warm-up exists to pay DNS + TCP + TLS before the first real call, so it must actually
+        // reach the org over the same client — and on a route that answers 200, not 404.
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal(
+            "https://dev.azure.com/contoso/_apis/connectionData?api-version=7.2-preview.1",
+            request.RequestUri?.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task WarmUp_Swallows_An_Expected_Failure()
+    {
+        var handler = new FakeHttpHandler().Respond(_ => throw new HttpRequestException("no dns"));
+
+        // Callers fire-and-forget the warm-up, so a throw here would surface as a phantom
+        // crash-log entry with no message bar. The first real call reports the same fault properly.
+        await Client(handler).WarmUpAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task WarmUp_Swallows_An_Auth_Failure_Rather_Than_Surfacing_It()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.Unauthorized, """{"message":"TF400813: not authorized"}""");
+
+        // A warm-up firing before the user has a usable token must stay invisible: the real
+        // sign-in path owns that message.
+        await Client(handler).WarmUpAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task WarmUp_Swallows_The_Quit_Race_On_A_Disposed_Connection()
+    {
+        var httpClient = new HttpClient(new FakeHttpHandler().Respond(HttpStatusCode.OK, "{}"))
+        {
+            BaseAddress = new Uri("https://dev.azure.com/contoso/"),
+        };
+        var http = new AdoHttp(httpClient);
+        httpClient.Dispose(); // the app quit while the warm-up was still in flight
+
+        await http.WarmUpAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task GetJson_Deserializes_CamelCase_Payload()
     {
         var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,

@@ -17,12 +17,14 @@ public class DriverResolutionTests
         EnvVars(cobaltDriver: value);
 
     private static Func<string, string?> EnvVars(
-        string? cobaltDriver = null, string? zellij = null, string? tmux = null) =>
+        string? cobaltDriver = null, string? zellij = null, string? tmux = null,
+        string? sessionName = null) =>
         name => name switch
         {
             "COBALT_DRIVER" => cobaltDriver,
             "ZELLIJ" => zellij,
             "TMUX" => tmux,
+            "SESSIONNAME" => sessionName,
             _ => null,
         };
 
@@ -90,6 +92,38 @@ public class DriverResolutionTests
     public void No_Override_And_No_Multiplexer_Is_Null()
     {
         Assert.Null(CobaltTuiApp.ResolveDriver(EnvVars(), Known));
+    }
+
+    [Theory]
+    [InlineData("RDP-Tcp#0")]
+    [InlineData("RDP-Tcp#42")]
+    [InlineData("rdp-tcp#0")] // case-insensitive: the prefix is the signal, not its casing
+    public void Rdp_Session_Selects_The_Dotnet_Driver(string sessionName)
+    {
+        // A remote/RDP session (e.g. a Windows 365 Cloud PC) paints through ConPTY's
+        // console-buffer translation on the Win32 'windows' driver — expensive over a
+        // latency link on a GPU-less host. The stdio/ANSI 'dotnet' driver skips it.
+        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(EnvVars(sessionName: sessionName), Known));
+    }
+
+    [Fact]
+    public void Console_Session_Stays_On_The_Default_Driver()
+    {
+        // A physical console (SESSIONNAME=Console) is unchanged: null → TG picks 'windows'.
+        Assert.Null(CobaltTuiApp.ResolveDriver(EnvVars(sessionName: "Console"), Known));
+    }
+
+    [Fact]
+    public void Explicit_Value_Overrides_Rdp_Detection()
+    {
+        // COBALT_DRIVER=windows forces the Win32 driver even in a remote session.
+        Assert.Equal("windows", CobaltTuiApp.ResolveDriver(EnvVars(cobaltDriver: "windows", sessionName: "RDP-Tcp#0"), Known));
+    }
+
+    [Fact]
+    public void Rdp_Session_Without_A_Dotnet_Driver_Falls_Back_To_Null()
+    {
+        Assert.Null(CobaltTuiApp.ResolveDriver(EnvVars(sessionName: "RDP-Tcp#0"), ["windows", "ansi"]));
     }
 
     [Fact]

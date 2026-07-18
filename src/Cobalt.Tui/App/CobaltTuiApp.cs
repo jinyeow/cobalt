@@ -38,6 +38,13 @@ public static class CobaltTuiApp
             [.. config.Contexts.Keys.Order(StringComparer.Ordinal)], context.Name, context.PrScope, config.Theme);
 
         using var connection = AdoConnection.Create(context, tokens);
+
+        // Open the connection while the UI builds, so the first real call skips the ~700ms cold
+        // DNS + TCP + TLS. Dropped on the floor deliberately rather than routed through
+        // FireAndForget: WarmUpAsync is silent by contract, and FireAndForget would report a
+        // warm-up fault to the message bar and the crash log — the two things it must never do.
+        _ = connection.Http.WarmUpAsync();
+
         var workItems = new WorkItemStoreAdapter(new WorkItemsApi(connection.Http, context), context.PrScope);
 
         // Resolve the signed-in user once and share it: the status bar and the PR
@@ -75,16 +82,18 @@ public static class CobaltTuiApp
     /// <summary>
     /// Resolves the Terminal.Gui driver. An explicit <c>COBALT_DRIVER</c> wins (matched
     /// case-insensitively against <paramref name="knownDrivers"/>, returned canonical; an
-    /// unknown value throws an actionable <see cref="ConfigException"/>). Otherwise, if a
-    /// terminal multiplexer is detected (<c>ZELLIJ</c>/<c>TMUX</c>), the <c>dotnet</c> driver
-    /// is selected. Failing both, <see langword="null"/> lets TG auto-detect (<c>windows</c>
-    /// on Windows).
+    /// unknown value throws an actionable <see cref="ConfigException"/>). Otherwise the
+    /// <c>dotnet</c> driver is selected when a terminal multiplexer (<c>ZELLIJ</c>/<c>TMUX</c>)
+    /// or a remote/RDP session (<c>SESSIONNAME=RDP-*</c>) is detected. Failing all of these,
+    /// <see langword="null"/> lets TG auto-detect (<c>windows</c> on Windows).
     ///
     /// <para>The Win32-console <c>windows</c> driver is unreliable through a multiplexer's
-    /// pseudo-terminal — it drops keystrokes and mishandles the editor suspend/resume — so
-    /// under zellij/tmux cobalt defaults to the stdio/ANSI <c>dotnet</c> driver. Set
-    /// <c>COBALT_DRIVER</c> explicitly to override (e.g. <c>=windows</c> to force it back, or
-    /// for a multiplexer this detection misses). See ADR 0016.</para>
+    /// pseudo-terminal — it drops keystrokes and mishandles the editor suspend/resume — and
+    /// under a remote session its console-buffer painting is translated to VT by ConPTY,
+    /// which is expensive over a latency link on a GPU-less host. In both cases cobalt
+    /// defaults to the stdio/ANSI <c>dotnet</c> driver, which writes VT straight to stdout.
+    /// Set <c>COBALT_DRIVER</c> explicitly to override (e.g. <c>=windows</c> to force it back,
+    /// or for an environment this detection misses). See ADR 0016.</para>
     /// </summary>
     internal static string? ResolveDriver(Func<string, string?> env, IReadOnlyCollection<string> knownDrivers)
     {
@@ -98,7 +107,12 @@ public static class CobaltTuiApp
         }
 
         var inMultiplexer = !string.IsNullOrEmpty(env("ZELLIJ")) || !string.IsNullOrEmpty(env("TMUX"));
-        return inMultiplexer
+        // A remote/RDP session (SESSIONNAME=RDP-Tcp#N, e.g. a Windows 365 Cloud PC) paints
+        // through ConPTY's console-buffer→VT translation on the 'windows' driver — measurably
+        // expensive over a latency link on a GPU-less host, where the terminal renders in
+        // software. The stdio/ANSI 'dotnet' driver writes VT straight to stdout and skips it.
+        var inRemoteSession = env("SESSIONNAME")?.StartsWith("RDP-", StringComparison.OrdinalIgnoreCase) == true;
+        return inMultiplexer || inRemoteSession
             // FirstOrDefault, not First: if 'dotnet' is somehow unregistered, fall back to
             // TG's default (null) rather than throwing into the crash boundary.
             ? knownDrivers.FirstOrDefault(d => d.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
