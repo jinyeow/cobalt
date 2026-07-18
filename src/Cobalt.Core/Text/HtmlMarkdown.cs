@@ -14,9 +14,11 @@ public static partial class HtmlMarkdown
 {
     private static readonly ReverseMarkdown.Converter ToMd = new(new ReverseMarkdown.Config
     {
-        UnknownTags = ReverseMarkdown.Config.UnknownTagsOption.PassThrough,
+        // ReverseMarkdown 6 moved these onto nested option objects (the old flat
+        // UnknownTags/RemoveComments are [Obsolete]); GithubFlavored stayed top-level.
+        Tags = { Unknown = ReverseMarkdown.Config.UnknownTagsOption.PassThrough },
         GithubFlavored = true,
-        RemoveComments = true,
+        Formatting = { RemoveComments = true },
     });
 
     private static readonly MarkdownPipeline MdPipeline =
