@@ -32,6 +32,73 @@ public class SyntaxTokenizerTests
     }
 
     [Fact]
+    public void Classifying_Identifiers_Allocates_No_Per_Word_Substring()
+    {
+        // ALGO-3: keyword membership is tested against the line span directly, so an
+        // identifier-heavy line must allocate no more than a substring-free control of the
+        // identical token structure (a number word per slot). The only difference between
+        // the two lines is the per-identifier substring the old path built to probe the set.
+        const int words = 200;
+        var identifiers = string.Join(" ", Enumerable.Repeat("ab", words));
+        var numbers = string.Join(" ", Enumerable.Repeat("12", words));
+
+        SyntaxTokenizer.Tokenize(identifiers, Language.CSharp); // warm up
+        SyntaxTokenizer.Tokenize(numbers, Language.CSharp);
+
+        var idAlloc = AllocatedBy(() => SyntaxTokenizer.Tokenize(identifiers, Language.CSharp));
+        var numAlloc = AllocatedBy(() => SyntaxTokenizer.Tokenize(numbers, Language.CSharp));
+
+        Assert.True(idAlloc <= numAlloc + 64,
+            $"identifier path allocated {idAlloc} vs substring-free control {numAlloc}");
+    }
+
+    private static long AllocatedBy(Action action)
+    {
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        action();
+        return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
+
+    [Fact]
+    public void Repeated_Tokenize_Does_Not_Rebuild_The_Language_Spec()
+    {
+        // ALGO-4: the (keywords, line-comment, quotes) spec is constant per language, so
+        // building a fresh LangSpec + quotes array on every call is pure churn. A short line
+        // makes the token list tiny, so a per-call spec allocation would dominate — the bound
+        // sits below the per-call cost of rebuilding it.
+        const string line = "if";
+        const int iterations = 4000;
+
+        for (var i = 0; i < 50; i++)
+        {
+            SyntaxTokenizer.Tokenize(line, Language.CSharp); // warm up
+        }
+
+        var allocated = AllocatedBy(() =>
+        {
+            for (var i = 0; i < iterations; i++)
+            {
+                SyntaxTokenizer.Tokenize(line, Language.CSharp);
+            }
+        });
+
+        var perCall = (double)allocated / iterations;
+        // The token list for a 2-char line measures ~80 B/call; a rebuilt LangSpec + quotes array
+        // added ~62 B (~142 B total). 128 sits clear of both, so a struct-layout tweak to the list
+        // cost won't false-positive while a rebuilt spec still trips it.
+        Assert.True(perCall < 128, $"per-call allocation {perCall:F1} bytes suggests the spec is rebuilt each call");
+    }
+
+    [Fact]
+    public void SyntaxToken_Is_A_Value_Type()
+    {
+        // ALGO-2: a per-token heap object on every code line is pure churn; the token is a
+        // tiny immutable (Start, Length, Kind) triple, so it lives inline in the backing
+        // array as a struct. Value equality (used across the suite) is preserved.
+        Assert.True(typeof(SyntaxToken).IsValueType);
+    }
+
+    [Fact]
     public void Empty_Line_Yields_No_Tokens()
     {
         Assert.Empty(SyntaxTokenizer.Tokenize("", Language.CSharp));

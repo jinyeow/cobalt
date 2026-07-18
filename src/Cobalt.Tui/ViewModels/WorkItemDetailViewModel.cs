@@ -61,8 +61,15 @@ public sealed class WorkItemDetailViewModel(IWorkItemStore store, long id, strin
             DescriptionMarkdown = analysis.Markdown;
             DescriptionLossy = analysis.Lossy;
 
-            Comments = await store.GetCommentsAsync(id, _project, ct).ConfigureAwait(false);
-            AvailableStates = await store.GetStatesAsync(Item.WorkItemType, _project, ct).ConfigureAwait(false);
+            // Comments and the available-states list are independent per-project reads: run them
+            // together so the detail pane opens a round-trip sooner instead of back-to-back. WhenAll
+            // surfaces the first fault and observes both, so one failing cannot orphan the other onto
+            // the crash-log hook (ADR 0013).
+            var commentsTask = store.GetCommentsAsync(id, _project, ct);
+            var statesTask = store.GetStatesAsync(Item.WorkItemType, _project, ct);
+            await Task.WhenAll(commentsTask, statesTask).ConfigureAwait(false);
+            Comments = await commentsTask.ConfigureAwait(false);
+            AvailableStates = await statesTask.ConfigureAwait(false);
         }
         catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
         {

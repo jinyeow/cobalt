@@ -122,6 +122,34 @@ public class DiffListDataSourceTests
     }
 
     [Fact]
+    public void Render_Caches_Unclipped_Run_Slices_Across_Redraws()
+    {
+        // An unclipped run (viewportX 0, fits in width) must be sliced once and the substring
+        // reused on every later repaint of that row (vertical scroll / selection move that does
+        // not rebuild the source), rather than re-Substring'd every frame (RENDER-3).
+        ThemeService.Enable();
+        ThemeService.Apply(ThemeResolver.Resolve(Cobalt.Core.Config.ThemeChoice.Dark, OsTheme.Unknown));
+        var runs = new List<StyledRun>
+        {
+            new(0, 2, new RunStyle(TokenKind.Plain, DiffLineKind.Added, Emphasis: false, IsGutter: true)),
+            new(2, 6, new RunStyle(TokenKind.Identifier, DiffLineKind.Added, Emphasis: false, IsGutter: false)),
+        };
+        var source = new DiffListDataSource([new StyledLine("+ abcdef", runs)]);
+        var listView = new ListView { SchemeName = "Base", Width = 40, Height = 1 };
+
+        source.Render(listView, selected: false, item: 0, col: 0, row: 0, width: 40, viewportX: 0);
+        // Capture the string instance now — reading the slot again after render 2 would alias the
+        // live array, so a ??=→= regression (re-Substring every frame) would still look "Same".
+        var sliceAfterFirst = source.RunSlicesFor(0)?[1];
+        source.Render(listView, selected: false, item: 0, col: 0, row: 0, width: 40, viewportX: 0);
+        var sliceAfterSecond = source.RunSlicesFor(0)?[1];
+
+        Assert.NotNull(sliceAfterFirst);
+        Assert.Same(sliceAfterFirst, sliceAfterSecond); // reused the cached substring, not re-cut
+        Assert.Equal("abcdef", sliceAfterSecond);       // and it is exactly the run's text
+    }
+
+    [Fact]
     public void Render_Resolves_Each_Distinct_Role_At_Most_Once_Per_Row()
     {
         // A row is a gutter run plus six code runs spanning only two distinct token kinds

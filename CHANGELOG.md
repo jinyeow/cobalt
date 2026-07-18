@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Changed
+- **The work-item list is capped at the first 200 assigned items**, matching the existing
+  pull-request-list cap: a heavy assignee no longer pulls an unbounded id set (and that many
+  batch reads). See "Known limitations" in the README.
+- **PR tabs, and the work-item/PR sections themselves, now keep what they last loaded when you
+  switch away and back.** Revisiting a tab or section paints its last-known rows instantly and
+  refreshes them in the background, instead of blanking the pane and re-fetching every time —
+  rows can be a few seconds stale until the refresh lands; `r` still forces a fresh fetch, and a
+  `:scope`/context change still clears the cache. See
+  [ADR 0008](docs/adr/0008-client-side-diff-and-line-comments.md).
+
+### Performance
+- **Diff review does less work per keystroke.** Folding, searching, and toggling
+  unified/side-by-side no longer rebuild the file tree — only actions that change what's shown
+  (resolve, mark-viewed, filter, stats refresh) still do. The unresolved-comment marker is now
+  precomputed once per thread refresh instead of scanning every file's threads on each render,
+  and the intra-line word diff skips its expensive comparison on line pairs whose lengths are
+  too mismatched for the result to be useful. Vim movement now redraws only the moved list
+  instead of repainting the whole app on every keystroke (needs both-driver UAT before it's
+  fully trusted — see [ADR 0016](docs/adr/0016-terminal-driver-selection.md)). Per-keystroke
+  input handling (the key router and tokenizer) no longer allocates on the hot path. These are
+  structural fixes verified by allocation/call-count tests, not measured against a live org.
+- **Fewer round-trips on work items.** Opening the work-item detail now fetches its comments and
+  allowed states concurrently instead of one after another; work-item-type states are cached
+  per project instead of re-fetched on every open; the cold-start identity check makes one
+  `connectionData` call instead of two; JSON responses are stream-parsed instead of buffered to
+  an intermediate string first.
+
 ### Added
 - **Auto-switch to the `dotnet` driver in remote/RDP sessions.** cobalt now detects a remote
   session (`SESSIONNAME=RDP-*`, e.g. a Windows 365 Cloud PC), like it already does for

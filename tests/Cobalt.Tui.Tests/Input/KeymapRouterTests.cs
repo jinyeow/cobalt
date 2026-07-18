@@ -313,6 +313,24 @@ public class KeymapRouterTests
         Assert.Equal(3, next.Count);
     }
 
+    // ---- INPUT-2: steady-state Feed() shouldn't allocate ----
+
+    [Fact]
+    public void Steady_State_Single_Key_Feed_Allocates_Nothing()
+    {
+        var router = new KeymapRouter(KeyBindingTable.Shared);
+        router.Feed("j", KeyScope.WorkItemList); // warm up JIT + grow the pending-buffer capacity
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+        {
+            router.Feed("j", KeyScope.WorkItemList);
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(allocated == 0, $"steady-state single-key routing must not allocate, but allocated {allocated} bytes");
+    }
+
     // ---- [ / ] PR sub-tab keys (ADR 0021) ----
 
     [Fact]

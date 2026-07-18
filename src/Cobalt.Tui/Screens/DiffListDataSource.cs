@@ -31,6 +31,17 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
     private readonly Func<DiffPalette> _palette = palette ?? (() => ThemeService.CurrentPalette);
     private static readonly int TokenKindCount = Enum.GetValues<TokenKind>().Length;
 
+    // Reused across rows so the diff pane does not allocate a Color?[] per drawn row every frame.
+    // Cleared per row (Render is single-threaded on the UI thread) so a re-render after a :theme
+    // switch re-resolves each Code* foreground rather than serving the palette it first drew under.
+    private readonly Color?[] _roleForegrounds = new Color?[TokenKindCount];
+
+    // Lazily cached per-line slices of the unclipped runs, so a row redrawn on every repaint
+    // (vertical scroll, selection move) that does not rebuild the source reuses its substrings
+    // rather than re-cutting them each frame; only clipped runs (viewportX/width) Substring fresh.
+    // Bounded by the rows actually drawn, and discarded when the source is replaced (RENDER-3).
+    private readonly string?[]?[] _runSlices = new string?[lines.Count][];
+
     public int Count => _lines.Count;
 
     /// <summary>Test seam: the composed lines this source draws, by row.</summary>
@@ -89,10 +100,13 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
         // Resolve each distinct Code* role's foreground at most once per row, not once per
         // run — a row can carry dozens of runs (e.g. many Identifier tokens) over a handful
         // of roles, and GetAttributeForRole does scheme resolution plus an event allocation.
-        var roleForegrounds = new Color?[TokenKindCount];
+        // The array is reused across rows; clear it so each row (and each redraw after a theme
+        // switch) resolves fresh.
+        Array.Clear(_roleForegrounds);
         var drawn = 0;
-        foreach (var runItem in styled.Runs)
+        for (var i = 0; i < styled.Runs.Count; i++)
         {
+            var runItem = styled.Runs[i];
             var start = Math.Max(runItem.Start, viewportX);
             var end = Math.Min(runItem.Start + runItem.Length, viewportX + width);
             if (end <= start)
@@ -103,9 +117,9 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
             // resolve it here so Map stays a pure palette mapping.
             var roleForeground = runItem.Style.IsGutter
                 ? normal.Foreground
-                : ResolveRoleForeground(listView, roleForegrounds, runItem.Style.Token);
+                : ResolveRoleForeground(listView, _roleForegrounds, runItem.Style.Token);
             listView.SetAttribute(Map(runItem.Style, normal, roleForeground, palette));
-            listView.AddStr(styled.DisplayText.Substring(start, end - start));
+            listView.AddStr(SliceFor(item, i, runItem, styled.DisplayText, start, end));
             drawn += end - start;
         }
 
@@ -118,6 +132,27 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
     {
         // Nothing owned; the source is replaced wholesale on refresh.
     }
+
+    /// <summary>
+    /// The string handed to <c>AddStr</c> for one run (there is no span overload — verified on TG
+    /// 2.4.16). When the run is fully on screen — the clamped [<paramref name="start"/>,
+    /// <paramref name="end"/>) equals the run's own [Start, Start+Length) — its slice equals the
+    /// run's text, so it is cut once and cached per line and reused on every later repaint; a
+    /// clipped run is Substring'd fresh each time.
+    /// </summary>
+    private string SliceFor(int item, int runIndex, StyledRun run, string display, int start, int end)
+    {
+        var unclipped = start == run.Start && end == run.Start + run.Length;
+        if (!unclipped)
+        {
+            return display.Substring(start, end - start);
+        }
+        var slices = _runSlices[item] ??= new string?[_lines[item].Runs.Count];
+        return slices[runIndex] ??= display.Substring(run.Start, run.Length);
+    }
+
+    /// <summary>Test seam: the cached unclipped-run slices for a row (null until the row is drawn).</summary>
+    internal IReadOnlyList<string?>? RunSlicesFor(int item) => _runSlices[item];
 
     private static string Clip(string text, int viewportX, int width)
     {

@@ -1,5 +1,6 @@
 using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
+using Terminal.Gui.Views;
 
 namespace Cobalt.Tui.Tests.App;
 
@@ -44,5 +45,27 @@ public class ShellKeyDecisionTests
 
         Assert.True(decision.Handled);
         Assert.Equal(AppCommand.MoveDown, decision.Command);
+    }
+
+    // ---- SHELL-2: SetIfChanged chrome guard ----
+
+    [Fact]
+    public void SetIfChanged_Is_A_NoOp_When_The_Text_Is_Unchanged()
+    {
+        var label = new Label { Text = "same" };
+
+        // Unchanged: must not touch the label (so RefreshChrome doesn't dirty every chrome label
+        // on every routine status/log message).
+        Assert.False(CobaltShell.SetIfChanged(label, "same"));
+        Assert.Equal("same", label.Text);
+    }
+
+    [Fact]
+    public void SetIfChanged_Updates_And_Reports_A_Change()
+    {
+        var label = new Label { Text = "old" };
+
+        Assert.True(CobaltShell.SetIfChanged(label, "new"));
+        Assert.Equal("new", label.Text);
     }
 }

@@ -19,7 +19,7 @@ public sealed class WorkItemDetailDialog
     private readonly WorkItemDetailViewModel _vm;
     private readonly WorkItemActions _actions;
     private readonly Action<string> _log;
-    private readonly KeyBindingTable _bindings = KeyBindingTable.Default();
+    private readonly KeyBindingTable _bindings = KeyBindingTable.Shared;
     private readonly KeymapRouter _router;
     private readonly CancellationTokenSource _cts = new();
     private bool _closed;
