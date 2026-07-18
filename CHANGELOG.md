@@ -59,6 +59,26 @@
   instead of re-formatting every row per count.
 
 ### Added
+- **Context keybar, showcmd, and a real tab strip** (the first slice of the
+  lazygit-inspired redesign). The bottom row now always shows the keys available in
+  the current context, generated from the live binding table so it can never drift
+  from behaviour; the status row shows an armed count or pending chord
+  (vim's showcmd) and clears it on `Esc`; the section tabs carry their `g1`/`g2`
+  jump chords; and the PR sub-tabs render as a visible tab row
+  (` [team 7] │ mine │ active`) — cycled with `[`/`]`
+  (lazygit's panel-tab keys) as well as `Tab`. See
+  [ADR 0021](docs/adr/0021-lazygit-inspired-shell-chrome.md).
+- **PR rows show the author** — a new author column between age and repo, sized to
+  the longest name in the result set (capped).
+### Changed
+- **PR sub-tabs are now team / mine / active (team default).** The personal
+  "review queue" tab left the cycle: it only ever listed PRs where *you personally*
+  are a requested reviewer and haven't voted, which is permanently empty in orgs
+  that request reviews via teams — the Team tab is the real queue there. (The
+  filter itself remains in the client for a future config-enabled view.)
+- Section tab labels no longer carry the `g1`/`g2` jump chords (UAT feedback) —
+  the chords remain discoverable via `?` help.
+- Version bumped to 0.3.0 (unreleased).
 - **Themes.** `theme = "dark" | "light" | "system"` in `config.toml` (default `dark`, the
   original look), switchable live with `:theme`. Terminal.Gui's built-in themes colour the app
   chrome + syntax highlighting; a cobalt `DiffPalette` colours the diff tints, so both recolour

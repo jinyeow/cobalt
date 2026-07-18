@@ -78,6 +78,10 @@ public static class HelpText
         AppCommand.HalfPageDown, AppCommand.HalfPageUp, AppCommand.Help, AppCommand.Back,
     ];
 
+    /// <summary>The shared one-line description for a command (the keybar's fallback vocabulary).</summary>
+    public static string Describe(AppCommand command) =>
+        Descriptions.GetValueOrDefault(command, command.ToString().ToLowerInvariant());
+
     /// <summary>Full help for the main shell: every binding visible from the scope.</summary>
     public static string For(KeyBindingTable table, KeyScope scope) =>
         Emit(table, scope, _ => true);

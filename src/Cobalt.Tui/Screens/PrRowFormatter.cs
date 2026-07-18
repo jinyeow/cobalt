@@ -8,28 +8,30 @@ namespace Cobalt.Tui.Screens;
 /// longest name present (capped), and the project column only appears when the
 /// rows actually span more than one project (the org-scoped, cross-project case).
 /// </summary>
-internal readonly record struct PrColumns(int RepoWidth, bool ShowProject, int ProjectWidth)
+internal readonly record struct PrColumns(int RepoWidth, bool ShowProject, int ProjectWidth, int AuthorWidth)
 {
     public const int MaxRepoWidth = 30;
     public const int MaxProjectWidth = 20;
+    public const int MaxAuthorWidth = 18;
 
     public static PrColumns For(IReadOnlyList<PullRequest> rows)
     {
         if (rows.Count == 0)
         {
-            return new PrColumns(0, false, 0);
+            return new PrColumns(0, false, 0, 0);
         }
         var repoWidth = Math.Min(MaxRepoWidth, rows.Max(r => r.RepositoryName.Length));
         var projects = rows.Select(r => r.ProjectName).Where(p => p.Length > 0).Distinct().ToList();
         var showProject = projects.Count > 1;
         var projectWidth = showProject ? Math.Min(MaxProjectWidth, projects.Max(p => p.Length)) : 0;
-        return new PrColumns(repoWidth, showProject, projectWidth);
+        var authorWidth = Math.Min(MaxAuthorWidth, rows.Max(r => r.Author.Length));
+        return new PrColumns(repoWidth, showProject, projectWidth, authorWidth);
     }
 }
 
 /// <summary>
 /// Pure, width-aware row formatting for the PR list. Fixed columns (id, votes, age,
-/// optional project, repo) sit left; the title takes all remaining width; an optional
+/// author, optional project, repo) sit left; the title takes all remaining width; an optional
 /// comment badge trails at the right. "Now" is injected so the age column is
 /// deterministic. Every row is exactly <c>width</c> cells.
 /// </summary>
@@ -50,6 +52,7 @@ internal static class PrRowFormatter
             RowText.Fit("!" + pr.PullRequestId, IdWidth) + " " +
             RowText.Fit(VoteSummary(pr), VoteWidth) + " " +
             AgeFormat.Since(pr.CreationDate, now).PadLeft(AgeWidth) + " " +
+            (cols.AuthorWidth > 0 ? RowText.Fit(pr.Author, cols.AuthorWidth) + " " : "") +
             (cols.ShowProject ? RowText.Fit(pr.ProjectName, cols.ProjectWidth) + " " : "") +
             RowText.Fit(pr.RepositoryName, cols.RepoWidth) + " " +
             (pr.IsDraft ? "[draft] " : "");
