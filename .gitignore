@@ -6,3 +6,6 @@ nupkg/
 .vs/
 .idea/
 TestResults/
+
+# Agent planning artifacts stay local — durable decisions go to docs/adr/, work items to GitHub issues
+.claude/

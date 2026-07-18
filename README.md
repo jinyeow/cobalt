@@ -13,6 +13,23 @@ Terminal.Gui, so the interesting logic is unit-tested (808 tests). See
 [docs/adr/0004](docs/adr/0004-terminal-gui-v2-with-viewmodels.md) and
 [0007](docs/adr/0007-vim-input-as-testable-data.md).
 
+## Contents
+
+- [Install](#install)
+- [Configure](#configure)
+- [Themes](#themes)
+- [Sign in](#sign-in)
+- [Keys (vim layer)](#keys-vim-layer)
+- [Lists](#lists)
+- [Editor](#editor)
+- [Terminal multiplexers (zellij / tmux) and remote sessions](#terminal-multiplexers-zellij--tmux-and-remote-sessions)
+- [Crash logs](#crash-logs)
+- [Known limitations](#known-limitations)
+- [Development](#development)
+  - [Testing local changes](#testing-local-changes)
+  - [Before pushing](#before-pushing)
+  - [Checks the test suite can't make (UAT)](#checks-the-test-suite-cant-make-uat)
+
 ## Install
 
 ```sh
@@ -75,6 +92,12 @@ cobalt --context oss  # launch against a named context
 
 ## Keys (vim layer)
 
+The bottom row is an always-visible **keybar** showing the keys for the current
+context (generated from the live binding table, so it never drifts), and the status
+row shows an armed count or pending chord vim-showcmd-style (`5g` while you type
+`5gg`). The tab strip names its jump chords, and the PR sub-tabs render as a real
+tab row with the active tab highlighted.
+
 `j/k` move · `gg`/`G` top/bottom · `Ctrl-d`/`Ctrl-u` half-page · `/` filter ·
 `Enter`/`o`/`l` open · `h`/`q` back/close · `gt`/`gT` next/prev section · `g1`/`g2` jump to Work Items /
 Pull Requests · `Tab` next tab · `:` command palette
@@ -83,8 +106,10 @@ Pull Requests · `Tab` next tab · `:` command palette
 `:help`, `:messages`) · `?` help ·
 `r` refresh. On a work item (the highlighted list row or its detail): `s` state ·
 `c` comment · `a` assign · `t` tags; the detail additionally has `e` edit
-description in `$EDITOR`. In the PR section: `Tab` cycles the review queue / team /
-mine / active sub-tabs; on a PR (the highlighted list row or its detail): `v` vote; the
+description in `$EDITOR`. In the PR section: `[`/`]` (or `Tab`) cycle the team /
+mine / active sub-tabs (team — PRs your teams are reviewing or teammates authored —
+is the default; a personal "awaiting my vote" queue is org-setup-dependent and no
+longer a tab); on a PR (the highlighted list row or its detail): `v` vote; the
 detail additionally has `c` reply · `g c` add a PR-level comment · `g b` open the source
 branch in the browser · `x` resolve thread · `u` reactivate · `C` complete · `A` abandon ·
 `d` open diff review, and shows the PR's **branch-policy / build status** (pass/fail, blocking).

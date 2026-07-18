@@ -11,8 +11,16 @@ public interface IPullRequestSource
 /// <summary>The PR tabs (review queue / team / mine / active) with async load, error, repo filter.</summary>
 public sealed class PrListViewModel(IPullRequestSource source)
 {
-    private static readonly PrListFilter[] TabOrder =
-        [PrListFilter.ReviewQueue, PrListFilter.Team, PrListFilter.Mine, PrListFilter.Active];
+    /// <summary>
+    /// The canonical sub-tab cycle order ([ / ] / Tab walk it). The tab strip renders
+    /// from this same array so the visible order can never diverge from the cycle.
+    /// The personal ReviewQueue is deliberately not in the cycle: orgs that request
+    /// reviews via teams (the common setup) always see it empty — the Team tab is
+    /// the real queue there, so it leads as the default. The filter itself remains
+    /// supported (adapter + API) for a future config-enabled view.
+    /// </summary>
+    internal static readonly PrListFilter[] TabOrder =
+        [PrListFilter.Team, PrListFilter.Mine, PrListFilter.Active];
 
     private IReadOnlyList<PullRequest> _all = [];
     private string _repositoryFilter = "";
@@ -30,7 +38,7 @@ public sealed class PrListViewModel(IPullRequestSource source)
     private readonly Dictionary<PrListFilter, IReadOnlyList<PullRequest>> _tabCache = [];
     private readonly object _cacheLock = new();
 
-    public PrListFilter ActiveTab { get; private set; } = PrListFilter.ReviewQueue;
+    public PrListFilter ActiveTab { get; private set; } = PrListFilter.Team;
     public bool IsLoading { get; private set; }
     public string? Error { get; private set; }
     public IReadOnlyList<PullRequest> Rows { get; private set; } = [];

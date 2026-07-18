@@ -37,6 +37,13 @@ public sealed class KeymapRouter(KeyBindingTable table)
     /// <summary>True when a count digit or a multi-key sequence is mid-entry — so Esc should clear it, not act.</summary>
     public bool HasPending => _pending.Count > 0 || _count > 0;
 
+    /// <summary>
+    /// Vim's showcmd: the armed count and pending sequence as typed ("5", "g", "5g"),
+    /// empty when idle. The status line renders this so multi-key state is visible.
+    /// </summary>
+    public string PendingDisplay =>
+        (_count > 0 ? _count.ToString() : "") + string.Concat(_pending);
+
     public KeyResult Feed(string keyToken, KeyScope scope)
     {
         if (keyToken == "Esc")

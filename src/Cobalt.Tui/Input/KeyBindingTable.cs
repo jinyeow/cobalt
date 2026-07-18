@@ -67,6 +67,11 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.WorkItemDetail, "t", AppCommand.EditTags);
 
         table.Bind(KeyScope.PullRequestList, "v", AppCommand.Vote);
+        // lazygit's panel-tab keys: [ / ] cycle the PR sub-tabs (review queue / team /
+        // mine / active). Tab / S-Tab stay as aliases until the preview workspace
+        // claims Tab for pane focus (ADR 0022).
+        table.Bind(KeyScope.PullRequestList, "]", AppCommand.NextTab);
+        table.Bind(KeyScope.PullRequestList, "[", AppCommand.PrevTab);
 
         table.Bind(KeyScope.PullRequestDetail, "v", AppCommand.Vote);
         table.Bind(KeyScope.PullRequestDetail, "c", AppCommand.Comment);
