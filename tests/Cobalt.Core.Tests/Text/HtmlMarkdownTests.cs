@@ -29,6 +29,18 @@ public class HtmlMarkdownTests
     }
 
     [Fact]
+    public void Html_To_Markdown_Strips_Comments_And_Passes_Unknown_Tags_Through()
+    {
+        // Pins the two options carried across the ReverseMarkdown 6 config API migration:
+        // Formatting.RemoveComments strips HTML comments, and Tags.Unknown = PassThrough keeps an
+        // unsupported tag verbatim (so a lossy round-trip stays visible) rather than dropping it.
+        var md = HtmlMarkdown.ToMarkdown("<p>keep<!-- drop me --> this</p><foo>inner text</foo>");
+
+        Assert.DoesNotContain("drop me", md);         // RemoveComments strips the comment
+        Assert.Contains("<foo>inner text</foo>", md); // PassThrough keeps the unknown tag as-is
+    }
+
+    [Fact]
     public void Simple_Content_Round_Trips_Cleanly()
     {
         var result = HtmlMarkdown.Analyze("<p>A simple <i>description</i> with a <a href=\"http://x\">link</a>.</p>");
