@@ -11,6 +11,33 @@ namespace Cobalt.Core.Ado;
 /// </summary>
 public sealed class AdoHttp(HttpClient client)
 {
+    /// <summary>
+    /// Best-effort connection warm-up: pays the cold DNS + TCP + TLS cost (~700ms to
+    /// dev.azure.com) on a cheap route so the first real API call does not. Callers
+    /// fire-and-forget it after auth.
+    ///
+    /// <para>Expected failures are swallowed, not surfaced: the warm-up has no user-visible job,
+    /// so an auth/network fault here must not reach the message bar or the crash log — the first
+    /// real request hits the same fault and reports it with proper context. Anything outside the
+    /// expected set is a bug and still propagates (ADR 0013).</para>
+    /// </summary>
+    public async Task WarmUpAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await client.GetAsync(
+                new Uri("_apis/connectionData?api-version=7.2-preview.1", UriKind.Relative),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (
+            ex is OperationCanceledException or ObjectDisposedException || AdoExceptions.IsExpected(ex))
+        {
+            // Not signed in yet, offline, or shutting down. ObjectDisposedException is the quit
+            // race: the app can dispose the connection while this request is still in flight, and
+            // a fire-and-forget fault would then log a crash for a warm-up nobody was waiting on.
+        }
+    }
+
     public async Task<T> GetJsonAsync<T>(
         string path, JsonTypeInfo<T> type, CancellationToken cancellationToken = default)
     {
@@ -28,11 +55,11 @@ public sealed class AdoHttp(HttpClient client)
         string contentType = "application/json",
         CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(method, new Uri(path, UriKind.Relative))
-        {
-            Content = new StringContent(
-                JsonSerializer.Serialize(body, requestType), Encoding.UTF8, contentType),
-        };
+        // Serialize straight to UTF-8 bytes (no intermediate string) and set an explicit
+        // charset=utf-8 so the wire Content-Type stays byte-identical to the old StringContent.
+        var payload = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(body, requestType));
+        payload.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType, "utf-8");
+        using var request = new HttpRequestMessage(method, new Uri(path, UriKind.Relative)) { Content = payload };
         using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
         return await ReadAsync(response, responseType, cancellationToken).ConfigureAwait(false);
     }
@@ -88,14 +115,18 @@ public sealed class AdoHttp(HttpClient client)
                 "Azure DevOps did not accept the access token (are you signed in to the right tenant?)");
         }
 
-        var bodyText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
+        // Error path only: materialize the body as text so ExtractError can pull the ADO
+        // `message` (or fall back to the status line for a non-JSON envelope like the HTML page).
         if (!response.IsSuccessStatusCode)
         {
+            var bodyText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             throw new AdoApiException(response.StatusCode, ExtractError(response, bodyText));
         }
 
-        var value = JsonSerializer.Deserialize(bodyText, type);
+        // Success path: deserialize straight from the buffered response stream (the default,
+        // untimed buffering keeps HttpClient.Timeout coverage), skipping the intermediate string.
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var value = await JsonSerializer.DeserializeAsync(stream, type, cancellationToken).ConfigureAwait(false);
         return value is not null
             ? value
             : throw new AdoApiException(response.StatusCode, "Azure DevOps returned an empty response body");

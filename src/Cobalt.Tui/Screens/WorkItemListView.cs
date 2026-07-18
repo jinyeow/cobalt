@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Cobalt.Core.Models;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
@@ -18,6 +19,7 @@ public sealed class WorkItemListView : View
     private readonly TextField _filter;
     private readonly CancellationTokenSource _cts = new();
     private int _lastWidth = -1;
+    private IReadOnlyList<WorkItem>? _renderedRows;
     private bool _filtering;
     private bool _disposed;
 
@@ -181,6 +183,9 @@ public sealed class WorkItemListView : View
 
     public bool IsFiltering => _filtering;
 
+    /// <summary>Test-only seam (MISSED-A): identity changes exactly when the row list is rebuilt.</summary>
+    internal IListDataSource? ListSource => _list.Source;
+
     internal void Render()
     {
         if (_vm.IsLoading)
@@ -206,18 +211,27 @@ public sealed class WorkItemListView : View
         }
 
         var width = _list.Viewport.Width;
+        // MISSED-A: a render can fire for a loading-state-only change (Changed with the same
+        // Rows reference), which has nothing for the row list to reflect. Skip the reformat +
+        // SetSource rebuild unless the rows or the width they're padded to actually changed.
+        var rowsChanged = width != _lastWidth || !ReferenceEquals(_vm.Rows, _renderedRows);
         _lastWidth = width;
 
-        // SetSource nulls SelectedItem in 2.4.16, so capture the reviewer's current
-        // row first and restore it (clamped) — otherwise a background reload snaps
-        // the highlight back to the top. The list is the source of truth.
-        var target = _list.SelectedItem ?? _vm.SelectedIndex;
-        var cols = WorkItemColumns.For(_vm.Rows);
-        var rows = new ObservableCollection<string>(_vm.Rows.Select(item => WorkItemRowFormatter.Format(item, width, cols)));
-        _list.SetSource(rows);
-        if (_vm.Rows.Count > 0)
+        if (rowsChanged)
         {
-            _list.SelectedItem = Math.Clamp(target, 0, _vm.Rows.Count - 1);
+            _renderedRows = _vm.Rows;
+
+            // SetSource nulls SelectedItem in 2.4.16, so capture the reviewer's current
+            // row first and restore it (clamped) — otherwise a background reload snaps
+            // the highlight back to the top. The list is the source of truth.
+            var target = _list.SelectedItem ?? _vm.SelectedIndex;
+            var cols = WorkItemColumns.For(_vm.Rows);
+            var rows = new ObservableCollection<string>(_vm.Rows.Select(item => WorkItemRowFormatter.Format(item, width, cols)));
+            _list.SetSource(rows);
+            if (_vm.Rows.Count > 0)
+            {
+                _list.SelectedItem = Math.Clamp(target, 0, _vm.Rows.Count - 1);
+            }
         }
         SetNeedsDraw();
     }

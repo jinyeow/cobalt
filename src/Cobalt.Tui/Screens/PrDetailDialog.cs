@@ -25,7 +25,7 @@ public sealed class PrDetailDialog(
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly PrActions _actions = new(app, log);
-    private readonly KeymapRouter _router = new(KeyBindingTable.Default());
+    private readonly KeymapRouter _router = new(KeyBindingTable.Shared);
     private bool _closed;
     private Dialog? _dialog;
 #pragma warning disable CS0618 // read-only scrollable pane; see WorkItemDetailDialog

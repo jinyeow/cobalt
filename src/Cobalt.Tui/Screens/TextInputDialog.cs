@@ -46,6 +46,7 @@ internal sealed class TextInputDialog
     // otherwise queue a second $EDITOR launch over the same buffer (last-write-wins clobber, ADR 0020).
     private bool _editorOpen;
 
+    /// <summary>Creates the dialog; call <see cref="Build"/> to wire the overlay before running it.</summary>
     /// <param name="app">The running application (for the default UI-thread marshal).</param>
     /// <param name="request">What to ask for (title, initial text, single- vs multi-line).</param>
     /// <param name="openInEditor">The Ctrl+E escape hatch: hands the current buffer to <c>$EDITOR</c>
@@ -167,13 +168,8 @@ internal sealed class TextInputDialog
             return;
         }
 
-        // The newline chord (multi-line only): a Ctrl/Shift modifier on Enter — which is also how the
-        // dotnet/ansi driver delivers a physical Ctrl+J (byte 0x0A), as Enter|CtrlMask (see remarks) —
-        // plus a defensive KeyCode.J|CtrlMask clause for the Win32 `windows` driver. Plain, unmodified
-        // Enter falls through to submit.
-        if (!_request.SingleLine &&
-            ((baseCode == KeyCode.Enter && (key.IsCtrl || key.IsShift)) ||
-             (baseCode == KeyCode.J && key.IsCtrl)))
+        // The newline chord is multi-line only; plain, unmodified Enter falls through to submit.
+        if (!_request.SingleLine && IsNewlineChord(key, baseCode))
         {
             key.Handled = true;
             InsertNewline();
@@ -189,6 +185,15 @@ internal sealed class TextInputDialog
 
         // Any other key (printable runes, backspace, arrows) falls through to the field.
     }
+
+    /// <summary>
+    /// True for the "insert newline" chord: a Ctrl/Shift modifier on Enter — which is also how the
+    /// dotnet/ansi driver delivers a physical Ctrl+J (byte 0x0A), as <c>Enter|CtrlMask</c> — plus a
+    /// defensive <c>KeyCode.J|CtrlMask</c> clause for the Win32 <c>windows</c> driver.
+    /// </summary>
+    private static bool IsNewlineChord(Key key, KeyCode baseCode) =>
+        (baseCode == KeyCode.Enter && (key.IsCtrl || key.IsShift)) ||
+        (baseCode == KeyCode.J && key.IsCtrl);
 
     /// <summary>Resolve exactly once (submit or cancel); cancels any in-flight Ctrl+E editor call.</summary>
     private void Close(string? result)

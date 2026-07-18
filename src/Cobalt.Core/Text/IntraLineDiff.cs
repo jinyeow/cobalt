@@ -14,11 +14,39 @@ public static class IntraLineDiff
     private static readonly Differ Differ = new();
     private static readonly WordChunker Chunker = new();
     private const double MaxChangedRatio = 0.60;
+    private const int MaxLineLength = 2000;
 
     public static (IReadOnlyList<LineSpan> OldSpans, IReadOnlyList<LineSpan> NewSpans) Compute(
         string oldLine, string newLine)
     {
+        // Length-ratio early-out: at most min(len) characters can survive as unchanged, so the
+        // longer side's changed ratio is at least (longer - shorter)/longer. When that lower
+        // bound already exceeds MaxChangedRatio the similarity guard is guaranteed to drop every
+        // span, so skip the Myers diff entirely and return the same empty result it would.
+        var longer = Math.Max(oldLine.Length, newLine.Length);
+        var shorter = Math.Min(oldLine.Length, newLine.Length);
+        if (longer > 0 && (double)(longer - shorter) / longer > MaxChangedRatio)
+        {
+            return ([], []);
+        }
+
+        return ComputeWithoutEarlyOut(oldLine, newLine);
+    }
+
+    // The full word-level compute with no length-ratio early-out. ALGO-1's early-out must
+    // return exactly this method's output on every input; it is the parity reference.
+    internal static (IReadOnlyList<LineSpan> OldSpans, IReadOnlyList<LineSpan> NewSpans) ComputeWithoutEarlyOut(
+        string oldLine, string newLine)
+    {
         if (string.Equals(oldLine, newLine, StringComparison.Ordinal))
+        {
+            return ([], []);
+        }
+
+        // Length guard: Myers is ~quadratic in word count worst case on very long lines
+        // (e.g. minified/generated content). Skip the compute entirely rather than let the
+        // similarity guard below catch it only after paying the full cost.
+        if (oldLine.Length > MaxLineLength || newLine.Length > MaxLineLength)
         {
             return ([], []);
         }

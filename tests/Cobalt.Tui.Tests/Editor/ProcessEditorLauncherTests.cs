@@ -23,9 +23,22 @@ public class ProcessEditorLauncherTests
     private static Func<string, string?> Env(string editor) =>
         name => name == "EDITOR" ? editor : null;
 
+    /// <summary>
+    /// Some tests use a POSIX command (<c>sh</c>, <c>true</c>) as a portable stand-in editor.
+    /// Those exist on Linux/macOS and on CI's Windows runners (Git Bash), but not on a bare
+    /// Windows box — so the test skips there rather than fails. cobalt itself never invokes a
+    /// shell at runtime: it launches the user's configured <c>$EDITOR</c>, nothing more.
+    /// </summary>
+    private static bool CommandOnPath(string name) =>
+        (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+            .Split(Path.PathSeparator)
+            .Where(dir => !string.IsNullOrEmpty(dir))
+            .Any(dir => File.Exists(Path.Combine(dir, name)) || File.Exists(Path.Combine(dir, name + ".exe")));
+
     [Fact]
     public async Task Process_Runs_Inside_Suspender_Body()
     {
+        Assert.SkipUnless(CommandOnPath("sh"), "requires 'sh' on PATH");
         var log = new List<string>();
         var launcher = new ProcessEditorLauncher(Env("sh -c 'exit 3'"), new RecordingSuspender(log));
         var path = Path.Join(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
@@ -39,6 +52,7 @@ public class ProcessEditorLauncherTests
     [Fact]
     public async Task Editor_Writes_File_Through_Suspender()
     {
+        Assert.SkipUnless(CommandOnPath("sh"), "requires 'sh' on PATH");
         var log = new List<string>();
         var launcher = new ProcessEditorLauncher(Env("sh -c 'echo edited > \"$0\"'"), new RecordingSuspender(log));
         var path = Path.Join(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
@@ -86,6 +100,7 @@ public class ProcessEditorLauncherTests
     [Fact]
     public async Task Default_Suspender_Is_Inline()
     {
+        Assert.SkipUnless(CommandOnPath("true"), "requires 'true' on PATH");
         var launcher = new ProcessEditorLauncher(Env("true"));
         var path = Path.Join(Path.GetTempPath(), $"cobalt-test-{Guid.NewGuid():N}.txt");
         try

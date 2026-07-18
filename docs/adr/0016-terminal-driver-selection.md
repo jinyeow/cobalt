@@ -48,10 +48,38 @@ was dropped before any handler ran. The record is corrected here and in the code
   driver — so cobalt "just works" under the common multiplexers with no configuration. On a
   bare console (neither var set) the default is unchanged: `null` → TG picks `windows`.
 
+- **Auto-detect a remote/RDP session and default to `dotnet` (amended 2026-07-16).** When
+  `COBALT_DRIVER` is unset and `SESSIONNAME` starts with `RDP-` (e.g. `RDP-Tcp#0`), select
+  `dotnet`. On the `windows` driver a remote session paints via the Win32 console API, and
+  ConPTY must diff that console buffer and re-encode it as VT before the terminal — which
+  renders in software on a GPU-less host — draws it; over a latency link that translation
+  dominates, and the terminal process (not cobalt) becomes the top CPU consumer while cobalt
+  itself sits near 0%. Confirmed on a Windows 365 Cloud PC (2 vCPU / 16 GB, no GPU): with
+  the default driver the terminal ran ~30–44% CPU navigating a diff; `COBALT_DRIVER=dotnet`
+  dropped it sharply and the UI became responsive. The `dotnet` driver writes VT straight to
+  stdout, skipping the console round-trip. A physical console (`SESSIONNAME=Console`) is
+  unchanged: `null` → `windows`.
+
 - **The explicit hatch is the complete backstop.** Auto-detect covers only the multiplexers
   it enumerates (zellij, tmux); screen/ssh/ConEmu/WezTerm-mux users, or anyone the detection
   misses, set `COBALT_DRIVER=dotnet`. And `COBALT_DRIVER` always wins — including
   `COBALT_DRIVER=windows` to force the Win32 driver back inside a multiplexer.
+
+### Targeted redraw on vim movement (round 2, INPUT-1) — needs both-driver UAT
+
+The earlier `LayoutAndDraw(false)→(true)` change (`fb5b777`, see Context above) forced a full
+`Application.LayoutAndDraw(true)` on every vim move to dodge a driver dirty-flag quirk, even
+though only the moved list actually changed. Round 2 replaces that with a targeted repaint: the
+moved list view calls `SetNeedsDraw()` on itself, and the app then runs
+`Application.LayoutAndDraw(false)` — no forced full-app repaint — relying on the explicit dirty
+flag to cover what `force:true` was compensating for on a programmatic `InvokeCommand` move.
+
+This is **not yet confirmed safe on both drivers** and must be UAT'd on the `windows` driver and
+the `dotnet` driver before it can be trusted — a headless test can assert `SetNeedsDraw()` was
+called, but not that the real driver actually repaints the moved row without the old `force:true`
+backstop, which is exactly the class of defect this ADR exists to catch (dropped input/redraw
+behaviour that only reproduces against a real console or pty). Until that UAT runs, treat the
+change as at-risk of resurrecting the redraw side of the original driver quirk.
 
 ## Consequences
 

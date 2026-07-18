@@ -37,6 +37,13 @@ public sealed class KeymapRouter(KeyBindingTable table)
     /// <summary>True when a count digit or a multi-key sequence is mid-entry — so Esc should clear it, not act.</summary>
     public bool HasPending => _pending.Count > 0 || _count > 0;
 
+    /// <summary>
+    /// Vim's showcmd: the armed count and pending sequence as typed ("5", "g", "5g"),
+    /// empty when idle. The status line renders this so multi-key state is visible.
+    /// </summary>
+    public string PendingDisplay =>
+        (_count > 0 ? _count.ToString() : "") + string.Concat(_pending);
+
     public KeyResult Feed(string keyToken, KeyScope scope)
     {
         if (keyToken == "Esc")
@@ -65,13 +72,13 @@ public sealed class KeymapRouter(KeyBindingTable table)
 
         var exact = default(AppCommand?);
         var extendable = false;
-        foreach (var (sequence, command) in table.Visible(scope))
+        // Index-loop over the cached array (INPUT-2): avoids the LINQ Take/SequenceEqual
+        // enumerator allocations that a per-keystroke hot path can't afford.
+        var bindings = table.Visible(scope);
+        for (var i = 0; i < bindings.Length; i++)
         {
-            if (sequence.Length < _pending.Count)
-            {
-                continue;
-            }
-            if (!sequence.Take(_pending.Count).SequenceEqual(_pending, StringComparer.Ordinal))
+            var (sequence, command) = bindings[i];
+            if (sequence.Length < _pending.Count || !IsPrefixMatch(sequence, _pending))
             {
                 continue;
             }
@@ -108,5 +115,18 @@ public sealed class KeymapRouter(KeyBindingTable table)
     {
         _pending.Clear();
         _count = 0;
+    }
+
+    /// <summary>True when every token in <paramref name="pending"/> matches the start of <paramref name="sequence"/> (ordinal).</summary>
+    private static bool IsPrefixMatch(string[] sequence, List<string> pending)
+    {
+        for (var i = 0; i < pending.Count; i++)
+        {
+            if (!string.Equals(sequence[i], pending[i], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 }

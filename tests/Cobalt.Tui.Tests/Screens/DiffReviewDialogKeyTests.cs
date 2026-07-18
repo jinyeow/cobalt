@@ -46,10 +46,20 @@ public class DiffReviewDialogKeyTests
             Task.FromResult(Iteration);
         public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repo, int prId, int iterationId, CancellationToken ct) =>
             Task.FromResult(Changes);
+        /// <summary>Blob fetches held open by path, so a test can render inside a select's await window.</summary>
+        public Dictionary<string, TaskCompletionSource<string>> Gates { get; } = new(StringComparer.Ordinal);
+
         public Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct) =>
-            Task.FromResult(Blobs.GetValueOrDefault((path, commit), ""));
+            Gates.TryGetValue(path, out var gate)
+                ? gate.Task
+                : Task.FromResult(Blobs.GetValueOrDefault((path, commit), ""));
+        /// <summary>Makes the review-threads fetch fail the way a real ADO outage does.</summary>
+        public bool FailThreads { get; set; }
+
         public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
-            Task.FromResult(Threads);
+            FailThreads
+                ? Task.FromException<IReadOnlyList<PrThread>>(new HttpRequestException("threads unavailable"))
+                : Task.FromResult(Threads);
         public string? LastLineCommentText { get; private set; }
 
         public Task AddLineCommentAsync(string project, string repo, int prId, string path, int line, bool right, string text, CancellationToken ct)
@@ -61,8 +71,13 @@ public class DiffReviewDialogKeyTests
             Task.CompletedTask;
         public Task SetThreadStatusAsync(string project, string repo, int prId, int threadId, PrThreadStatus status, CancellationToken ct) =>
             Task.CompletedTask;
+        /// <summary>Makes a vote fail the way a real ADO rejection does (an expected error, ADR 0013).</summary>
+        public bool FailVote { get; set; }
+
         public Task VoteAsync(string project, string repo, int prId, PrVote vote, CancellationToken ct) =>
-            Task.CompletedTask;
+            FailVote
+                ? Task.FromException(new HttpRequestException("vote rejected"))
+                : Task.CompletedTask;
     }
 
     private static PullRequest Pr() =>
@@ -92,6 +107,58 @@ public class DiffReviewDialogKeyTests
         return (detail, dialog);
     }
 
+    /// <summary>A dialog whose review threads failed to load, with a second file to navigate to.</summary>
+    private static async Task<(DiffReviewDialog Detail, Dialog Dialog, PrDiffViewModel Vm)> ThreadsFailedDialog()
+    {
+        var source = new FakeDiffSource
+        {
+            FailThreads = true,
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
+        };
+        source.Blobs[("/a.cs", "src")] = "alpha\n";
+        source.Blobs[("/b.cs", "src")] = "beta\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.True(vm.ThreadsUnavailable); // the fixture really did lose its threads
+
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+        dialog.SetFocus();
+        return (detail, dialog, vm);
+    }
+
+    [Fact]
+    public async Task Unloadable_Threads_Stay_Visible_After_Navigating()
+    {
+        // A threads failure is permanent for the session (LoadAsync runs once), so every later
+        // paint shows unmarked code that is indistinguishable from "this file has no comments".
+        // The reviewer must be able to tell that markers are unknown rather than absent — at any
+        // time, on any file — or they can approve a PR blind to its review comments.
+        var (detail, _, vm) = await ThreadsFailedDialog();
+
+        // Selecting a file publishes a diff, which is what used to mask the state. Changed fires
+        // at the end of the select and a headless Application cannot service the Invoke it posts,
+        // so observe that fault; the diff is published before Changed, which is the state here.
+        var select = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<NotInitializedException>(() => select);
+        Assert.NotNull(vm.CurrentDiff); // a diff is now on screen — the masking condition
+        detail.RunQueuedStatsRefresh(); // any later chrome refresh
+
+        Assert.DoesNotContain("unresolved", detail.Title);
+        Assert.Contains("comments unavailable", detail.Title);
+    }
+
+    [Fact]
+    public async Task The_Title_Reports_Unresolved_Threads_When_They_Loaded()
+    {
+        // The counterpart: with threads loaded, the title keeps reporting the real count.
+        var (detail, _) = await BuiltDialog();
+
+        Assert.Contains("unresolved", detail.Title);
+        Assert.DoesNotContain("comments unavailable", detail.Title);
+    }
+
     [Fact]
     public async Task J_Moves_The_Focused_File_List()
     {
@@ -101,6 +168,221 @@ public class DiffReviewDialogKeyTests
         dialog.NewKeyDownEvent(new Key('j'));
 
         Assert.Equal(1, detail.FileList.SelectedItem);
+    }
+
+    [Fact]
+    public async Task Stats_Refresh_Does_Not_Rebuild_The_Diff_Pane()
+    {
+        // The background-prefetch stats path refreshes title totals + file-row stats but must
+        // not re-tokenize/rebuild the (unchanged) displayed diff. A full Render always assigns a
+        // new DiffListDataSource; the stats-only path must leave the existing instance in place.
+        var (detail, _) = await BuiltDialog();
+        var before = detail.DiffPane.Source;
+
+        detail.RunQueuedStatsRefresh();
+
+        Assert.Same(before, detail.DiffPane.Source);
+    }
+
+    [Fact]
+    public async Task Thread_Navigation_Follows_The_Displayed_File_Threads()
+    {
+        // ]t probed threads through vm.ThreadsForDiffLine, which scopes to SelectedFile — so
+        // during a select it navigated the *next* file's threads over the displayed file's lines
+        // and simply refused to move. Probing the displayed file's commented lines fixes both
+        // that and the per-line O(threads) scan behind it.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [], "/a.cs", 3, null)],
+        };
+        source.Blobs[("/a.cs", "src")] = "l0\nl1\nl2\n"; // added lines, new line numbers 1..3
+        source.Gates["/b.cs"] = new TaskCompletionSource<string>();
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        _ = vm.SelectFileAsync(1, TestContext.Current.CancellationToken); // /b.cs's fetch hangs
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+        detail.DiffPane.SetFocus();
+        Assert.Equal("/a.cs", vm.CurrentDiffPath); // /a.cs is on screen, /b.cs is selected
+
+        dialog.NewKeyDownEvent(new Key(']'));
+        dialog.NewKeyDownEvent(new Key('t'));
+
+        // /a.cs's thread is on new line 3 — the third of its three added lines.
+        Assert.Equal(2, detail.SelectedDiffLineIndex);
+    }
+
+    [Fact]
+    public async Task Mark_Viewed_Marks_The_File_On_Screen_Not_The_One_Being_Selected()
+    {
+        // Same drift as the header: during a select, SelectedFile is already the next file while
+        // the previous one is still on screen. 'm' means "I have reviewed what I am looking at",
+        // so it must mark the displayed file — marking the one the reviewer has not seen yet
+        // silently drops a file out of their review.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
+        };
+        source.Blobs[("/a.cs", "src")] = "alpha\n";
+        source.Gates["/b.cs"] = new TaskCompletionSource<string>();
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        _ = vm.SelectFileAsync(1, TestContext.Current.CancellationToken); // /b.cs's fetch hangs
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+        Assert.Equal("/b.cs", vm.SelectedFile?.Path);
+        Assert.Equal("/a.cs", vm.CurrentDiffPath);
+
+        dialog.NewKeyDownEvent(new Key('m'));
+
+        Assert.True(vm.IsViewed("/a.cs"), "the file on screen should be marked viewed");
+        Assert.False(vm.IsViewed("/b.cs"), "the file still loading should not be marked viewed");
+    }
+
+    [Fact]
+    public async Task Mark_Viewed_Does_Not_Rebuild_The_Diff_Pane()
+    {
+        // m only changes the file-tree glyph for the current file; the displayed diff is
+        // unchanged, so it must not pay the re-tokenize cost of a full diff-pane rebuild.
+        var (detail, dialog) = await BuiltDialog();
+        var before = detail.DiffPane.Source;
+
+        dialog.NewKeyDownEvent(new Key('m'));
+
+        Assert.Same(before, detail.DiffPane.Source);
+    }
+
+    [Fact]
+    public async Task Mark_Unviewed_Does_Not_Rebuild_The_Diff_Pane()
+    {
+        var (detail, dialog) = await BuiltDialog();
+        var before = detail.DiffPane.Source;
+
+        dialog.NewKeyDownEvent(new Key('M'));
+
+        Assert.Same(before, detail.DiffPane.Source);
+    }
+
+    // An edited file whose only change is at the top, so the 20-odd context lines below it fold
+    // away (radius 3) and 'e' has something to expand.
+    private static async Task<(DiffReviewDialog Detail, Dialog Dialog)> FoldedDialog()
+    {
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Edit)] };
+        var original = Enumerable.Range(0, 30).Select(i => $"var x{i} = {i};").ToList();
+        source.Blobs[("/a.cs", "base")] = string.Join("\n", original) + "\n";
+        original[0] = "var x0 = 99;";
+        source.Blobs[("/a.cs", "src")] = string.Join("\n", original) + "\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+        dialog.SetFocus();
+        return (detail, dialog);
+    }
+
+    /// <summary>The composed line currently shown for each visible unified diff-line index.</summary>
+    private static Dictionary<int, StyledLine> ComposedByLine(DiffReviewDialog detail)
+    {
+        var source = Assert.IsType<DiffListDataSource>(detail.DiffPane.Source);
+        var map = new Dictionary<int, StyledLine>();
+        for (var i = 0; i < detail.DiffRows.Count; i++)
+        {
+            if (detail.DiffRows[i].LineIndex is { } lineIndex)
+            {
+                map[lineIndex] = source.Lines[i];
+            }
+        }
+        return map;
+    }
+
+    [Fact]
+    public async Task The_Diff_Pane_Describes_The_File_Its_Diff_Came_From()
+    {
+        // SelectFileAsync moves SelectedFile to the new file immediately and only publishes that
+        // file's diff once the fetch returns (PrDiffViewModel.SelectFileAsync). A render inside
+        // that window — a comment or vote round-trip landing — would otherwise pair the new
+        // file's identity with the previous file's diff: its path over the old stats, and its
+        // comment markers painted onto the old file's lines.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
+            // A thread on /b.cs, right line 1 — the same line number /a.cs's diff has.
+            Threads = [new PrThread(1, PrThreadStatus.Active, [], "/b.cs", 1, null)],
+        };
+        source.Blobs[("/a.cs", "src")] = "alpha\n";
+        source.Gates["/b.cs"] = new TaskCompletionSource<string>();
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        // Left in flight deliberately: completing it would raise Changed, and a headless
+        // Application cannot service the Invoke that posts.
+        _ = vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        Assert.Equal("/b.cs", vm.SelectedFile?.Path); // the cursor has moved
+        Assert.Equal("/a.cs", vm.CurrentDiffPath);    // the diff on screen has not
+
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+
+        Assert.Contains("/a.cs", detail.DiffHeader.Text);
+        var shown = Assert.IsType<DiffListDataSource>(detail.DiffPane.Source);
+        Assert.DoesNotContain(shown.Lines, l => l.DisplayText.Contains('●'));
+    }
+
+    [Fact]
+    public async Task Mark_Viewed_Keeps_The_File_Header_After_A_Failed_Action()
+    {
+        // A failed vote leaves vm.Error set, and its message reaches the reviewer through the
+        // message bar. The header's job is to say which file is on screen, so marking it viewed
+        // must not replace the path/stats with a stale error from an unrelated action.
+        var source = new FakeDiffSource
+        {
+            FailVote = true,
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add)],
+        };
+        source.Blobs[("/a.cs", "src")] = "line 0\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        // Voted before Build subscribes: a headless Application cannot service the Invoke that
+        // vm.Changed would post. The state under test is the same — Error set, a diff on screen.
+        await vm.VoteAsync(PrVote.Approved, TestContext.Current.CancellationToken);
+        Assert.NotNull(vm.Error); // the vote really did fail
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(100, 24));
+        dialog.SetFocus();
+        // A full render already prefers the path over the error; the partial render must agree.
+        var expected = detail.DiffHeader.Text;
+        Assert.Contains("/a.cs", expected);
+
+        dialog.NewKeyDownEvent(new Key('m'));
+
+        // Compared whole, not just for the path, so the binary/too-large/side-by-side suffix
+        // cannot be dropped either — m changes nothing the header reports.
+        Assert.Equal(expected, detail.DiffHeader.Text);
+    }
+
+    [Fact]
+    public async Task Expanding_A_Fold_Reuses_The_Lines_Already_Composed()
+    {
+        // 'e' changes only which lines are visible, so the lines that were already on screen must
+        // come back as the same composition — re-tokenizing them is the cost this exists to avoid.
+        var (detail, dialog) = await FoldedDialog();
+        Assert.Contains(detail.DiffRows, r => r.FoldId is not null); // the fixture actually folds
+        var before = ComposedByLine(detail);
+
+        dialog.NewKeyDownEvent(new Key('e'));
+
+        var after = ComposedByLine(detail);
+        Assert.True(after.Count > before.Count, "expanding the fold should reveal more lines");
+        foreach (var (lineIndex, styled) in before)
+        {
+            Assert.Same(styled, after[lineIndex]);
+        }
     }
 
     [Fact]
@@ -994,5 +1276,234 @@ public class DiffReviewDialogKeyTests
         detail.DiffPane.SetFocus(); // focus leaves the bar (Tab/click equivalent), no Enter/Esc
 
         Assert.False(detail.SearchBar.Visible); // hidden, not orphaned with stale text
+    }
+
+    // ---- RENDER-2: the unresolved dot reads the view-model's precomputed set ----
+
+    [Fact]
+    public async Task File_Row_Unresolved_Dot_Tracks_The_View_Models_Unresolved_File_Set()
+    {
+        // The file-tree "has unresolved comments" dot is driven by vm.UnresolvedFilePaths (one
+        // O(threads) pass per Threads write) rather than a per-file Threads.Any scan on every
+        // tree rebuild. A file in the set gets the dot; one outside it does not.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "fix", false)], "/b.cs", RightLine: 1, LeftLine: null)],
+        };
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        source.Blobs[("/b.cs", "src")] = "y\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("/b.cs", vm.UnresolvedFilePaths); // fixture gate
+        Assert.DoesNotContain("/a.cs", vm.UnresolvedFilePaths);
+
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+
+        var fileRows = detail.Rows.Where(r => r.Kind == FileTreeRowKind.File).ToDictionary(r => r.NodePath);
+        Assert.True(fileRows["/b.cs"].HasUnresolved);
+        Assert.False(fileRows["/a.cs"].HasUnresolved);
+    }
+
+    // ---- RENDER-4: a mutation's busy flip repaints chrome only ----
+
+    [Fact]
+    public async Task Busy_Refresh_Repaints_Chrome_Without_Rebuilding_The_Diff_Pane_Or_File_Tree()
+    {
+        // The busy flip at a mutation's start changes neither the displayed diff nor the file
+        // annotations, so it must not re-tokenize the open file (a new DiffListDataSource) nor
+        // re-flatten the tree (a new _rows list) — only the trailing Changed does a full rebuild.
+        var (detail, _) = await BuiltDialog();
+        var beforeSource = detail.DiffPane.Source;
+        var beforeRows = detail.Rows;
+
+        detail.RunBusyRefresh();
+
+        Assert.Same(beforeSource, detail.DiffPane.Source); // diff pane not rebuilt
+        Assert.Same(beforeRows, detail.Rows);              // file tree not re-flattened
+        Assert.Contains("/a.cs", detail.DiffHeader.Text);  // header still refreshed (a cleared error repaints)
+    }
+
+    [Fact]
+    public async Task Busy_Refresh_Clears_A_Stale_Error_Header_When_There_Is_No_Diff()
+    {
+        // A mutation's busy flip nulls vm.Error, so the chrome-only render must remove a header that
+        // was showing an error — otherwise a cleared "vote failed" error stays on screen. With no
+        // diff on screen the header falls to its final else, which must clear rather than retain.
+        var source = new FakeDiffSource { Iteration = null }; // no iteration → Error set, no diff
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.NotNull(vm.Error);
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        Assert.Contains("error", detail.DiffHeader.Text); // the stale error is on screen
+
+        // The busy flip a successful retry raises nulls Error before it throws on the headless
+        // Invoke; catch that so we are left in the (Error == null, no diff) state to render.
+        try { await vm.VoteAsync(PrVote.Approved, TestContext.Current.CancellationToken); }
+        catch (NotInitializedException) { }
+        Assert.Null(vm.Error); // the flip cleared the error
+
+        detail.RunBusyRefresh();
+
+        Assert.Equal("", detail.DiffHeader.Text.Trim()); // the cleared error disappeared
+    }
+
+    // ---- RENDER-1: diff-only paths skip the file-tree re-flatten ----
+
+    [Fact]
+    public async Task Expanding_A_Fold_Does_Not_Reflatten_The_File_Tree()
+    {
+        // 'e' changes only which diff lines are visible — no file annotation changes — so the
+        // file tree must not be re-flattened (RebuildFileList assigns a fresh _rows list).
+        var (detail, dialog) = await FoldedDialog();
+        Assert.Contains(detail.DiffRows, r => r.FoldId is not null); // fixture actually folds
+        var before = detail.Rows;
+
+        dialog.NewKeyDownEvent(new Key('e'));
+
+        Assert.Same(before, detail.Rows);
+    }
+
+    [Fact]
+    public async Task Toggling_Diff_Mode_Does_Not_Reflatten_The_File_Tree()
+    {
+        var (detail, dialog) = await BuiltModifiedDialog();
+        var before = detail.Rows;
+
+        dialog.NewKeyDownEvent(new Key('s'));
+
+        Assert.True(detail.SideBySide);
+        Assert.Same(before, detail.Rows);
+    }
+
+    [Fact]
+    public async Task Applying_A_Search_Does_Not_Reflatten_The_File_Tree()
+    {
+        var (detail, dialog) = await BuiltSearchDialog();
+        detail.SearchPromptAction = () => "needle";
+        var before = detail.Rows;
+
+        dialog.NewKeyDownEvent(new Key('/'));
+
+        Assert.Equal(2, detail.SearchMatchCount); // the search really ran
+        Assert.Same(before, detail.Rows);
+    }
+
+    [Fact]
+    public async Task Toggling_The_Thread_Filter_Still_Reflattens_The_File_Tree()
+    {
+        // The counterpart guard: T changes which files are shown, an annotation-scoped change, so
+        // the tree MUST be rebuilt — the includeFileList gate must not swallow this path.
+        var source = new FakeDiffSource
+        {
+            Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
+            Threads = [new PrThread(1, PrThreadStatus.Active, [new PrComment(1, "Sam", "fix", false)], "/b.cs", RightLine: 1, LeftLine: null)],
+        };
+        source.Blobs[("/a.cs", "src")] = "x\n";
+        source.Blobs[("/b.cs", "src")] = "y\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        var dialog = detail.Build();
+        dialog.Layout(new Size(120, 24));
+        detail.FileList.SetFocus();
+        var before = detail.Rows;
+
+        dialog.NewKeyDownEvent(new Key('T'));
+
+        Assert.NotSame(before, detail.Rows); // filtered → tree rebuilt
+        Assert.Single(detail.Rows, r => r.Kind == FileTreeRowKind.File);
+    }
+
+    // ---- RENDER-7: the unified-line → row map resolves in either mode ----
+
+    [Fact]
+    public async Task Toggling_Diff_Mode_Preserves_The_Cursor_On_The_Same_Unified_Line()
+    {
+        // ToggleDiffMode captures the cursor's unified line, re-renders, then SelectDiffLine's it
+        // back — which resolves through the int→row map. Preserving the added line across the flip
+        // exercises the side-by-side right-index entry, proving the map maps a line to its row.
+        var (detail, dialog) = await BuiltModifiedDialog(); // unified: [context, removed, added]
+        detail.DiffPane.SetFocus();
+        dialog.NewKeyDownEvent(new Key('G')); // cursor on the last (added) line
+        var before = detail.SelectedDiffLineIndex;
+        Assert.True(before > 0); // really on a real line, not row 0
+
+        dialog.NewKeyDownEvent(new Key('s')); // unified → side-by-side
+
+        Assert.True(detail.SideBySide);
+        Assert.Equal(before, detail.SelectedDiffLineIndex); // same unified line, resolved via the map
+    }
+
+    // ---- ASYNC-3: the FilesLoaded handler and the LoadAsync fallback each launch the prefetch ----
+    //
+    // The dialog's LoadAsync cannot be driven headless: vm.LoadAsync's opening Changed?.Invoke()
+    // routes through app.Invoke, which throws NotInitializedException without Application.Init (the
+    // same limitation the Unloadable_Threads test relies on). So these drive the real handler
+    // (OnFilesLoaded, the target of the vm.FilesLoaded += wiring) and the real fallback call
+    // (StartPrefetch) directly. Empty Files keeps the launched prefetch a no-op, so it never raises
+    // StatsChanged → app.Invoke on a background thread (which would throw + write the crash log).
+
+    private static async Task WaitForAsync(Func<bool> condition)
+    {
+        for (var i = 0; i < 200 && !condition(); i++)
+        {
+            await Task.Delay(5, TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task FilesLoaded_Handler_Launches_The_Prefetch_Once()
+    {
+        var source = new FakeDiffSource(); // empty changes → the launched prefetch no-ops
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        detail.Build();
+        Assert.Equal(0, detail.PrefetchLaunches);
+
+        detail.OnFilesLoaded(); // the handler vm.FilesLoaded is wired to (posts StartPrefetch)
+
+        await WaitForAsync(() => detail.PrefetchLaunches == 1);
+        Assert.Equal(1, detail.PrefetchLaunches);
+    }
+
+    [Fact]
+    public async Task Prefetch_Does_Not_Relaunch_When_FilesLoaded_And_The_Fallback_Both_Fire()
+    {
+        // FilesLoaded and the LoadAsync fallback can both fire; the guard launches the wave once,
+        // never twice (ADR 0008: one shared token, one wave).
+        var source = new FakeDiffSource();
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        detail.Build();
+
+        detail.OnFilesLoaded(); // FilesLoaded path
+        await WaitForAsync(() => detail.PrefetchLaunches == 1);
+        detail.StartPrefetch(); // the LoadAsync fallback
+
+        Assert.Equal(1, detail.PrefetchLaunches);
+    }
+
+    [Fact]
+    public async Task The_Fallback_Launches_The_Prefetch_When_FilesLoaded_Never_Fired()
+    {
+        // The early-return path (no iteration) never assigns Files, so FilesLoaded never fires; the
+        // LoadAsync fallback (StartPrefetch) must still launch the wave exactly once.
+        var source = new FakeDiffSource { Iteration = null };
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), _ => { });
+        detail.Build();
+        Assert.Equal(0, detail.PrefetchLaunches);
+
+        detail.StartPrefetch();
+
+        Assert.Equal(1, detail.PrefetchLaunches);
     }
 }

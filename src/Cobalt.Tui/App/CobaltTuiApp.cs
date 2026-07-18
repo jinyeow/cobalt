@@ -38,14 +38,20 @@ public static class CobaltTuiApp
             [.. config.Contexts.Keys.Order(StringComparer.Ordinal)], context.Name, context.PrScope, config.Theme);
 
         using var connection = AdoConnection.Create(context, tokens);
+
+        // Prime the shared identity cache while the UI builds, so the first real call skips
+        // the ~700ms cold DNS + TCP + TLS. Dropped on the floor deliberately rather than routed
+        // through FireAndForget: priming is silent by contract, and FireAndForget would report
+        // a warm-up fault to the message bar and the crash log — the two things it must never
+        // do. Everything below reads the same cache through GetIdentityAsync, so cold start
+        // makes one connectionData call, not a separate warm-up ping plus an identity read.
+        _ = connection.PrimeIdentityAsync();
+
         var workItems = new WorkItemStoreAdapter(new WorkItemsApi(connection.Http, context), context.PrScope);
 
-        // Resolve the signed-in user once and share it: the status bar and the PR
-        // reviewer/creator filters both consume this single cached call.
-        var identity = new Lazy<Task<AdoUser>>(() => connection.Identity.GetAuthenticatedUserAsync());
         var pullRequests = new PullRequestStoreAdapter(
             new GitApi(connection.Http, context),
-            async ct => (await identity.Value.WaitAsync(ct).ConfigureAwait(false)).Id,
+            async ct => (await connection.GetIdentityAsync(ct).ConfigureAwait(false)).Id,
             ct => BuildTeamDirectoryAsync(connection.Teams, ct),
             context.Project,
             context.PrScope,
@@ -66,7 +72,7 @@ public static class CobaltTuiApp
         using var shell = new CobaltShell(
             app, vm, workItems, pullRequests, editor: null, context: context, themeMonitor: monitor);
 
-        ResolveIdentityInBackground(app, vm, identity);
+        ResolveIdentityInBackground(app, vm, connection.GetIdentityAsync);
 
         app.Run(shell);
         return 0;
@@ -75,16 +81,18 @@ public static class CobaltTuiApp
     /// <summary>
     /// Resolves the Terminal.Gui driver. An explicit <c>COBALT_DRIVER</c> wins (matched
     /// case-insensitively against <paramref name="knownDrivers"/>, returned canonical; an
-    /// unknown value throws an actionable <see cref="ConfigException"/>). Otherwise, if a
-    /// terminal multiplexer is detected (<c>ZELLIJ</c>/<c>TMUX</c>), the <c>dotnet</c> driver
-    /// is selected. Failing both, <see langword="null"/> lets TG auto-detect (<c>windows</c>
-    /// on Windows).
+    /// unknown value throws an actionable <see cref="ConfigException"/>). Otherwise the
+    /// <c>dotnet</c> driver is selected when a terminal multiplexer (<c>ZELLIJ</c>/<c>TMUX</c>)
+    /// or a remote/RDP session (<c>SESSIONNAME=RDP-*</c>) is detected. Failing all of these,
+    /// <see langword="null"/> lets TG auto-detect (<c>windows</c> on Windows).
     ///
     /// <para>The Win32-console <c>windows</c> driver is unreliable through a multiplexer's
-    /// pseudo-terminal — it drops keystrokes and mishandles the editor suspend/resume — so
-    /// under zellij/tmux cobalt defaults to the stdio/ANSI <c>dotnet</c> driver. Set
-    /// <c>COBALT_DRIVER</c> explicitly to override (e.g. <c>=windows</c> to force it back, or
-    /// for a multiplexer this detection misses). See ADR 0016.</para>
+    /// pseudo-terminal — it drops keystrokes and mishandles the editor suspend/resume — and
+    /// under a remote session its console-buffer painting is translated to VT by ConPTY,
+    /// which is expensive over a latency link on a GPU-less host. In both cases cobalt
+    /// defaults to the stdio/ANSI <c>dotnet</c> driver, which writes VT straight to stdout.
+    /// Set <c>COBALT_DRIVER</c> explicitly to override (e.g. <c>=windows</c> to force it back,
+    /// or for an environment this detection misses). See ADR 0016.</para>
     /// </summary>
     internal static string? ResolveDriver(Func<string, string?> env, IReadOnlyCollection<string> knownDrivers)
     {
@@ -98,7 +106,12 @@ public static class CobaltTuiApp
         }
 
         var inMultiplexer = !string.IsNullOrEmpty(env("ZELLIJ")) || !string.IsNullOrEmpty(env("TMUX"));
-        return inMultiplexer
+        // A remote/RDP session (SESSIONNAME=RDP-Tcp#N, e.g. a Windows 365 Cloud PC) paints
+        // through ConPTY's console-buffer→VT translation on the 'windows' driver — measurably
+        // expensive over a latency link on a GPU-less host, where the terminal renders in
+        // software. The stdio/ANSI 'dotnet' driver writes VT straight to stdout and skips it.
+        var inRemoteSession = env("SESSIONNAME")?.StartsWith("RDP-", StringComparison.OrdinalIgnoreCase) == true;
+        return inMultiplexer || inRemoteSession
             // FirstOrDefault, not First: if 'dotnet' is somehow unregistered, fall back to
             // TG's default (null) rather than throwing into the crash boundary.
             ? knownDrivers.FirstOrDefault(d => d.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
@@ -190,26 +203,51 @@ public static class CobaltTuiApp
 
     /// <summary>Fills the status bar with who we are; failures land in the message bar, never block startup.</summary>
     private static void ResolveIdentityInBackground(
-        IApplication app, ShellViewModel vm, Lazy<Task<AdoUser>> identity)
+        IApplication app, ShellViewModel vm, Func<CancellationToken, Task<AdoUser>> getIdentity)
     {
         _ = Task.Run(async () =>
         {
-            try
+            var outcome = await ResolveIdentityAsync(getIdentity).ConfigureAwait(false);
+            app.Invoke(() =>
             {
-                var user = await identity.Value.ConfigureAwait(false);
-                app.Invoke(() => vm.OnUserResolved(user.DisplayName));
-            }
-            catch (Exception ex) when (ex is AdoApiException
-                or Azure.Identity.AuthenticationFailedException
-                or HttpRequestException
-                or OperationCanceledException
-                or System.Text.Json.JsonException)
-            {
-                var message = ex.Message;
-                app.Invoke(() => vm.Messages.Error($"not signed in — {FirstLine(message)} (run: cobalt auth login)"));
-            }
+                if (outcome.DisplayName is { } name)
+                {
+                    vm.OnUserResolved(name);
+                }
+                else
+                {
+                    vm.Messages.Error(outcome.ErrorMessage!);
+                }
+            });
         });
     }
+
+    /// <summary>
+    /// The pure half of the background identity resolve: expected auth/network faults (ADR 0013)
+    /// become an actionable message rather than propagating. Split out from
+    /// <see cref="ResolveIdentityInBackground"/> so it is testable without a running Terminal.Gui
+    /// application (<c>IApplication.Invoke</c> requires <c>Init</c>).
+    /// </summary>
+    internal static async Task<IdentityOutcome> ResolveIdentityAsync(
+        Func<CancellationToken, Task<AdoUser>> getIdentity, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var user = await getIdentity(cancellationToken).ConfigureAwait(false);
+            return new IdentityOutcome(user.DisplayName, null);
+        }
+        catch (Exception ex) when (ex is AdoApiException
+            or Azure.Identity.AuthenticationFailedException
+            or HttpRequestException
+            or OperationCanceledException
+            or System.Text.Json.JsonException)
+        {
+            return new IdentityOutcome(null, $"not signed in — {FirstLine(ex.Message)} (run: cobalt auth login)");
+        }
+    }
+
+    /// <summary>Result of a background identity resolve: exactly one of the two members is set.</summary>
+    internal readonly record struct IdentityOutcome(string? DisplayName, string? ErrorMessage);
 
     private static string FirstLine(string message)
     {

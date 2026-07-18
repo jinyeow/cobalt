@@ -77,53 +77,70 @@ public sealed record IdentityRefDto
 
 // ---- domain projections (what the UI binds to) ----
 
-public sealed class WorkItem(long id, IReadOnlyDictionary<string, JsonElement> fields)
+public sealed class WorkItem
 {
-    public long Id { get; } = id;
+    private readonly IReadOnlyDictionary<string, JsonElement> _fields;
 
-    public string Title => GetString("System.Title");
-    public string State => GetString("System.State");
-    public string WorkItemType => GetString("System.WorkItemType");
-    public string IterationPath => GetString("System.IterationPath");
+    public WorkItem(long id, IReadOnlyDictionary<string, JsonElement> fields)
+    {
+        Id = id;
+        _fields = fields;
+
+        // Project the list-row fields once: these are read on every list render, so materialize
+        // them in the ctor instead of re-walking the JsonElement dict per property access. Detail
+        // fields (below) stay lazy against the retained raw dict.
+        Title = GetString("System.Title");
+        State = GetString("System.State");
+        WorkItemType = GetString("System.WorkItemType");
+        IterationPath = GetString("System.IterationPath");
+        TeamProject = GetString("System.TeamProject");
+        AssignedToDisplayName = GetIdentityDisplayName("System.AssignedTo");
+        AssignedToUniqueName = GetIdentityUniqueName("System.AssignedTo");
+        ChangedDate = GetDate("System.ChangedDate");
+
+        var rawTags = GetString("System.Tags");
+        Tags = rawTags.Length == 0
+            ? []
+            : rawTags.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    public long Id { get; }
+
+    public string Title { get; }
+    public string State { get; }
+    public string WorkItemType { get; }
+    public string IterationPath { get; }
+    public string TeamProject { get; }
+    public string? AssignedToDisplayName { get; }
+    public string? AssignedToUniqueName { get; }
+    public DateTimeOffset? ChangedDate { get; }
+    public IReadOnlyList<string> Tags { get; }
+
+    // Detail reads: fetched only for the detail pane, so left lazy against the raw dict.
     public string AreaPath => GetString("System.AreaPath");
-    public string TeamProject => GetString("System.TeamProject");
-    public string? AssignedToDisplayName => GetIdentityDisplayName("System.AssignedTo");
-    public string? AssignedToUniqueName => GetIdentityUniqueName("System.AssignedTo");
     public string DescriptionHtml => GetString("System.Description");
-    public DateTimeOffset? ChangedDate => GetDate("System.ChangedDate");
     public int? Priority => GetInt("Microsoft.VSTS.Common.Priority");
     public double? StoryPoints => GetDouble("Microsoft.VSTS.Scheduling.StoryPoints");
 
-    public IReadOnlyList<string> Tags
-    {
-        get
-        {
-            var raw = GetString("System.Tags");
-            return raw.Length == 0
-                ? []
-                : raw.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        }
-    }
-
     public string GetString(string field) =>
-        fields.TryGetValue(field, out var e) && e.ValueKind == JsonValueKind.String ? e.GetString()! : "";
+        _fields.TryGetValue(field, out var e) && e.ValueKind == JsonValueKind.String ? e.GetString()! : "";
 
     private int? GetInt(string field) =>
-        fields.TryGetValue(field, out var e) && e.ValueKind == JsonValueKind.Number ? e.GetInt32() : null;
+        _fields.TryGetValue(field, out var e) && e.ValueKind == JsonValueKind.Number ? e.GetInt32() : null;
 
     private double? GetDouble(string field) =>
-        fields.TryGetValue(field, out var e) && e.ValueKind == JsonValueKind.Number ? e.GetDouble() : null;
+        _fields.TryGetValue(field, out var e) && e.ValueKind == JsonValueKind.Number ? e.GetDouble() : null;
 
     private DateTimeOffset? GetDate(string field) =>
-        fields.TryGetValue(field, out var e) && e.ValueKind == JsonValueKind.String &&
+        _fields.TryGetValue(field, out var e) && e.ValueKind == JsonValueKind.String &&
         e.TryGetDateTimeOffset(out var d) ? d : null;
 
     private string? GetIdentityDisplayName(string field) =>
-        fields.TryGetValue(field, out var e) && e.ValueKind == JsonValueKind.Object &&
+        _fields.TryGetValue(field, out var e) && e.ValueKind == JsonValueKind.Object &&
         e.TryGetProperty("displayName", out var n) ? n.GetString() : null;
 
     private string? GetIdentityUniqueName(string field) =>
-        fields.TryGetValue(field, out var e) && e.ValueKind == JsonValueKind.Object &&
+        _fields.TryGetValue(field, out var e) && e.ValueKind == JsonValueKind.Object &&
         e.TryGetProperty("uniqueName", out var n) ? n.GetString() : null;
 
     public static WorkItem From(WorkItemDto dto) => new(dto.Id, dto.Fields);

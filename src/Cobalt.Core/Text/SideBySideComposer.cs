@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Cobalt.Core.Text.Syntax;
 
 namespace Cobalt.Core.Text;
@@ -21,7 +22,15 @@ public sealed record SideBySideRow(int? LeftIndex, int? RightIndex);
 /// </summary>
 public static class SideBySideComposer
 {
-    public static IReadOnlyList<SideBySideRow> Pair(IReadOnlyList<DiffLine> lines)
+    // The same file yields the same DiffLine list instance across renders (the view model caches
+    // one FileDiff per path), so pairing is memoized per lines reference. The weak table lets a
+    // closed file's projection be collected with its lines, and is safe under concurrent access.
+    private static readonly ConditionalWeakTable<IReadOnlyList<DiffLine>, IReadOnlyList<SideBySideRow>> PairCache = new();
+
+    public static IReadOnlyList<SideBySideRow> Pair(IReadOnlyList<DiffLine> lines) =>
+        PairCache.GetValue(lines, static l => (IReadOnlyList<SideBySideRow>)BuildPairs(l).AsReadOnly());
+
+    private static List<SideBySideRow> BuildPairs(IReadOnlyList<DiffLine> lines)
     {
         var rows = new List<SideBySideRow>();
         var i = 0;

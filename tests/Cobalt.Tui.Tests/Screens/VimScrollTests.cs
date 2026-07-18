@@ -143,6 +143,45 @@ public class VimScrollTests
     }
 
     [Fact]
+    public void MoveDown_From_A_Null_Selection_Selects_The_First_Row()
+    {
+        // Mirror TG's own MoveDown: from no selection j lands on the first row, not the second.
+        var list = LaidOutList(rows: 50);
+        list.SelectedItem = null;
+
+        VimScroll.Apply(list, AppCommand.MoveDown, null);
+
+        Assert.Equal(0, list.SelectedItem);
+    }
+
+    [Fact]
+    public void MoveUp_From_A_Null_Selection_Selects_The_Last_Row()
+    {
+        // Mirror TG's own MoveUp: from no selection k wraps to the last row, not clamps at the top.
+        var list = LaidOutList(rows: 50);
+        list.SelectedItem = null;
+
+        VimScroll.Apply(list, AppCommand.MoveUp, null);
+
+        Assert.Equal(49, list.SelectedItem);
+    }
+
+    [Fact]
+    public void MoveBottom_Scrolls_The_Selected_Row_Into_View()
+    {
+        // The ListView path sets SelectedItem directly, so it must also scroll it on screen —
+        // the last row of a 50-row list cannot sit inside a 12-row viewport at offset 0.
+        var list = LaidOutList(rows: 50, height: 12);
+
+        VimScroll.Apply(list, AppCommand.MoveBottom, null);
+
+        var top = list.Viewport.Y;
+        var selected = list.SelectedItem!.Value;
+        Assert.InRange(selected, top, top + list.Viewport.Height - 1); // within the visible window
+        Assert.True(top > 0, "the viewport scrolled down to reveal the last row");
+    }
+
+    [Fact]
     public void MoveBottom_With_Count_Goes_To_Line_N()
     {
         // "3G" jumps to line 3 (1-based) → index 2.

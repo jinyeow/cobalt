@@ -20,6 +20,27 @@ public class SideBySideComposerTests
     private static DiffLine Add(int newNo, string text) => new(DiffLineKind.Added, null, newNo, text);
 
     [Fact]
+    public void Pair_Reuses_The_Projection_For_The_Same_Lines_Reference()
+    {
+        // RENDER-5: the same file yields the same DiffLine list instance on every render, and
+        // pairing is a pure projection of it — so it is computed once per lines reference.
+        DiffLine[] lines = [Ctx(1, 1, "a"), Rem(2, "old"), Add(2, "new")];
+
+        Assert.Same(SideBySideComposer.Pair(lines), SideBySideComposer.Pair(lines));
+    }
+
+    [Fact]
+    public void Pair_Recomputes_For_A_Different_Lines_Reference()
+    {
+        // Keyed on the reference, not the contents: a distinct list (even with equal lines) is
+        // a distinct file to the cache.
+        DiffLine[] first = [Ctx(1, 1, "a"), Rem(2, "old"), Add(2, "new")];
+        DiffLine[] second = [Ctx(1, 1, "a"), Rem(2, "old"), Add(2, "new")];
+
+        Assert.NotSame(SideBySideComposer.Pair(first), SideBySideComposer.Pair(second));
+    }
+
+    [Fact]
     public void Pair_Aligns_Kth_Removed_With_Kth_Added_Then_Leaves_Extras_One_Sided()
     {
         DiffLine[] lines =

@@ -26,15 +26,17 @@ public class PrListViewModelTests
     }
 
     [Fact]
-    public async Task Starts_On_ReviewQueue_Tab()
+    public async Task Starts_On_Team_Tab()
     {
+        // Team is the first (default) tab: review-via-team is the common ADO setup,
+        // so the personal review queue is no longer in the cycle (always empty there).
         var source = new FakeSource();
-        source.ByFilter[PrListFilter.ReviewQueue] = [Pr(1, "review me")];
+        source.ByFilter[PrListFilter.Team] = [Pr(1, "review me")];
         var vm = new PrListViewModel(source);
 
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(PrListFilter.ReviewQueue, vm.ActiveTab);
+        Assert.Equal(PrListFilter.Team, vm.ActiveTab);
         Assert.Single(vm.Rows);
         Assert.Equal("review me", vm.Rows[0].Title);
     }
@@ -55,24 +57,22 @@ public class PrListViewModelTests
     }
 
     [Fact]
-    public async Task NextTab_Cycles_Through_All_Filters_Including_Team()
+    public async Task NextTab_Cycles_Team_Mine_Active()
     {
         var vm = new PrListViewModel(new FakeSource());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
-        // Tab order: ReviewQueue → Team → Mine → Active → (wrap) ReviewQueue.
-        await vm.NextTabAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(PrListFilter.Team, vm.ActiveTab);
+        // Tab order: Team → Mine → Active → (wrap) Team.
         await vm.NextTabAsync(TestContext.Current.CancellationToken);
         Assert.Equal(PrListFilter.Mine, vm.ActiveTab);
         await vm.NextTabAsync(TestContext.Current.CancellationToken);
         Assert.Equal(PrListFilter.Active, vm.ActiveTab);
         await vm.NextTabAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(PrListFilter.ReviewQueue, vm.ActiveTab);
+        Assert.Equal(PrListFilter.Team, vm.ActiveTab);
     }
 
     [Fact]
-    public async Task PrevTab_From_ReviewQueue_Wraps_To_Active()
+    public async Task PrevTab_From_Team_Wraps_To_Active()
     {
         var vm = new PrListViewModel(new FakeSource());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
@@ -162,20 +162,20 @@ public class PrListViewModelTests
     public async Task Switching_Tab_Blanks_Rows_And_Sets_Loading_Before_Fetch_Completes()
     {
         var source = new GatedSource();
-        source.Gate(PrListFilter.ReviewQueue).SetResult([Pr(1, "seed")]);
+        source.Gate(PrListFilter.Team).SetResult([Pr(1, "seed")]);
         var vm = new PrListViewModel(source);
         await vm.LoadAsync(TestContext.Current.CancellationToken);
         Assert.Single(vm.Rows);
 
-        var team = source.Gate(PrListFilter.Team);
-        var switching = vm.NextTabAsync(TestContext.Current.CancellationToken); // ReviewQueue → Team
+        var mine = source.Gate(PrListFilter.Mine);
+        var switching = vm.NextTabAsync(TestContext.Current.CancellationToken); // Team → Mine
 
         // Fetch has not completed yet: the pane must already show the loading state
         // with the previous tab's rows cleared.
         Assert.True(vm.IsLoading);
         Assert.Empty(vm.Rows);
 
-        team.SetResult([Pr(2, "my pr")]);
+        mine.SetResult([Pr(2, "my pr")]);
         await switching;
 
         Assert.False(vm.IsLoading);
@@ -207,10 +207,84 @@ public class PrListViewModelTests
     }
 
     [Fact]
+    public async Task Revisiting_A_Loaded_Tab_Paints_Cached_Rows_Before_The_Refresh()
+    {
+        var source = new GatedSource();
+        source.Gate(PrListFilter.Team).SetResult([Pr(1, "seed")]);
+        var vm = new PrListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken); // Team → [1], cached
+        source.Gate(PrListFilter.Mine).SetResult([Pr(2, "mine")]);
+        await vm.SetTabAsync(PrListFilter.Mine, TestContext.Current.CancellationToken); // Mine → [2], cached
+
+        // Switch back to Team, but hold the refresh so we can see what paints first.
+        var refresh = source.Gate(PrListFilter.Team);
+        var switching = vm.SetTabAsync(PrListFilter.Team, TestContext.Current.CancellationToken);
+
+        // The cached rows paint immediately (no blank pane), while the tab shows as refreshing.
+        Assert.True(vm.IsLoading);
+        Assert.Single(vm.Rows);
+        Assert.Equal(1, vm.Rows[0].PullRequestId);
+
+        refresh.SetResult([Pr(1, "seed"), Pr(3, "fresh")]);
+        await switching;
+
+        Assert.False(vm.IsLoading);
+        Assert.Equal([1, 3], vm.Rows.Select(r => r.PullRequestId));
+    }
+
+    [Fact]
+    public async Task InvalidateCache_Stops_A_Revisit_From_Painting_Stale_Rows()
+    {
+        var source = new GatedSource();
+        source.Gate(PrListFilter.Team).SetResult([Pr(1, "seed")]);
+        var vm = new PrListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        source.Gate(PrListFilter.Mine).SetResult([Pr(2, "mine")]);
+        await vm.SetTabAsync(PrListFilter.Mine, TestContext.Current.CancellationToken);
+
+        // A scope/context change invalidates every tab's cached rows.
+        vm.InvalidateCache();
+
+        var refresh = source.Gate(PrListFilter.Team);
+        var switching = vm.SetTabAsync(PrListFilter.Team, TestContext.Current.CancellationToken);
+
+        // No stale paint: the cache was dropped, so the pane blanks and waits for the fresh fetch.
+        Assert.Empty(vm.Rows);
+
+        refresh.SetResult([Pr(1, "seed")]);
+        await switching;
+        Assert.Single(vm.Rows);
+    }
+
+    [Fact]
+    public async Task InvalidateActiveTab_Drops_The_Active_Tab_So_A_Refresh_Does_Not_Paint_Stale()
+    {
+        var source = new GatedSource();
+        source.Gate(PrListFilter.Team).SetResult([Pr(1, "seed")]);
+        var vm = new PrListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken); // Team [1] cached, active = Team
+        Assert.Single(vm.Rows);
+
+        // A mutation (vote/abandon) drops the active tab's cache so a transient refresh failure
+        // shows a blank pane rather than a stale row that no longer reflects the change.
+        vm.InvalidateActiveTab();
+
+        var refresh = source.Gate(PrListFilter.Team);
+        var reload = vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        // No stale paint: the active tab's cache was dropped, so the pane blanks and waits.
+        Assert.Empty(vm.Rows);
+
+        refresh.SetResult([Pr(1, "seed")]);
+        await reload;
+        Assert.Single(vm.Rows);
+    }
+
+    [Fact]
     public async Task RepoFilter_Narrows_Active_Rows()
     {
         var source = new FakeSource();
-        source.ByFilter[PrListFilter.ReviewQueue] = [Pr(1, "a", "web"), Pr(2, "b", "api")];
+        source.ByFilter[PrListFilter.Team] = [Pr(1, "a", "web"), Pr(2, "b", "api")];
         var vm = new PrListViewModel(source);
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
@@ -224,7 +298,7 @@ public class PrListViewModelTests
     public async Task ProjectFilter_Narrows_Rows_By_Project_Name()
     {
         var source = new FakeSource();
-        source.ByFilter[PrListFilter.ReviewQueue] =
+        source.ByFilter[PrListFilter.Team] =
             [Pr(1, "a", "web", "Fabrikam"), Pr(2, "b", "api", "Contoso")];
         var vm = new PrListViewModel(source);
         await vm.LoadAsync(TestContext.Current.CancellationToken);
@@ -239,7 +313,7 @@ public class PrListViewModelTests
     public async Task ProjectFilter_And_RepoFilter_Compose()
     {
         var source = new FakeSource();
-        source.ByFilter[PrListFilter.ReviewQueue] =
+        source.ByFilter[PrListFilter.Team] =
         [
             Pr(1, "a", "web", "Fabrikam"),
             Pr(2, "b", "api", "Fabrikam"),
@@ -261,7 +335,7 @@ public class PrListViewModelTests
         // `:project Web` must exclude a "WebApps" PR (exact, case-insensitive), matching the
         // work-item side's WIQL equality (M4).
         var source = new FakeSource();
-        source.ByFilter[PrListFilter.ReviewQueue] =
+        source.ByFilter[PrListFilter.Team] =
             [Pr(1, "a", "web", "Web"), Pr(2, "b", "api", "WebApps")];
         var vm = new PrListViewModel(source);
         await vm.LoadAsync(TestContext.Current.CancellationToken);

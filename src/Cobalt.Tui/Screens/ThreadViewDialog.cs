@@ -23,7 +23,7 @@ public sealed class ThreadViewDialog(
     IReadOnlyList<PrThread> threads)
 {
     private readonly CancellationTokenSource _cts = new();
-    private readonly KeymapRouter _router = new(KeyBindingTable.Default());
+    private readonly KeymapRouter _router = new(KeyBindingTable.Shared);
     private readonly IReadOnlyList<int> _threadIds = threads.Select(t => t.Id).ToList();
     private bool _closed;
     private Dialog? _dialog;

@@ -1,4 +1,6 @@
 using System.Net;
+using System.Text;
+using System.Text.Json;
 using Cobalt.Core.Ado;
 using Cobalt.Core.Config;
 using Cobalt.Core.Tests.Fakes;
@@ -64,7 +66,10 @@ public class WorkItemsApiTests : IDisposable
     [Fact]
     public async Task QueryMyWorkItems_Pages_Batch_Calls_Over_200_Ids()
     {
-        // 250 ids from WIQL must become two workitemsbatch calls (200 + 50).
+        // 250 ids from WIQL must become two workitemsbatch calls (200 + 50). This exercises the
+        // DEFENSIVE multi-page path: the fake WIQL handler ignores $top, so it drives >200 ids
+        // to prove Chunk paging + WIQL-order merge across pages. Production is capped at
+        // $top=200 (one page); this scenario cannot occur against the real server.
         var wiqlIds = string.Join(",", Enumerable.Range(1, 250).Select(i => $"{{\"id\":{i}}}"));
         var page1 = string.Join(",", Enumerable.Range(1, 200).Select(WorkItemJson));
         var page2 = string.Join(",", Enumerable.Range(201, 50).Select(WorkItemJson));
@@ -333,4 +338,69 @@ public class WorkItemsApiTests : IDisposable
 
         Assert.Contains("My%20Project/_apis/wit/workitems/42", handler.Requests[0].RequestUri!.AbsoluteUri);
     }
+
+    // ---- NET-8: known fields are projected once in the ctor; the dict stays for detail reads ----
+
+    [Fact]
+    public async Task WorkItem_Projects_Known_Fields_Once()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK,
+            """
+            {"id":42,"fields":{"System.Title":"Fix login","System.State":"Active","System.WorkItemType":"Bug",
+              "System.Tags":"ui; auth","System.Description":"<p>steps</p>","Microsoft.VSTS.Common.Priority":2}}
+            """);
+
+        var item = await Api(handler).GetWorkItemAsync(42, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Same(item.Title, item.Title); // materialized once, not recomputed per access
+        Assert.Same(item.Tags, item.Tags);
+        Assert.Equal(["ui", "auth"], item.Tags);
+        Assert.Equal("Fix login", item.Title);
+        Assert.Equal("Active", item.State);
+        Assert.Equal("Bug", item.WorkItemType);
+        // Detail fields still read through the retained raw dict, and the GetString hatch works.
+        Assert.Equal("<p>steps</p>", item.DescriptionHtml);
+        Assert.Equal(2, item.Priority);
+        Assert.Equal("Fix login", item.GetString("System.Title"));
+    }
+
+    // ---- NET-7: JSON bodies serialize straight to UTF-8 bytes; wire Content-Type stays charset=utf-8 ----
+
+    [Fact]
+    public async Task SendJson_Body_Is_Utf8_With_Charset_And_Round_Trips_Non_Ascii()
+    {
+        System.Net.Http.Headers.MediaTypeHeaderValue? contentType = null;
+        var handler = new FakeHttpHandler().Respond(req =>
+        {
+            contentType = req.Content!.Headers.ContentType;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"id":3,"text":"ok","createdBy":{"displayName":"Jin"},"createdDate":"2026-01-03T10:00:00Z"}""",
+                    Encoding.UTF8, "application/json"),
+            };
+        });
+
+        await Api(handler).AddCommentAsync(42, "ship it 🚀", cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal("application/json", contentType?.MediaType);
+        Assert.Equal("utf-8", contentType?.CharSet);
+        // The emoji survives the serialize -> UTF-8 -> deserialize wire round-trip.
+        using var doc = JsonDocument.Parse(handler.RequestBodies[0]!);
+        Assert.Contains("🚀", doc.RootElement.GetProperty("text").GetString());
+    }
+
+    // ---- NET-6: WIQL is capped with $top so an unbounded assigned-items list can't blow up ----
+
+    [Fact]
+    public async Task QueryMyWorkItems_Caps_The_Wiql_With_Top()
+    {
+        var handler = new FakeHttpHandler().Respond(HttpStatusCode.OK, """{"workItems":[]}""");
+
+        await Api(handler).QueryMyWorkItemsAsync(
+            new WorkItemQuery(), PrScope.Org, TestContext.Current.CancellationToken);
+
+        Assert.Contains("$top=200", handler.Requests[0].RequestUri!.AbsoluteUri);
+    }
+
 }

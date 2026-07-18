@@ -16,6 +16,30 @@ public class DiffFoldTests
         Enumerable.Range(1, count).Select(Ctx).ToList();
 
     [Fact]
+    public void Rows_Are_Memoized_So_Repeated_Projection_Reuses_The_Same_List()
+    {
+        // RENDER-5: the state is immutable, so Rows() is a pure function of it — the diff pane
+        // re-projects on every render, so the list is built once and reused by reference.
+        var state = DiffFoldState.Create(ContextRun(10), radius: 3);
+
+        Assert.Same(state.Rows(), state.Rows());
+    }
+
+    [Fact]
+    public void An_Expanded_State_Projects_Its_Own_Rows_Not_The_Originals()
+    {
+        // Memoization must be per-state: expanding returns a new state whose projection differs.
+        var lines = ContextRun(10);
+        var state = DiffFoldState.Create(lines, radius: 3);
+        var foldId = state.Rows().Single().FoldId!.Value;
+
+        var expanded = state.Expand(foldId);
+
+        Assert.NotSame(state.Rows(), expanded.Rows());
+        Assert.Equal(10, expanded.Rows().Count);
+    }
+
+    [Fact]
     public void No_Changes_Folds_The_Whole_File_Into_One_Fold()
     {
         var lines = ContextRun(10);

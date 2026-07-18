@@ -29,8 +29,29 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
 {
     private readonly IReadOnlyList<StyledLine> _lines = lines;
     private readonly Func<DiffPalette> _palette = palette ?? (() => ThemeService.CurrentPalette);
+    private static readonly int TokenKindCount = Enum.GetValues<TokenKind>().Length;
+
+    // Reused across rows so the diff pane does not allocate a Color?[] per drawn row every frame.
+    // Cleared per row (Render is single-threaded on the UI thread) so a re-render after a :theme
+    // switch re-resolves each Code* foreground rather than serving the palette it first drew under.
+    private readonly Color?[] _roleForegrounds = new Color?[TokenKindCount];
+
+    // Lazily cached per-line slices of the unclipped runs, so a row redrawn on every repaint
+    // (vertical scroll, selection move) that does not rebuild the source reuses its substrings
+    // rather than re-cutting them each frame; only clipped runs (viewportX/width) Substring fresh.
+    // Bounded by the rows actually drawn, and discarded when the source is replaced (RENDER-3).
+    private readonly string?[]?[] _runSlices = new string?[lines.Count][];
 
     public int Count => _lines.Count;
+
+    /// <summary>Test seam: the composed lines this source draws, by row.</summary>
+    internal IReadOnlyList<StyledLine> Lines => _lines;
+
+    /// <summary>
+    /// Test seam: the diff palette this source paints with, read fresh — the production path
+    /// constructs it without an override, so this is what makes <c>:theme</c> live (ADR 0019).
+    /// </summary>
+    internal DiffPalette Palette => _palette();
 
     public int MaxItemLength { get; } = lines.Count == 0 ? 0 : lines.Max(l => l.DisplayText.Length);
 
@@ -75,9 +96,17 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
         }
 
         var normal = listView.GetAttributeForRole(VisualRole.Normal);
+        var palette = _palette();
+        // Resolve each distinct Code* role's foreground at most once per row, not once per
+        // run — a row can carry dozens of runs (e.g. many Identifier tokens) over a handful
+        // of roles, and GetAttributeForRole does scheme resolution plus an event allocation.
+        // The array is reused across rows; clear it so each row (and each redraw after a theme
+        // switch) resolves fresh.
+        Array.Clear(_roleForegrounds);
         var drawn = 0;
-        foreach (var runItem in styled.Runs)
+        for (var i = 0; i < styled.Runs.Count; i++)
         {
+            var runItem = styled.Runs[i];
             var start = Math.Max(runItem.Start, viewportX);
             var end = Math.Min(runItem.Start + runItem.Length, viewportX + width);
             if (end <= start)
@@ -88,14 +117,14 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
             // resolve it here so Map stays a pure palette mapping.
             var roleForeground = runItem.Style.IsGutter
                 ? normal.Foreground
-                : listView.GetAttributeForRole(RoleFor(runItem.Style.Token)).Foreground;
-            listView.SetAttribute(Map(runItem.Style, normal, roleForeground));
-            listView.AddStr(styled.DisplayText.Substring(start, end - start));
+                : ResolveRoleForeground(listView, _roleForegrounds, runItem.Style.Token);
+            listView.SetAttribute(Map(runItem.Style, normal, roleForeground, palette));
+            listView.AddStr(SliceFor(item, i, runItem, styled.DisplayText, start, end));
             drawn += end - start;
         }
 
         // Full-width diff tint: pad the rest of the row in the line-kind background.
-        listView.SetAttribute(new Attribute(normal.Foreground, BackgroundFor(lineKind, emphasis: false, normal.Background)));
+        listView.SetAttribute(new Attribute(normal.Foreground, BackgroundFor(lineKind, emphasis: false, normal.Background, palette)));
         Pad(listView, width - drawn);
     }
 
@@ -103,6 +132,27 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
     {
         // Nothing owned; the source is replaced wholesale on refresh.
     }
+
+    /// <summary>
+    /// The string handed to <c>AddStr</c> for one run (there is no span overload — verified on TG
+    /// 2.4.16). When the run is fully on screen — the clamped [<paramref name="start"/>,
+    /// <paramref name="end"/>) equals the run's own [Start, Start+Length) — its slice equals the
+    /// run's text, so it is cut once and cached per line and reused on every later repaint; a
+    /// clipped run is Substring'd fresh each time.
+    /// </summary>
+    private string SliceFor(int item, int runIndex, StyledRun run, string display, int start, int end)
+    {
+        var unclipped = start == run.Start && end == run.Start + run.Length;
+        if (!unclipped)
+        {
+            return display.Substring(start, end - start);
+        }
+        var slices = _runSlices[item] ??= new string?[_lines[item].Runs.Count];
+        return slices[runIndex] ??= display.Substring(run.Start, run.Length);
+    }
+
+    /// <summary>Test seam: the cached unclipped-run slices for a row (null until the row is drawn).</summary>
+    internal IReadOnlyList<string?>? RunSlicesFor(int item) => _runSlices[item];
 
     private static string Clip(string text, int viewportX, int width)
     {
@@ -123,15 +173,15 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
     }
 
     /// <summary>
-    /// Maps a <see cref="RunStyle"/> to its <see cref="Attribute"/> using the active
-    /// <see cref="DiffPalette"/>. The theme-role parts are supplied by the caller:
-    /// <paramref name="normal"/> is <see cref="VisualRole.Normal"/> (context foreground/background)
-    /// and <paramref name="roleForeground"/> is the token's Code* foreground — so this stays a
-    /// pure, headless-testable palette mapping.
+    /// Maps a <see cref="RunStyle"/> to its <see cref="Attribute"/> using <paramref name="palette"/>.
+    /// The theme-role parts are supplied by the caller: <paramref name="normal"/> is
+    /// <see cref="VisualRole.Normal"/> (context foreground/background) and
+    /// <paramref name="roleForeground"/> is the token's Code* foreground — so this stays a pure
+    /// palette mapping. <see cref="Render"/> reads the palette once per row and passes it through,
+    /// so live <c>:theme</c> switching works without re-reading it per run.
     /// </summary>
-    internal Attribute Map(RunStyle style, Attribute normal, Color roleForeground)
+    internal static Attribute Map(RunStyle style, Attribute normal, Color roleForeground, DiffPalette palette)
     {
-        var palette = _palette();
         var foreground = style.IsGutter
             ? style.LineKind switch
             {
@@ -144,8 +194,19 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
         // A search hit wins the background so matches stand out over the diff tint.
         var background = style.SearchHit
             ? palette.SearchHitBackground
-            : BackgroundFor(style.LineKind, style.Emphasis, normal.Background);
+            : BackgroundFor(style.LineKind, style.Emphasis, normal.Background, palette);
         return new Attribute(foreground, background);
+    }
+
+    /// <summary>
+    /// Resolves the Code* foreground for <paramref name="token"/>, caching it in
+    /// <paramref name="cache"/> (indexed by <see cref="TokenKind"/>) so a role already seen in
+    /// this row is not re-resolved for every run that carries it.
+    /// </summary>
+    private static Color ResolveRoleForeground(ListView listView, Color?[] cache, TokenKind token)
+    {
+        var index = (int)token;
+        return cache[index] ??= listView.GetAttributeForRole(RoleFor(token)).Foreground;
     }
 
     private static VisualRole RoleFor(TokenKind token) => token switch
@@ -160,14 +221,11 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
         _ => VisualRole.Normal,
     };
 
-    private Color BackgroundFor(DiffLineKind kind, bool emphasis, Color contextBackground)
-    {
-        var palette = _palette();
-        return kind switch
+    private static Color BackgroundFor(DiffLineKind kind, bool emphasis, Color contextBackground, DiffPalette palette) =>
+        kind switch
         {
             DiffLineKind.Added => emphasis ? palette.AddedEmphasisBackground : palette.AddedBackground,
             DiffLineKind.Removed => emphasis ? palette.RemovedEmphasisBackground : palette.RemovedBackground,
             _ => contextBackground,
         };
-    }
 }

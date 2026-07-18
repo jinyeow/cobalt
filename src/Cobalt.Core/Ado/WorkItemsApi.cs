@@ -8,6 +8,10 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
 {
     private const string ApiVersion = "api-version=7.2-preview.3";
 
+    // Upper bound on the assigned-items list (matches GitApi.ListTop); a heavier assignee is
+    // silently truncated to the most-recently-changed 200.
+    private const int WiqlTop = 200;
+
     private static readonly string[] ListFields =
     [
         "System.Id", "System.WorkItemType", "System.Title", "System.State",
@@ -21,6 +25,13 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
         "System.AreaPath", "System.Description",
         "Microsoft.VSTS.Common.Priority", "Microsoft.VSTS.Scheduling.StoryPoints",
     ];
+
+    /// <summary>
+    /// The context project name a null/blank <c>project</c> argument resolves to (see
+    /// <see cref="ProjectSeg"/>). Callers that key a cache by project use this to fold a null
+    /// project onto the same key as the explicit context project.
+    /// </summary>
+    public string ContextProject => context.Project;
 
     private string Project => Uri.EscapeDataString(context.Project);
 
@@ -49,7 +60,9 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
 
         var result = await http.SendJsonAsync(
             HttpMethod.Post,
-            $"{prefix}_apis/wit/wiql?api-version=7.2-preview.2",
+            // $top caps the assigned-items list: without it a heavy assignee pulls an unbounded id
+            // set (then that many batch reads). 200 matches GitApi.ListTop; excess is truncated.
+            $"{prefix}_apis/wit/wiql?$top={WiqlTop}&api-version=7.2-preview.2",
             wiql,
             WorkItemJsonContext.Default.WiqlQuery,
             WorkItemJsonContext.Default.WiqlResult,
@@ -61,8 +74,12 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
             return [];
         }
 
-        // workitemsbatch caps at 200 ids per call; page through and merge.
-        var byId = new Dictionary<long, WorkItem>();
+        // The WIQL above is capped at $top=WiqlTop (200), so ids.Count is always <= 200 in
+        // production and Chunk yields a single page; workitemsbatch itself caps at 200 ids
+        // per call. Chunk stays here defensively in case the $top cap is ever raised, but with
+        // one page in practice there is nothing to gain from dispatching pages concurrently, so
+        // fetch them sequentially.
+        var byId = new Dictionary<long, WorkItem>(ids.Count);
         foreach (var page in Chunk(ids, 200))
         {
             var batch = await BatchAsync(page, ListFields, orgRoute, cancellationToken).ConfigureAwait(false);
@@ -73,7 +90,16 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
         }
 
         // WIQL returns ids ordered; the batch endpoint does not, so re-sort by WIQL order.
-        return [.. ids.Where(byId.ContainsKey).Select(id => byId[id])];
+        var ordered = new List<WorkItem>(ids.Count);
+        foreach (var id in ids)
+        {
+            if (byId.TryGetValue(id, out var item))
+            {
+                ordered.Add(item);
+            }
+        }
+
+        return ordered;
     }
 
     /// <summary>
@@ -148,11 +174,11 @@ public sealed class WorkItemsApi(AdoHttp http, AdoContext context)
         return WorkItemComment.From(dto);
     }
 
-    private static IEnumerable<List<T>> Chunk<T>(IReadOnlyList<T> items, int size)
+    private static IEnumerable<List<T>> Chunk<T>(List<T> items, int size)
     {
         for (var i = 0; i < items.Count; i += size)
         {
-            yield return [.. items.Skip(i).Take(size)];
+            yield return items.GetRange(i, Math.Min(size, items.Count - i));
         }
     }
 
