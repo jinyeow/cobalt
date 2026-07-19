@@ -1,4 +1,5 @@
 using Cobalt.Core.Ado;
+using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
 
@@ -13,8 +14,8 @@ namespace Cobalt.Tui.Screens;
 /// </summary>
 internal static class OperationLogDialog
 {
-    public static void Show(IApplication app, OperationLog operations) =>
-        TextDialog.Show(app, "log", Format(operations.History));
+    public static void Show(IApplication app, OperationLog operations, KeyBindingTable? bindings = null) =>
+        TextDialog.Show(app, "log", Format(operations.History), bindings);
 
     /// <summary>Renders the history newest-last; pure so the formatting is unit-testable without a run loop.</summary>
     internal static string Format(IReadOnlyList<AdoOperation> history) =>

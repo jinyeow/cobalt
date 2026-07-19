@@ -7,6 +7,7 @@ using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
+using Terminal.Gui.Input;
 
 namespace Cobalt.Tui.Tests.App;
 
@@ -108,5 +109,42 @@ public class ShellIntegrationWiringTests
         // up, so the empty-state hint now offers widening back to org.
         shellVm.HandlePaletteInput("scope project");
         Assert.Contains(":scope org", listVm.EmptyStateText);
+    }
+
+    private static KeyBindingTable RemapGlobal(string command, string sequence) =>
+        KeyBindingTable.FromConfig(new KeysConfig(
+            new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>
+            {
+                ["global"] = new Dictionary<string, IReadOnlyList<string>> { [command] = new[] { sequence } },
+            }));
+
+    [Fact]
+    public void Remapped_Movement_Key_Routes_Through_The_Injected_Table()
+    {
+        // move-down remapped j -> n. The shell's router is built from the injected table, so 'n'
+        // must reach the movement-dispatch path (observed via MovementRedrawOverride, the seam a
+        // real list Navigate fires). With the default Shared table 'n' is unbound and nothing fires.
+        var vm = new ShellViewModel(["work"], "work");
+        using var shell = new CobaltShell(App, vm, bindings: RemapGlobal("move-down", "n"));
+        bool? forced = null;
+        shell.MovementRedrawOverride = f => forced = f;
+        shell.SetFocus();
+
+        shell.NewKeyDownEvent(new Key('n'));
+
+        Assert.Equal(false, forced); // a movement was dispatched (non-forced redraw) via the remapped key
+    }
+
+    [Fact]
+    public void Log_Palette_Command_Reaches_The_Subscribed_Shell()
+    {
+        var vm = new ShellViewModel(["work"], "work");
+        using var shell = new CobaltShell(App, vm);
+        OperationLog? shown = null;
+        shell.ShowLogOverride = ops => shown = ops;
+
+        vm.HandlePaletteInput("log"); // parser -> LogRequested -> shell's ShowLog
+
+        Assert.Same(vm.Operations, shown);
     }
 }

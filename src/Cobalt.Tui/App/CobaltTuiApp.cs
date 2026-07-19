@@ -44,6 +44,16 @@ public static class CobaltTuiApp
 
         using var connection = AdoConnection.Create(context, tokens);
 
+        // Feed every ADO request into the :log view — wired BEFORE the prime below so the one
+        // cached connectionData op the prime makes is deterministically logged (assigning the
+        // observer after the prime would race the request and drop it). The observer fires on
+        // threadpool continuation threads (AdoHttp's ConfigureAwait(false)); once the app exists it
+        // marshals each record onto the UI thread, and until then (the prime can complete before
+        // Init) it adds directly — OperationLog.Add is itself thread-safe, so that is race-free.
+        IApplication? appForLog = null;
+        connection.Http.OperationObserver = OperationObserver(
+            vm.Operations, run => { if (appForLog is { } a) { a.Invoke(run); } else { run(); } });
+
         // Prime the shared identity cache while the UI builds, so the first real call skips
         // the ~700ms cold DNS + TCP + TLS. Dropped on the floor deliberately rather than routed
         // through FireAndForget: priming is silent by contract, and FireAndForget would report
@@ -82,10 +92,9 @@ public static class CobaltTuiApp
         // Lower input latency: the default 25 iterations/sec adds up to ~40ms per
         // keystroke; 60 halves that to ~16ms for a snappier vim feel.
         Application.MaximumIterationsPerSecond = 60;
-        // Feed every ADO request into the :log view. The observer fires on threadpool continuation
-        // threads (AdoHttp's ConfigureAwait(false)), so marshal each record onto the UI thread
-        // before touching OperationLog's subscribers.
-        connection.Http.OperationObserver = OperationObserver(vm.Operations, app.Invoke);
+        // The app now exists: subsequent :log records marshal onto its UI thread (see the observer
+        // wiring above); anything the prime already reported was added directly and thread-safely.
+        appForLog = app;
         // Declared before the shell so disposal runs shell→monitor: the shell unsubscribes its
         // Changed handler before the monitor (whose watcher thread raises it) is disposed.
         using var monitor = OsThemeMonitor.Create();

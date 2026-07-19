@@ -64,4 +64,24 @@ public class PaletteCompletionTests
 
         Assert.Equal("context web", field.Text.ToString());
     }
+
+    [Fact]
+    public void Tab_Chains_From_An_Arg_Command_Into_Argument_Completion_Not_Stale_Commands()
+    {
+        using var shell = NewShell(out _, "work", "web");
+        var field = shell.OpenPaletteForTest();
+        field.Text = ":c";
+
+        // :c -> :context (with the trailing space Accept adds for an arg-taking command).
+        field.NewKeyDownEvent(Key.Tab);
+        Assert.Equal(":context ", field.Text.ToString());
+
+        // The 2nd Tab must chain into CONTEXT NAMES (not re-cycle command matches to :scope).
+        field.NewKeyDownEvent(Key.Tab);
+        Assert.Equal(":context work", field.Text.ToString());
+
+        // Further Tabs cycle the argument candidates.
+        field.NewKeyDownEvent(Key.Tab);
+        Assert.Equal(":context web", field.Text.ToString());
+    }
 }

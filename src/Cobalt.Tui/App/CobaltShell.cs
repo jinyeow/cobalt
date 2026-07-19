@@ -512,7 +512,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new PrDetailViewModel(_pullRequests, id);
-        new PrDetailDialog(_app, detailVm, _textInput, _vm.Messages.Info, _pullRequests, _context).Show();
+        new PrDetailDialog(_app, detailVm, _textInput, _vm.Messages.Info, _pullRequests, _context, _bindings).Show();
         _prList?.RefreshAfterMutation(); // reflect any votes/edits back into the list, dropping stale cache
     }
 
@@ -523,7 +523,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new WorkItemDetailViewModel(_workItems, id, project);
-        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _textInput).Show();
+        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _textInput, _bindings).Show();
         _workItemList?.OnRefresh(); // reflect any edits back into the list
     }
 
@@ -621,16 +621,20 @@ public sealed class CobaltShell : Window
     }
 
     /// <summary>
-    /// One Tab/S-Tab step of `:` completion. A fresh field (text changed since the last completion)
-    /// re-ranks suggestions for the current text and lands on the first (Tab) or last (S-Tab); an
-    /// unchanged field cycles the standing suggestions. The completed text (leading colon and
-    /// argument spacing preserved by <see cref="PaletteSuggestionsViewModel.Accept"/>) is written
-    /// back and the caret moved to the end so the next Tab keeps completing.
+    /// One Tab/S-Tab step of `:` completion. Re-ranks suggestions for the current text when the
+    /// field changed since the last completion, OR when the last completion left a trailing space —
+    /// that space is how <see cref="PaletteSuggestionsViewModel.Accept"/> marks "this command takes
+    /// an argument, keep completing", so the next Tab must chain into ARGUMENT candidates (e.g.
+    /// <c>:context </c> → context names) rather than re-cycle the command list. Otherwise the field
+    /// is a settled candidate and Tab/S-Tab cycles the standing suggestions. The completed text
+    /// (leading colon and argument spacing preserved by Accept) is written back and the caret moved
+    /// to the end so the next Tab keeps completing.
     /// </summary>
     private void CompletePalette(bool forward)
     {
         var text = _palette.Text?.ToString() ?? "";
-        if (text != _lastCompletion)
+        var chainIntoArgument = text == _lastCompletion && text.EndsWith(' ');
+        if (text != _lastCompletion || chainIntoArgument)
         {
             _suggestions.SetInput(text);
             if (!forward)
@@ -783,17 +787,29 @@ public sealed class CobaltShell : Window
         RefreshMessage();
     }
 
-    private void ShowHelp() => TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope));
+    private void ShowHelp() => TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope), _bindings);
 
     private void ShowMessages()
     {
         var lines = _vm.Messages.History
             .Select(m => $"{m.At:HH:mm:ss} {(m.Level == MessageLevel.Error ? "E" : "I")} {m.Text}");
-        TextDialog.Show(_app, "messages", string.Join("\n", lines));
+        TextDialog.Show(_app, "messages", string.Join("\n", lines), _bindings);
     }
 
+    /// <summary>Test seam: replaces the real :log overlay (needs a run loop) so a headless test can
+    /// prove the shell is subscribed to <see cref="ShellViewModel.LogRequested"/>.</summary>
+    internal Action<OperationLog>? ShowLogOverride { get; set; }
+
     /// <summary>:log — the ADO operations log (name, masked route, duration, outcome), same overlay as messages.</summary>
-    private void ShowLog() => OperationLogDialog.Show(_app, _vm.Operations);
+    private void ShowLog()
+    {
+        if (ShowLogOverride is { } show)
+        {
+            show(_vm.Operations);
+            return;
+        }
+        OperationLogDialog.Show(_app, _vm.Operations, _bindings);
+    }
 
     /// <summary>
     /// Unsubscribe the theme handlers before teardown. The monitor's watcher thread can raise
