@@ -326,13 +326,21 @@ public sealed class PrListView : View
         }
 
         var now = _now();
-        var cols = PrColumns.For(_vm.Rows);
 
         // SetSource nulls SelectedItem in 2.4.16, so capture the reviewer's current
         // row first and restore it (clamped) — otherwise a background reload snaps
         // the highlight back to the top. The list is the source of truth.
         var target = tabChanged ? 0 : (_list.SelectedItem ?? _vm.SelectedIndex);
-        _rendered = [.. _vm.Rows.Select(pr => PrRowFormatter.Format(pr, width, cols, now, _comments?.TryGet(pr)))];
+        if (_vm.Rows.Count == 0 && _vm.EmptyStateText is { } emptyText)
+        {
+            // Helpful-empty-states (item 3): explain why the list is empty instead of a blank body.
+            _rendered = [emptyText];
+        }
+        else
+        {
+            var cols = PrColumns.For(_vm.Rows);
+            _rendered = [.. _vm.Rows.Select(pr => PrRowFormatter.Format(pr, width, cols, now, _comments?.TryGet(pr)))];
+        }
         var rows = new ObservableCollection<string>(_rendered);
         _list.SetSource(rows);
         if (_vm.Rows.Count > 0)
