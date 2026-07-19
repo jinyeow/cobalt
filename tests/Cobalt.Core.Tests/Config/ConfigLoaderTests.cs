@@ -250,4 +250,82 @@ public class ConfigLoaderTests
         Assert.Contains("light", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("system", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    // ---- [keys.<scope>] remap config (ticket #30) ----
+
+    [Fact]
+    public void Keys_Section_Absent_Yields_Empty_KeysConfig()
+    {
+        var config = ConfigLoader.Parse(ValidToml);
+
+        Assert.Empty(config.Keys.Scopes);
+    }
+
+    [Fact]
+    public void Parses_A_Single_String_Key_Override()
+    {
+        var config = ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+
+            [keys.global]
+            move-down = "n"
+            """);
+
+        Assert.Equal(["n"], config.Keys.Scopes["global"]["move-down"]);
+    }
+
+    [Fact]
+    public void Parses_An_Array_Of_Key_Sequences()
+    {
+        var config = ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+
+            [keys.global]
+            move-down = ["n", "g j"]
+            """);
+
+        Assert.Equal(["n", "g j"], config.Keys.Scopes["global"]["move-down"]);
+    }
+
+    [Fact]
+    public void Empty_String_Value_Parses_To_No_Sequences()
+    {
+        var config = ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+
+            [keys.global]
+            move-down = ""
+            """);
+
+        Assert.Empty(config.Keys.Scopes["global"]["move-down"]);
+    }
+
+    [Fact]
+    public void Keys_Section_Entry_Not_A_Table_Is_An_Error()
+    {
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+
+            [keys]
+            global = "nope"
+            """));
+        Assert.Contains("keys.global", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Key_Value_Neither_String_Nor_Array_Is_An_Error()
+    {
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+
+            [keys.global]
+            move-down = 5
+            """));
+        Assert.Contains("move-down", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }

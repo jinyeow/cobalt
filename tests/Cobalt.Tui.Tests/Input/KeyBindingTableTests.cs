@@ -1,3 +1,4 @@
+using Cobalt.Core.Config;
 using Cobalt.Tui.Input;
 
 namespace Cobalt.Tui.Tests.Input;
@@ -72,5 +73,95 @@ public class KeyBindingTableTests
 
         Assert.NotSame(before, after);
         Assert.Contains(after, b => b.Sequence is ["b"]);
+    }
+
+    // ---- FromConfig: [keys.<scope>] overrides (ticket #30) ----
+
+    private static KeysConfig Keys(string scope, params (string Command, string Sequences)[] commands)
+    {
+        var scopeCommands = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        foreach (var (command, sequences) in commands)
+        {
+            scopeCommands[command] = sequences.Length == 0 ? [] : [sequences];
+        }
+        return new KeysConfig(new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [scope] = scopeCommands,
+        });
+    }
+
+    [Fact]
+    public void FromConfig_With_No_Overrides_Matches_The_Default_Table()
+    {
+        var table = KeyBindingTable.FromConfig(KeysConfig.Empty);
+
+        Assert.Equal(
+            KeyBindingTable.Default().Visible(KeyScope.Global).Select(b => (string.Join(' ', b.Sequence), b.Command)),
+            table.Visible(KeyScope.Global).Select(b => (string.Join(' ', b.Sequence), b.Command)));
+    }
+
+    [Fact]
+    public void FromConfig_Overrides_A_Default_Binding()
+    {
+        var table = KeyBindingTable.FromConfig(Keys("global", ("move-down", "n")));
+
+        var moveDown = table.Visible(KeyScope.Global).Where(b => b.Command == AppCommand.MoveDown).ToList();
+        Assert.Equal([new[] { "n" }], moveDown.Select(b => b.Sequence));
+    }
+
+    [Fact]
+    public void FromConfig_Empty_String_Unbinds_A_Command()
+    {
+        var table = KeyBindingTable.FromConfig(Keys("global", ("move-down", "")));
+
+        Assert.DoesNotContain(table.Visible(KeyScope.Global), b => b.Command == AppCommand.MoveDown);
+    }
+
+    [Fact]
+    public void FromConfig_Extends_A_Scope_With_A_New_Binding_For_An_Existing_Command()
+    {
+        // MarkViewed is only bound in DiffReview by default; extend it into WorkItemList.
+        var table = KeyBindingTable.FromConfig(Keys("workitemlist", ("mark-viewed", "Q")));
+
+        Assert.Contains(table.Visible(KeyScope.WorkItemList), b => b.Sequence is ["Q"] && b.Command == AppCommand.MarkViewed);
+    }
+
+    [Fact]
+    public void FromConfig_Unknown_Command_Throws_ConfigException()
+    {
+        var ex = Assert.Throws<ConfigException>(() =>
+            KeyBindingTable.FromConfig(Keys("global", ("not-a-real-command", "n"))));
+
+        Assert.Contains("not-a-real-command", ex.Message);
+    }
+
+    [Fact]
+    public void FromConfig_Unknown_Scope_Throws_ConfigException()
+    {
+        var ex = Assert.Throws<ConfigException>(() =>
+            KeyBindingTable.FromConfig(Keys("not-a-real-scope", ("move-down", "n"))));
+
+        Assert.Contains("not-a-real-scope", ex.Message);
+    }
+
+    [Fact]
+    public void FromConfig_Duplicate_Sequence_Conflict_Throws_ConfigException_Naming_The_Sequence()
+    {
+        // move-down keeps its default "j"; rebinding move-up onto "j" too is a same-scope
+        // shadow conflict (unlike scoped-over-global shadowing, which is legal).
+        var ex = Assert.Throws<ConfigException>(() =>
+            KeyBindingTable.FromConfig(Keys("global", ("move-up", "j"))));
+
+        Assert.Contains("j", ex.Message);
+    }
+
+    [Fact]
+    public void FromConfig_Prefix_Conflict_Throws_ConfigException_Naming_The_Sequence()
+    {
+        // "g" would shadow the existing "g g" (MoveTop) sequence, making it unreachable.
+        var ex = Assert.Throws<ConfigException>(() =>
+            KeyBindingTable.FromConfig(Keys("global", ("refresh", "g"))));
+
+        Assert.Contains("g", ex.Message);
     }
 }

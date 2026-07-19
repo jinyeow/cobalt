@@ -66,7 +66,60 @@ public static class ConfigLoader
                 $"default_context '{defaultContext}' has no matching [contexts.{defaultContext}] section");
         }
 
-        return new CobaltConfig(defaultContext, contexts, ParseTheme(root));
+        return new CobaltConfig(defaultContext, contexts, ParseTheme(root), ParseKeys(root));
+    }
+
+    private static KeysConfig ParseKeys(TomlTable root)
+    {
+        if (!root.TryGetValue("keys", out var raw) || raw is not TomlTable keysTable)
+        {
+            return KeysConfig.Empty;
+        }
+
+        var scopes = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (scopeName, scopeValue) in keysTable)
+        {
+            if (scopeValue is not TomlTable scopeTable)
+            {
+                throw new ConfigException(
+                    $"[keys.{scopeName}] must be a table of command-name = \"tokens\" entries");
+            }
+
+            var commands = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+            foreach (var (commandName, commandValue) in scopeTable)
+            {
+                commands[commandName] = ParseKeySequences(scopeName, commandName, commandValue);
+            }
+            scopes[scopeName] = commands;
+        }
+        return new KeysConfig(scopes);
+    }
+
+    private static IReadOnlyList<string> ParseKeySequences(string scopeName, string commandName, object? value)
+    {
+        switch (value)
+        {
+            case string sequence:
+                return sequence.Length == 0 ? [] : [sequence];
+            case TomlArray array:
+                var sequences = new List<string>();
+                foreach (var item in array)
+                {
+                    if (item is not string s)
+                    {
+                        throw new ConfigException(
+                            $"[keys.{scopeName}] {commandName} must be a string or array of strings");
+                    }
+                    if (s.Length > 0)
+                    {
+                        sequences.Add(s);
+                    }
+                }
+                return sequences;
+            default:
+                throw new ConfigException(
+                    $"[keys.{scopeName}] {commandName} must be a string or array of strings");
+        }
     }
 
     private static ThemeChoice ParseTheme(TomlTable table)
