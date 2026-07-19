@@ -54,3 +54,43 @@ in `DiffListDataSource` because they live *outside* TG's scheme roles (ADR 0010)
   follow in a real terminal.
 - When TG's MEC configuration can own theme data (TG #5416), `ThemeService` is the one file to
   migrate off the obsolete API.
+
+## Extension (2026-07): colour-degradation tiers
+
+The original decision assumed a truecolor terminal — the diff tints are 24-bit RGB. Terminals
+that lack truecolor (or opt out via `NO_COLOR`) rendered those RGB values against the nearest
+colour the driver could manage, which is not something cobalt controlled. This extension makes
+the degradation explicit and cobalt-owned, still entirely through the `DiffPalette`/`ThemeService`
+seam above — no new hard-coded colours, no renderer rewrite.
+
+- **Capability detection is pure.** `TerminalCapabilities.Detect(Func<string, string?> getEnv)`
+  decides a `ColorSupport` tier (`Full` truecolor / `Ansi16` / `None` monochrome) and a
+  `UnicodeSafe` flag **deterministically from environment variables** — never by probing the live
+  terminal — reusing the same injected env seam as `CobaltTuiApp.ResolveDriver` (ADR 0016), so it
+  is fully unit-testable. Precedence: a non-empty `NO_COLOR` → `None`; an explicit `COBALT_COLOR`
+  override (`none`/`16`/`true`); `TERM=dumb` → `None`; `COLORTERM=truecolor|24bit`, `WT_SESSION`,
+  or a `TERM` naming `truecolor|24bit|256color` → `Full`; otherwise `Ansi16`. `UnicodeSafe` is
+  `false` for the Linux console and a dumb terminal (detected and exposed now, consumed by a later
+  renderer change).
+
+- **The tier degrades the diff palette, not the chrome model.** `ThemeResolver.Resolve` gains a
+  three-argument form `(ThemeChoice, OsTheme, ColorSupport)`: the choice still picks the chrome
+  theme name and the light/dark diff family, then the tier swaps the `DiffPalette` — `Full` keeps
+  the truecolor tints (byte-identical to before this extension), `Ansi16` uses the nearest
+  `ColorName16` palettes (`DiffPalette.Dark16`/`Light16`), and `None` collapses **both** light and
+  dark to `DiffPalette.Mono`. Mono carries no background tint (add and remove share one
+  background); the renderer's `+`/`-` sign gutters and attribute emphasis carry the meaning, so a
+  monochrome diff stays legible. A two-argument overload delegating to `Full` is retained so
+  pre-degradation callers still compile.
+
+- **Detected capabilities are ambient, like the palette.** `ThemeService.Capabilities` is published
+  once at startup (`ThemeService.SetCapabilities`, called before `Enable()`), defaulting to
+  `Full` + Unicode-safe so the pre-detection look is unchanged. Startup also sets Terminal.Gui's
+  `Force16Colors` when `Capabilities.Color < ColorSupport.Full`, so the chrome degrades in step
+  with the diff — this is the library-config setting this ADR already audited as equal to TG's
+  hard-coded default, now set deliberately.
+
+- **Testing.** As above, the rendered colours are PTY/manual, but detection, resolution, and the
+  palette tiers are pure and unit-tested: `Detect` over an env permutation table, `Resolve` across
+  the `(choice × os × support)` matrix, `Mono` has no add/remove tint, and the 16-tier palettes are
+  asserted to contain only `ColorName16`-representable colours.

@@ -53,4 +53,25 @@ public class ThemeServiceTests
         // "Default" is a live, selectable key after the merge — the active theme really switched.
         Assert.Equal("Default", ThemeManager.GetCurrentThemeName());
     }
+
+    [Fact]
+    public void Capabilities_Default_To_Full_Colour_So_The_Pre_Detection_Look_Is_Unchanged()
+    {
+        // Before startup detects anything, assume the richest terminal so today's truecolor look
+        // holds — matching CurrentPalette defaulting to DiffPalette.Dark.
+        Assert.Equal(ColorSupport.Full, ThemeService.Capabilities.Color);
+    }
+
+    [Fact]
+    public void SetCapabilities_Publishes_Detected_Capabilities_For_The_Ambient_Reader()
+    {
+        var detected = new TerminalCapabilities(ColorSupport.Ansi16, UnicodeSafe: false);
+
+        ThemeService.SetCapabilities(detected);
+
+        Assert.Equal(detected, ThemeService.Capabilities);
+
+        // Restore the default so a leaked static does not perturb order-dependent sibling tests.
+        ThemeService.SetCapabilities(new TerminalCapabilities(ColorSupport.Full, UnicodeSafe: true));
+    }
 }
