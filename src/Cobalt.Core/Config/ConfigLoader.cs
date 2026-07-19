@@ -71,14 +71,30 @@ public static class ConfigLoader
 
     private static KeysConfig ParseKeys(TomlTable root)
     {
-        if (!root.TryGetValue("keys", out var raw) || raw is not TomlTable keysTable)
+        if (!root.TryGetValue("keys", out var raw))
         {
             return KeysConfig.Empty;
         }
+        if (raw is not TomlTable keysTable)
+        {
+            throw new ConfigException("[keys] must be a table of [keys.<scope>] sections, e.g. [keys.global]");
+        }
 
-        var scopes = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.OrdinalIgnoreCase);
+        var scopes = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.Ordinal);
+        // TOML keys are case-sensitive, so `[keys.global]` and `[keys.Global]` are two
+        // distinct table entries here; both resolve to the same KeyScope downstream
+        // (case-insensitively), so silently letting the second overwrite the first would
+        // drop one's bindings without a trace. Track normalized names to catch that.
+        var seenScopeNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (scopeName, scopeValue) in keysTable)
         {
+            if (seenScopeNames.TryGetValue(scopeName, out var firstSpelling))
+            {
+                throw new ConfigException(
+                    $"[keys.{scopeName}] duplicates [keys.{firstSpelling}]; scope names are case-insensitive");
+            }
+            seenScopeNames[scopeName] = scopeName;
+
             if (scopeValue is not TomlTable scopeTable)
             {
                 throw new ConfigException(
@@ -100,9 +116,19 @@ public static class ConfigLoader
         switch (value)
         {
             case string sequence:
-                return sequence.Length == 0 ? [] : [sequence];
+                if (sequence.Length == 0)
+                {
+                    return []; // a bare "" is the documented unbind syntax
+                }
+                if (string.IsNullOrWhiteSpace(sequence))
+                {
+                    throw new ConfigException(
+                        $"[keys.{scopeName}] {commandName} is whitespace-only; use \"\" to unbind");
+                }
+                return [sequence];
             case TomlArray array:
                 var sequences = new List<string>();
+                var seen = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var item in array)
                 {
                     if (item is not string s)
@@ -110,10 +136,18 @@ public static class ConfigLoader
                         throw new ConfigException(
                             $"[keys.{scopeName}] {commandName} must be a string or array of strings");
                     }
-                    if (s.Length > 0)
+                    if (string.IsNullOrWhiteSpace(s))
                     {
-                        sequences.Add(s);
+                        throw new ConfigException(
+                            $"[keys.{scopeName}] {commandName} has an empty or whitespace-only entry in its array " +
+                            "(a bare \"\" outside an array unbinds instead)");
                     }
+                    if (!seen.Add(s))
+                    {
+                        throw new ConfigException(
+                            $"[keys.{scopeName}] {commandName} binds '{s}' twice");
+                    }
+                    sequences.Add(s);
                 }
                 return sequences;
             default:

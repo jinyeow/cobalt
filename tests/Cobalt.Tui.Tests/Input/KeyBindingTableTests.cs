@@ -91,13 +91,17 @@ public class KeyBindingTableTests
     }
 
     [Fact]
-    public void FromConfig_With_No_Overrides_Matches_The_Default_Table()
+    public void FromConfig_With_No_Overrides_Matches_The_Default_Table_In_Every_Scope()
     {
         var table = KeyBindingTable.FromConfig(KeysConfig.Empty);
+        var defaults = KeyBindingTable.Default();
 
-        Assert.Equal(
-            KeyBindingTable.Default().Visible(KeyScope.Global).Select(b => (string.Join(' ', b.Sequence), b.Command)),
-            table.Visible(KeyScope.Global).Select(b => (string.Join(' ', b.Sequence), b.Command)));
+        foreach (var scope in Enum.GetValues<KeyScope>())
+        {
+            Assert.Equal(
+                defaults.Visible(scope).Select(b => (string.Join(' ', b.Sequence), b.Command)),
+                table.Visible(scope).Select(b => (string.Join(' ', b.Sequence), b.Command)));
+        }
     }
 
     [Fact]
@@ -163,5 +167,61 @@ public class KeyBindingTableTests
             KeyBindingTable.FromConfig(Keys("global", ("refresh", "g"))));
 
         Assert.Contains("g", ex.Message);
+    }
+
+    [Fact]
+    public void FromConfig_Duplicate_Sequence_Conflict_In_A_Non_Global_Scope_Throws()
+    {
+        // ThreadView's default "x" belongs to ResolveThread; rebinding Comment onto "x"
+        // too is a same-scope shadow conflict (not the legal scoped-over-global kind).
+        var ex = Assert.Throws<ConfigException>(() =>
+            KeyBindingTable.FromConfig(Keys("threadview", ("comment", "x"))));
+
+        Assert.Contains("x", ex.Message);
+    }
+
+    [Fact]
+    public void FromConfig_Sequence_Containing_Esc_Throws_ConfigException()
+    {
+        // KeymapRouter always treats "Esc" as cancel before consulting the binding
+        // table; a sequence containing it could never fire.
+        var ex = Assert.Throws<ConfigException>(() =>
+            KeyBindingTable.FromConfig(Keys("global", ("refresh", "g Esc"))));
+
+        Assert.Contains("Esc", ex.Message);
+        Assert.Contains("refresh", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FromConfig_Sequence_Starting_With_A_Digit_Throws_ConfigException()
+    {
+        // KeymapRouter always consumes a leading digit as a count prefix before
+        // consulting the binding table; such a sequence could never fire.
+        var ex = Assert.Throws<ConfigException>(() =>
+            KeyBindingTable.FromConfig(Keys("global", ("refresh", "5"))));
+
+        Assert.Contains("refresh", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FromConfig_Command_Name_With_Extra_Hyphen_Is_Unknown()
+    {
+        // Only an exact kebab-case match resolves now; stripping every hyphen used to
+        // let a typo like "move--down" silently match "move-down".
+        var ex = Assert.Throws<ConfigException>(() =>
+            KeyBindingTable.FromConfig(Keys("global", ("move--down", "n"))));
+
+        Assert.Contains("move--down", ex.Message);
+    }
+
+    [Fact]
+    public void FromConfig_Two_Config_Keys_Resolving_To_The_Same_Command_Throws()
+    {
+        // "refresh" and "Refresh" are distinct TOML keys but the same AppCommand
+        // case-insensitively; last-wins would silently drop one binding.
+        var ex = Assert.Throws<ConfigException>(() =>
+            KeyBindingTable.FromConfig(Keys("global", ("refresh", "r"), ("Refresh", "x"))));
+
+        Assert.Contains("refresh", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

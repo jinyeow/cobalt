@@ -1,3 +1,4 @@
+using System.Text;
 using Cobalt.Core.Config;
 
 namespace Cobalt.Tui.Input;
@@ -153,13 +154,29 @@ public sealed class KeyBindingTable
 
             if (overridesByScope.TryGetValue(scope, out var overrides))
             {
+                var scopeLabel = scope.ToString().ToLowerInvariant();
+                // Distinct config keys (TOML is case-sensitive) can still resolve to the
+                // same AppCommand case-insensitively (e.g. "refresh" and "Refresh"); track
+                // that so the second doesn't silently overwrite the first (own.RemoveAll +
+                // re-add would otherwise make this a last-wins, no-error operation).
+                var resolvedFrom = new Dictionary<AppCommand, string>();
                 foreach (var (commandName, sequences) in overrides)
                 {
                     var command = ResolveCommand(commandName);
+                    if (resolvedFrom.TryGetValue(command, out var firstName))
+                    {
+                        throw new ConfigException(
+                            $"[keys.{scopeLabel}] '{firstName}' and '{commandName}' both resolve to command " +
+                            $"{command}; remove the duplicate");
+                    }
+                    resolvedFrom[command] = commandName;
+
                     own.RemoveAll(b => b.Command == command);
                     foreach (var sequence in sequences)
                     {
-                        own.Add((sequence.Split(' ', StringSplitOptions.RemoveEmptyEntries), command));
+                        var tokens = sequence.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        ValidateReachable(scopeLabel, commandName, sequence, tokens);
+                        own.Add((tokens, command));
                     }
                 }
             }
@@ -197,15 +214,52 @@ public sealed class KeyBindingTable
 
     private static AppCommand ResolveCommand(string name)
     {
-        var normalized = name.Replace("-", "", StringComparison.Ordinal);
         foreach (var command in Enum.GetValues<AppCommand>())
         {
-            if (string.Equals(command.ToString(), normalized, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(ToKebabCase(command), name, StringComparison.OrdinalIgnoreCase))
             {
                 return command;
             }
         }
         throw new ConfigException($"unknown key-binding command '{name}'");
+    }
+
+    /// <summary>"MoveDown" -&gt; "move-down": the canonical config spelling for an <see cref="AppCommand"/>.</summary>
+    private static string ToKebabCase(AppCommand command)
+    {
+        var name = command.ToString();
+        var sb = new StringBuilder(name.Length + 4);
+        for (var i = 0; i < name.Length; i++)
+        {
+            if (i > 0 && char.IsUpper(name[i]))
+            {
+                sb.Append('-');
+            }
+            sb.Append(char.ToLowerInvariant(name[i]));
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Rejects a sequence <see cref="KeymapRouter"/> could never deliver as a binding:
+    /// "Esc" always short-circuits to cancel (checked first, unconditionally), and a
+    /// leading digit is always consumed as a count prefix (checked before any binding
+    /// lookup) — so either makes the binding permanently dead.
+    /// </summary>
+    private static void ValidateReachable(string scopeLabel, string commandName, string rawSequence, string[] tokens)
+    {
+        if (tokens.Contains("Esc", StringComparer.Ordinal))
+        {
+            throw new ConfigException(
+                $"[keys.{scopeLabel}] {commandName} = \"{rawSequence}\" contains \"Esc\", which the router " +
+                "always treats as cancel; this binding could never fire");
+        }
+        if (tokens.Length > 0 && tokens[0].Length == 1 && tokens[0][0] is >= '0' and <= '9')
+        {
+            throw new ConfigException(
+                $"[keys.{scopeLabel}] {commandName} = \"{rawSequence}\" starts with a digit, which the router " +
+                "always consumes as a count prefix; this binding could never fire");
+        }
     }
 
     public void Bind(KeyScope scope, string sequence, AppCommand command)

@@ -328,4 +328,89 @@ public class ConfigLoaderTests
             """));
         Assert.Contains("move-down", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Keys_Not_A_Table_Is_An_Error()
+    {
+        // `keys = ...` must precede any [contexts.*]/[keys.*] header, or TOML would bind
+        // it to the preceding table instead of the root (same rule as `theme`).
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            """
+            keys = "bad"
+
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            """));
+        Assert.Contains("keys", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Duplicate_Scope_Table_Case_Insensitive_Is_An_Error()
+    {
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+
+            [keys.global]
+            move-down = "n"
+
+            [keys.Global]
+            move-up = "e"
+            """));
+        Assert.Contains("global", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Duplicate_Sequence_For_The_Same_Command_In_An_Array_Is_An_Error()
+    {
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+
+            [keys.global]
+            refresh = ["r", "r"]
+            """));
+        Assert.Contains("refresh", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("r", ex.Message);
+    }
+
+    [Fact]
+    public void Whitespace_Only_Bare_String_Is_An_Error()
+    {
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+
+            [keys.global]
+            move-down = "   "
+            """));
+        Assert.Contains("move-down", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Empty_String_Inside_An_Array_Is_An_Error()
+    {
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+
+            [keys.global]
+            move-down = ["n", ""]
+            """));
+        Assert.Contains("move-down", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Whitespace_Only_String_Inside_An_Array_Is_An_Error()
+    {
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+
+            [keys.global]
+            move-down = ["n", "   "]
+            """));
+        Assert.Contains("move-down", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }
