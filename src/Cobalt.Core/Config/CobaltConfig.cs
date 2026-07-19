@@ -5,11 +5,13 @@ public sealed class CobaltConfig
     public CobaltConfig(
         string? defaultContext,
         IReadOnlyDictionary<string, AdoContext> contexts,
-        ThemeChoice theme = ThemeChoice.Dark)
+        ThemeChoice theme = ThemeChoice.Dark,
+        KeysConfig? keys = null)
     {
         DefaultContext = defaultContext;
         Contexts = contexts;
         Theme = theme;
+        Keys = keys ?? KeysConfig.Empty;
     }
 
     public string? DefaultContext { get; }
@@ -17,6 +19,9 @@ public sealed class CobaltConfig
 
     /// <summary>The colour theme from <c>theme = …</c>; defaults to <see cref="ThemeChoice.Dark"/>.</summary>
     public ThemeChoice Theme { get; }
+
+    /// <summary>The <c>[keys.&lt;scope&gt;]</c> remap overrides; empty when config has no <c>[keys]</c> section.</summary>
+    public KeysConfig Keys { get; }
 
     /// <summary>Picks the active context: CLI override, then default_context, then a sole context.</summary>
     public AdoContext Resolve(string? nameOverride)

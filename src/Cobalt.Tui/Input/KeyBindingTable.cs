@@ -1,3 +1,6 @@
+using System.Text;
+using Cobalt.Core.Config;
+
 namespace Cobalt.Tui.Input;
 
 /// <summary>
@@ -124,6 +127,141 @@ public sealed class KeyBindingTable
         return table;
     }
 
+    /// <summary>
+    /// The default table with a user's <c>[keys.&lt;scope&gt;]</c> overrides applied (the
+    /// single remapping seam ADR 0007 designed for). Per command: a config entry replaces
+    /// that command's default bindings in the named scope (an empty sequence list unbinds
+    /// it); a command with no config entry keeps its default bindings; a command bound only
+    /// in config extends the table with a new binding. Fails loud (<see cref="ConfigException"/>)
+    /// on an unknown scope/command name, and on a conflict the resulting table would produce
+    /// (duplicate sequence or prefix shadowing within the same scope).
+    /// </summary>
+    public static KeyBindingTable FromConfig(KeysConfig config)
+    {
+        var overridesByScope = new Dictionary<KeyScope, IReadOnlyDictionary<string, IReadOnlyList<string>>>();
+        foreach (var (scopeName, commands) in config.Scopes)
+        {
+            overridesByScope[ResolveScope(scopeName)] = commands;
+        }
+
+        var defaults = Default();
+        var table = new KeyBindingTable();
+        foreach (var scope in Enum.GetValues<KeyScope>())
+        {
+            var own = defaults._bindings.TryGetValue(scope, out var defaultList)
+                ? new List<(string[] Sequence, AppCommand Command)>(defaultList)
+                : [];
+
+            if (overridesByScope.TryGetValue(scope, out var overrides))
+            {
+                var scopeLabel = scope.ToString().ToLowerInvariant();
+                // Distinct config keys (TOML is case-sensitive) can still resolve to the
+                // same AppCommand case-insensitively (e.g. "refresh" and "Refresh"); track
+                // that so the second doesn't silently overwrite the first (own.RemoveAll +
+                // re-add would otherwise make this a last-wins, no-error operation).
+                var resolvedFrom = new Dictionary<AppCommand, string>();
+                foreach (var (commandName, sequences) in overrides)
+                {
+                    var command = ResolveCommand(commandName);
+                    if (resolvedFrom.TryGetValue(command, out var firstName))
+                    {
+                        throw new ConfigException(
+                            $"[keys.{scopeLabel}] '{firstName}' and '{commandName}' both resolve to command " +
+                            $"{command}; remove the duplicate");
+                    }
+                    resolvedFrom[command] = commandName;
+
+                    own.RemoveAll(b => b.Command == command);
+                    foreach (var sequence in sequences)
+                    {
+                        var tokens = sequence.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        ValidateReachable(scopeLabel, commandName, sequence, tokens);
+                        own.Add((tokens, command));
+                    }
+                }
+            }
+
+            foreach (var (sequence, command) in own)
+            {
+                table.Bind(scope, string.Join(' ', sequence), command);
+            }
+        }
+
+        try
+        {
+            table.Validate();
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new ConfigException($"[keys] config produces a conflicting binding: {ex.Message}");
+        }
+
+        return table;
+    }
+
+    private static KeyScope ResolveScope(string name)
+    {
+        foreach (var scope in Enum.GetValues<KeyScope>())
+        {
+            if (string.Equals(scope.ToString(), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return scope;
+            }
+        }
+        var valid = string.Join(", ", Enum.GetValues<KeyScope>().Select(s => s.ToString().ToLowerInvariant()));
+        throw new ConfigException($"unknown key scope '[keys.{name}]'; valid scopes: {valid}");
+    }
+
+    private static AppCommand ResolveCommand(string name)
+    {
+        foreach (var command in Enum.GetValues<AppCommand>())
+        {
+            if (string.Equals(ToKebabCase(command), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return command;
+            }
+        }
+        throw new ConfigException($"unknown key-binding command '{name}'");
+    }
+
+    /// <summary>"MoveDown" -&gt; "move-down": the canonical config spelling for an <see cref="AppCommand"/>.</summary>
+    private static string ToKebabCase(AppCommand command)
+    {
+        var name = command.ToString();
+        var sb = new StringBuilder(name.Length + 4);
+        for (var i = 0; i < name.Length; i++)
+        {
+            if (i > 0 && char.IsUpper(name[i]))
+            {
+                sb.Append('-');
+            }
+            sb.Append(char.ToLowerInvariant(name[i]));
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Rejects a sequence <see cref="KeymapRouter"/> could never deliver as a binding:
+    /// "Esc" always short-circuits to cancel (checked first, unconditionally), and a
+    /// leading digit is always consumed as a count prefix (checked before any binding
+    /// lookup) — so either makes the binding permanently dead.
+    /// </summary>
+    private static void ValidateReachable(string scopeLabel, string commandName, string rawSequence, string[] tokens)
+    {
+        if (tokens.Contains("Esc", StringComparer.Ordinal))
+        {
+            throw new ConfigException(
+                $"[keys.{scopeLabel}] {commandName} = \"{rawSequence}\" contains \"Esc\", which the router " +
+                "always treats as cancel; this binding could never fire");
+        }
+        if (tokens.Length > 0 && tokens[0].Length == 1 && tokens[0][0] is >= '0' and <= '9')
+        {
+            throw new ConfigException(
+                $"[keys.{scopeLabel}] {commandName} = \"{rawSequence}\" starts with a digit, which the router " +
+                "always consumes as a count prefix; this binding could never fire");
+        }
+    }
+
     public void Bind(KeyScope scope, string sequence, AppCommand command)
     {
         if (!_bindings.TryGetValue(scope, out var list))
@@ -146,6 +284,30 @@ public sealed class KeyBindingTable
     {
         foreach (var scope in Enum.GetValues<KeyScope>())
         {
+            // Duplicate-sequence check runs against the scope's OWN bindings only (not the
+            // global fallback): a scoped binding deliberately reusing a global key to shadow
+            // it (e.g. DiffReview's "h" over Global's "h") is by design (KeymapRouter picks
+            // the first — scoped — match), not a conflict. Two different commands sharing an
+            // exact sequence within the same own list, though, is unreachable/ambiguous.
+            var own = scope == KeyScope.Global ? Visible(KeyScope.Global) : ScopedOnly(scope).ToArray();
+            var seen = new Dictionary<string, AppCommand>();
+            foreach (var (sequence, command) in own)
+            {
+                var key = string.Join(" ", sequence);
+                if (seen.TryGetValue(key, out var existing))
+                {
+                    if (existing != command)
+                    {
+                        throw new InvalidOperationException(
+                            $"key binding '{key}' is bound to both {existing} and {command} in scope {scope}");
+                    }
+                }
+                else
+                {
+                    seen[key] = command;
+                }
+            }
+
             var sequences = Visible(scope).Select(b => b.Sequence).ToList();
             foreach (var a in sequences)
             {
