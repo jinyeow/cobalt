@@ -1,3 +1,4 @@
+using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 using Cobalt.Tui.ViewModels;
 
@@ -359,12 +360,34 @@ public class PrListViewModelTests
     [Fact]
     public async Task EmptyStateText_On_Empty_Team_Tab_Explains_Org_Dependent_Setup()
     {
-        var vm = new PrListViewModel(new FakeSource());
+        var vm = new PrListViewModel(new FakeSource(), scope: () => PrScope.Project);
         await vm.LoadAsync(TestContext.Current.CancellationToken); // Team tab, empty by default
 
         Assert.Equal(PrListFilter.Team, vm.ActiveTab);
         Assert.Contains("empty, not broken", vm.EmptyStateText);
         Assert.Contains(":scope org", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Omits_Scope_Hint_When_Already_Org_Scoped()
+    {
+        // :scope org is a no-op when org is already the active scope (the default) — suggesting
+        // it would send the reviewer to run a command that changes nothing.
+        var vm = new PrListViewModel(new FakeSource(), scope: () => PrScope.Org);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(":scope org", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Omits_Scope_Hint_By_Default_With_No_Scope_Accessor()
+    {
+        // Org is the product default, so omitting the ctor param must behave the same as
+        // passing Org — never assume Project.
+        var vm = new PrListViewModel(new FakeSource());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(":scope org", vm.EmptyStateText);
     }
 
     [Fact]
@@ -378,8 +401,11 @@ public class PrListViewModelTests
     }
 
     [Fact]
-    public async Task EmptyStateText_Names_Repo_Filter_When_Filtered_To_Zero()
+    public async Task EmptyStateText_Does_Not_Name_The_Repo_Filter_No_Command_Clears_It_Yet()
     {
+        // RepositoryFilter has no palette command wired to it (no `:repo` yet — nothing in src
+        // sets it outside a test), so naming it as "the" active filter would send the reviewer
+        // to a command that doesn't exist. Falls through to the ordinary Team-tab guidance.
         var source = new FakeSource();
         source.ByFilter[PrListFilter.Team] = [Pr(1, "a", "web")];
         var vm = new PrListViewModel(source);
@@ -388,7 +414,23 @@ public class PrListViewModelTests
         vm.RepositoryFilter = "no-such-repo";
 
         Assert.Empty(vm.Rows);
-        Assert.Contains("no-such-repo", vm.EmptyStateText);
+        Assert.DoesNotContain("no-such-repo", vm.EmptyStateText);
+        Assert.Contains("empty, not broken", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Falls_Through_When_Project_Filter_Matches_Nothing_At_All()
+    {
+        // The server already returned zero PRs — the project filter did not cause the
+        // emptiness, so "0 of 0 ... clear to see them all" would be a false claim.
+        var vm = new PrListViewModel(new FakeSource()); // Team tab, empty by default
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.ProjectFilter = "Contoso";
+
+        Assert.Empty(vm.Rows);
+        Assert.DoesNotContain("0 of 0", vm.EmptyStateText);
+        Assert.Contains("empty, not broken", vm.EmptyStateText);
     }
 
     [Fact]

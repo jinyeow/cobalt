@@ -21,6 +21,10 @@ public sealed class WorkItemListView : View
     private int _lastWidth = -1;
     private IReadOnlyList<WorkItem>? _renderedRows;
     private IReadOnlyList<string> _rendered = [];
+    // Tracks the placeholder text (if any) the last rebuild actually painted. A reload's start
+    // flips EmptyStateText to null (IsLoading) without reassigning Rows — a guard keyed only on
+    // Rows-reference/width would leave a stale placeholder on screen through the whole reload.
+    private string? _renderedEmptyStateText;
     private bool _filtering;
     private bool _disposed;
 
@@ -217,8 +221,12 @@ public sealed class WorkItemListView : View
         var width = _list.Viewport.Width;
         // MISSED-A: a render can fire for a loading-state-only change (Changed with the same
         // Rows reference), which has nothing for the row list to reflect. Skip the reformat +
-        // SetSource rebuild unless the rows or the width they're padded to actually changed.
-        var rowsChanged = width != _lastWidth || !ReferenceEquals(_vm.Rows, _renderedRows);
+        // SetSource rebuild unless the rows, the width they're padded to, or the painted
+        // placeholder actually changed (a reload's start flips EmptyStateText without touching
+        // Rows, and that must still clear a stale placeholder).
+        var rowsChanged = width != _lastWidth
+            || !ReferenceEquals(_vm.Rows, _renderedRows)
+            || _vm.EmptyStateText != _renderedEmptyStateText;
         _lastWidth = width;
 
         if (rowsChanged)
@@ -233,9 +241,11 @@ public sealed class WorkItemListView : View
             {
                 // Helpful-empty-states (item 3): explain why the list is empty instead of a blank body.
                 _rendered = [emptyText];
+                _renderedEmptyStateText = emptyText;
             }
             else
             {
+                _renderedEmptyStateText = null;
                 var cols = WorkItemColumns.For(_vm.Rows);
                 _rendered = [.. _vm.Rows.Select(item => WorkItemRowFormatter.Format(item, width, cols))];
             }

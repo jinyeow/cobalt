@@ -1,4 +1,5 @@
 using Cobalt.Core.Ado;
+using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 using Cobalt.Tui.Tasks;
 
@@ -10,14 +11,26 @@ public interface IWorkItemSource
     Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(WorkItemQuery query, CancellationToken ct);
 }
 
-/// <summary>State for the "my work items" list: async load, error surface, live filter, selection.</summary>
-public sealed class WorkItemListViewModel(IWorkItemSource source, bool includeCompleted = false, string? projectFilter = null)
+/// <summary>
+/// State for the "my work items" list: async load, error surface, live filter, selection.
+/// <paramref name="scope"/> reads the shell's current PR/WI scope so
+/// <see cref="EmptyStateText"/> only suggests <c>:scope org</c> when it would actually change
+/// anything (Project scope) — org is the product default, so a caller that omits this behaves
+/// as if scope were always Org. Unit E: pass <c>() =&gt; _vm.Scope</c> (<c>ShellViewModel.Scope</c>)
+/// when constructing this view-model.
+/// </summary>
+public sealed class WorkItemListViewModel(
+    IWorkItemSource source,
+    bool includeCompleted = false,
+    string? projectFilter = null,
+    Func<PrScope>? scope = null)
 {
     private IReadOnlyList<WorkItem> _all = [];
     private string _filter = "";
     private int _selectedIndex;
     private bool _includeCompleted = includeCompleted;
     private string? _projectFilter = string.IsNullOrEmpty(projectFilter) ? null : projectFilter;
+    private readonly Func<PrScope> _scope = scope ?? (() => PrScope.Org);
     private CancellationToken _reloadToken = CancellationToken.None;
     private int _loadSeq;
 
@@ -94,9 +107,13 @@ public sealed class WorkItemListViewModel(IWorkItemSource source, bool includeCo
                 return null;
             }
 
-            if (_filter.Length != 0)
+            // Only blame the filter when there was something for it to narrow — if the server
+            // itself returned nothing, the filter isn't the cause and "0 of 0" would be false.
+            if (_filter.Length != 0 && _all.Count != 0)
             {
-                return $"0 of {_all.Count} work items match \"{_filter}\" — clear the search (Esc) to see them all.";
+                // Esc only hides the filter field — it does not clear _filter — so the hint must
+                // name the action that actually does: reopen `/` and clear the text.
+                return $"0 of {_all.Count} work items match \"{_filter}\" — reopen / and clear it to see them all.";
             }
 
             if (_projectFilter is not null)
@@ -104,7 +121,20 @@ public sealed class WorkItemListViewModel(IWorkItemSource source, bool includeCo
                 return $"No work items in project \"{_projectFilter}\" — clear with :project (no argument).";
             }
 
-            return "No work items assigned to you — :done show includes completed states; :scope org widens the query.";
+            // :done show and :scope org are only offered when they would actually change
+            // something — suggesting a no-op command is worse than no hint at all.
+            var hints = new List<string>();
+            if (!_includeCompleted)
+            {
+                hints.Add(":done show includes completed states");
+            }
+            if (_scope() == PrScope.Project)
+            {
+                hints.Add(":scope org widens the query");
+            }
+            return hints.Count == 0
+                ? "No work items assigned to you."
+                : $"No work items assigned to you — {string.Join("; ", hints)}.";
         }
     }
 

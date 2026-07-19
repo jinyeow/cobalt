@@ -119,4 +119,57 @@ public class WorkItemListRenderGuardTests
 
         Assert.Equal(vm.EmptyStateText, view.RowText(0));
     }
+
+    private sealed class GatedWiSource : IWorkItemSource
+    {
+        private readonly Queue<TaskCompletionSource<IReadOnlyList<WorkItem>>> _gates = new();
+
+        public TaskCompletionSource<IReadOnlyList<WorkItem>> NextGate()
+        {
+            var tcs = new TaskCompletionSource<IReadOnlyList<WorkItem>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _gates.Enqueue(tcs);
+            return tcs;
+        }
+
+        public Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(WorkItemQuery query, CancellationToken ct) =>
+            _gates.Dequeue().Task;
+    }
+
+    [Fact]
+    public async Task Render_Clears_The_Stale_Placeholder_When_A_Reload_Starts()
+    {
+        // WorkItemListViewModel.LoadAsync raises Changed at the START of a reload without
+        // reassigning Rows (only ApplyFilter at the END does), so a render guard keyed only on
+        // Rows-reference/width would leave a previous placeholder painted through the reload.
+        var source = new GatedWiSource();
+        var vm = new WorkItemListViewModel(source);
+        var firstGate = source.NextGate();
+        var firstLoad = vm.LoadAsync(TestContext.Current.CancellationToken);
+        firstGate.SetResult([]);
+        await firstLoad;
+
+        var view = new WorkItemListView(App, vm);
+        var window = new Window();
+        window.Add(view);
+        window.Layout(new System.Drawing.Size(60, 20));
+
+        var placeholder = vm.EmptyStateText;
+        Assert.Equal(placeholder, view.RowText(0));
+
+        source.NextGate(); // the reload triggered below is left in flight, never completes
+        try
+        {
+            // Setter reassigns _includeCompleted then fires a background reload synchronously up
+            // to its first await; the Changed it raises tries app.Invoke, which throws without
+            // Application.Init() (same pattern as the other tests in this suite).
+            vm.IncludeCompleted = true;
+        }
+        catch (Terminal.Gui.App.NotInitializedException)
+        {
+        }
+        view.Render();
+
+        Assert.True(vm.IsLoading);
+        Assert.NotEqual(placeholder, view.RowText(0));
+    }
 }
