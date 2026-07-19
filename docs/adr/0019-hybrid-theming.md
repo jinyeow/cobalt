@@ -68,20 +68,26 @@ seam above — no new hard-coded colours, no renderer rewrite.
   `UnicodeSafe` flag **deterministically from environment variables** — never by probing the live
   terminal — reusing the same injected env seam as `CobaltTuiApp.ResolveDriver` (ADR 0016), so it
   is fully unit-testable. Precedence: a non-empty `NO_COLOR` → `None`; an explicit `COBALT_COLOR`
-  override (`none`/`16`/`true`); `TERM=dumb` → `None`; `COLORTERM=truecolor|24bit`, `WT_SESSION`,
-  or a `TERM` naming `truecolor|24bit|256color` → `Full`; otherwise `Ansi16`. `UnicodeSafe` is
-  `false` for the Linux console and a dumb terminal (detected and exposed now, consumed by a later
-  renderer change).
+  override (`none`/`16`/`true`/`full`, an unrecognised value **throws** rather than being silently
+  ignored); `TERM=dumb` → `None`; `COLORTERM=truecolor|24bit`, `WT_SESSION`, a `TERM_PROGRAM` of a
+  known-truecolor emulator (`iTerm.app`/`WezTerm`/`vscode`), or a `TERM` naming
+  `truecolor|24bit|256color` → `Full`; **otherwise (incl. a missing/unknown `TERM`, the common
+  Windows-conhost case) → `Ansi16`** — only `NO_COLOR` and `TERM=dumb` blank colour, so a bare
+  terminal keeps the 16 ANSI colours every terminal has. `UnicodeSafe` is `false` for the Linux
+  console and a dumb terminal (detected and exposed now, consumed by a later renderer change).
 
 - **The tier degrades the diff palette, not the chrome model.** `ThemeResolver.Resolve` gains a
   three-argument form `(ThemeChoice, OsTheme, ColorSupport)`: the choice still picks the chrome
   theme name and the light/dark diff family, then the tier swaps the `DiffPalette` — `Full` keeps
   the truecolor tints (byte-identical to before this extension), `Ansi16` uses the nearest
-  `ColorName16` palettes (`DiffPalette.Dark16`/`Light16`), and `None` collapses **both** light and
-  dark to `DiffPalette.Mono`. Mono carries no background tint (add and remove share one
-  background); the renderer's `+`/`-` sign gutters and attribute emphasis carry the meaning, so a
-  monochrome diff stays legible. A two-argument overload delegating to `Full` is retained so
-  pre-degradation callers still compile.
+  `ColorName16` palettes (`DiffPalette.Dark16`/`Light16`, whose `+`/`-` gutter signs use a
+  contrasting neutral — white on the dark tier, black on the light — so they never vanish where a
+  scheme's bright ≈ normal), and `None` collapses **both** light and dark to `DiffPalette.Mono`.
+  Mono paints *no* diff background — its background/gutter fields are `null`, which the renderer
+  maps to the terminal's normal background/foreground, so add/removed rows carry no colour stripe
+  and the `+`/`-` sign gutters plus attribute emphasis carry the whole meaning; a search hit pairs a
+  black-on-white foreground/background so it stays visible on the untinted body. A two-argument
+  overload delegating to `Full` is retained so pre-degradation callers still compile.
 
 - **Detected capabilities are ambient, like the palette.** `ThemeService.Capabilities` is published
   once at startup (`ThemeService.SetCapabilities`, called before `Enable()`), defaulting to

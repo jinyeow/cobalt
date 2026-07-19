@@ -70,6 +70,36 @@ public class DiffListDataSourceTests
     }
 
     [Fact]
+    public void Mono_Added_And_Removed_Rows_Inherit_The_Context_Background_So_No_Tint()
+    {
+        // NO_COLOR / mono must not stripe the diff with a hard-coded background — the +/- sign
+        // gutters carry add/remove, and the body keeps the terminal's normal background so it stays
+        // legible under any chrome (ADR 0019 extension).
+        var added = new RunStyle(TokenKind.Plain, DiffLineKind.Added, Emphasis: false, IsGutter: false);
+        var addedEmphasis = new RunStyle(TokenKind.Plain, DiffLineKind.Added, Emphasis: true, IsGutter: false);
+        var removed = new RunStyle(TokenKind.Plain, DiffLineKind.Removed, Emphasis: false, IsGutter: false);
+        var removedEmphasis = new RunStyle(TokenKind.Plain, DiffLineKind.Removed, Emphasis: true, IsGutter: false);
+
+        Assert.Equal(Normal.Background, DiffListDataSource.Map(added, Normal, RoleForeground, DiffPalette.Mono).Background);
+        Assert.Equal(Normal.Background, DiffListDataSource.Map(addedEmphasis, Normal, RoleForeground, DiffPalette.Mono).Background);
+        Assert.Equal(Normal.Background, DiffListDataSource.Map(removed, Normal, RoleForeground, DiffPalette.Mono).Background);
+        Assert.Equal(Normal.Background, DiffListDataSource.Map(removedEmphasis, Normal, RoleForeground, DiffPalette.Mono).Background);
+    }
+
+    [Fact]
+    public void Mono_Gutter_Sign_Uses_The_Normal_Foreground_On_The_Untinted_Background()
+    {
+        // The +/- glyph must read on the inherited background — its colour cannot carry meaning,
+        // so it falls back to the theme's normal foreground rather than a fixed hue.
+        var addedGutter = new RunStyle(TokenKind.Plain, DiffLineKind.Added, Emphasis: false, IsGutter: true);
+
+        var attr = DiffListDataSource.Map(addedGutter, Normal, RoleForeground, DiffPalette.Mono);
+
+        Assert.Equal(Normal.Foreground, attr.Foreground);
+        Assert.Equal(Normal.Background, attr.Background);
+    }
+
+    [Fact]
     public void Context_Falls_Back_To_The_Normal_Background()
     {
         var style = new RunStyle(TokenKind.Plain, DiffLineKind.Context, Emphasis: false, IsGutter: false);

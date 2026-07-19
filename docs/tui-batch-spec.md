@@ -110,14 +110,16 @@ truecolor gets ANSI-16 tints; truecolor terminals are byte-identical to today.
 **What:** pure detection of colour depth + Unicode width support, feeding item 4.
 **Owned files (unit D):** new `src/Cobalt.Tui/Theming/TerminalCapabilities.cs`; tests.
 **Approach:** `record TerminalCapabilities(ColorSupport Color, bool UnicodeSafe)` with
-`enum ColorSupport { Mono, Ansi16, TrueColor }` and a pure
-`Detect(Func<string, string?> env)` — same env-func seam as
-`CobaltTuiApp.ResolveDriver` (`CobaltTuiApp.cs:97`, ADR 0016) so it's fully unit-testable.
-Precedence: `NO_COLOR` (any non-empty value) → Mono; `COBALT_COLOR=16|true` override;
-`COLORTERM=truecolor|24bit` or `WT_SESSION` → TrueColor; `TERM` containing `256color`/
-known truecolor terms → TrueColor; otherwise Ansi16. `UnicodeSafe` from
-`TERM=linux`/codepage heuristics — detected and exposed now, consumed later (no renderer
-change in this batch). Published once at startup next to the palette's ambient seam:
+`enum ColorSupport { None, Ansi16, Full }` (ordered so `None < Ansi16 < Full`, letting startup
+couple `Force16Colors` to `Color < Full`) and a pure `Detect(Func<string, string?> env)` — same
+env-func seam as `CobaltTuiApp.ResolveDriver` (`CobaltTuiApp.cs:97`, ADR 0016) so it's fully
+unit-testable. Precedence: `NO_COLOR` (any non-empty value) → None; `COBALT_COLOR=none|16|true|full`
+override (an unrecognised value throws, not silently ignored); `TERM=dumb` → None;
+`COLORTERM=truecolor|24bit`, `WT_SESSION`, `TERM_PROGRAM` ∈ {iTerm.app, WezTerm, vscode}, or a
+`TERM` containing `256color`/`truecolor`/`24bit` → Full; **otherwise (incl. a missing/unknown
+`TERM`, the common Windows-conhost case) → Ansi16** — only `NO_COLOR`/`TERM=dumb` blank colour.
+`UnicodeSafe` from `TERM=linux`/dumb heuristics — detected and exposed now, consumed later (no
+renderer change in this batch). Published once at startup next to the palette's ambient seam:
 `ThemeService.Capabilities` (set before `Enable()` in `CobaltTuiApp.Run`,
 `CobaltTuiApp.cs:63` — unit E), consistent with ADR 0019's "theme is global state,
 ambient accessor is correct" (`ThemeService.cs:5-13`).

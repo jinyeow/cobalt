@@ -65,24 +65,20 @@ public sealed record TerminalCapabilities(ColorSupport Color, bool UnicodeSafe)
             return ColorSupport.None;
         }
 
-        // Explicit app override beats every heuristic below.
+        // Explicit app override beats every heuristic below; an unparseable value is a config
+        // error, so fail loud with the offending value named rather than silently ignoring it.
         var overridden = getEnv("COBALT_COLOR")?.Trim();
         if (!string.IsNullOrEmpty(overridden))
         {
-            switch (overridden.ToLowerInvariant())
+            return overridden.ToLowerInvariant() switch
             {
-                case "none":
-                case "0":
-                case "mono":
-                    return ColorSupport.None;
-                case "16":
-                case "ansi16":
-                    return ColorSupport.Ansi16;
-                case "true":
-                case "truecolor":
-                case "24bit":
-                    return ColorSupport.Full;
-            }
+                "none" or "0" or "mono" => ColorSupport.None,
+                "16" or "ansi16" => ColorSupport.Ansi16,
+                "true" or "truecolor" or "24bit" or "full" => ColorSupport.Full,
+                _ => throw new ArgumentException(
+                    $"COBALT_COLOR='{overridden}' is not a recognised value; use none, 16, or true.",
+                    nameof(getEnv)),
+            };
         }
 
         if (term.Equals("dumb", StringComparison.OrdinalIgnoreCase))
@@ -96,8 +92,15 @@ public sealed record TerminalCapabilities(ColorSupport Color, bool UnicodeSafe)
             return ColorSupport.Full;
         }
 
-        // Windows Terminal advertises truecolor via WT_SESSION rather than COLORTERM.
+        // Windows Terminal advertises truecolor via WT_SESSION, and some emulators via TERM_PROGRAM
+        // rather than COLORTERM.
         if (!string.IsNullOrEmpty(getEnv("WT_SESSION")))
+        {
+            return ColorSupport.Full;
+        }
+
+        var termProgram = getEnv("TERM_PROGRAM")?.Trim();
+        if (termProgram is not null && KnownTruecolorPrograms.Contains(termProgram))
         {
             return ColorSupport.Full;
         }
@@ -109,7 +112,12 @@ public sealed record TerminalCapabilities(ColorSupport Color, bool UnicodeSafe)
             return ColorSupport.Full;
         }
 
-        // A terminal that names itself but signals no rich colour still gets the 16 ANSI colours.
+        // A terminal that names itself (or none — the common Windows conhost case) but signals no
+        // rich colour still gets the 16 ANSI colours; only NO_COLOR and TERM=dumb blank it.
         return ColorSupport.Ansi16;
     }
+
+    // Emulators that render truecolor but advertise it only through TERM_PROGRAM (not COLORTERM).
+    private static readonly HashSet<string> KnownTruecolorPrograms =
+        new(StringComparer.OrdinalIgnoreCase) { "iTerm.app", "WezTerm", "vscode" };
 }

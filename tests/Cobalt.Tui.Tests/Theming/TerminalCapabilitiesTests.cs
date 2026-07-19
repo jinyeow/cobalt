@@ -105,4 +105,48 @@ public class TerminalCapabilitiesTests
 
         Assert.True(caps.UnicodeSafe);
     }
+
+    [Fact]
+    public void Empty_Environment_Keeps_Ansi16_Not_Mono()
+    {
+        // A missing TERM is the common Windows-conhost case; blanking colour there would be worse
+        // than assuming the 16 ANSI colours every terminal has. Only NO_COLOR/dumb force mono.
+        var caps = TerminalCapabilities.Detect(_ => null);
+
+        Assert.Equal(ColorSupport.Ansi16, caps.Color);
+        Assert.True(caps.UnicodeSafe);
+    }
+
+    [Theory]
+    [InlineData("iTerm.app")]
+    [InlineData("WezTerm")]
+    [InlineData("vscode")]
+    public void Known_Truecolor_Term_Program_Yields_Full(string program)
+    {
+        var caps = TerminalCapabilities.Detect(Env(("TERM_PROGRAM", program)));
+
+        Assert.Equal(ColorSupport.Full, caps.Color);
+    }
+
+    [Theory]
+    [InlineData("full", ColorSupport.Full)]
+    [InlineData("truecolor", ColorSupport.Full)]
+    [InlineData("16", ColorSupport.Ansi16)]
+    [InlineData("none", ColorSupport.None)]
+    public void Cobalt_Color_Override_Parses_Every_Documented_Value(string value, ColorSupport expected)
+    {
+        var caps = TerminalCapabilities.Detect(Env(("COBALT_COLOR", value)));
+
+        Assert.Equal(expected, caps.Color);
+    }
+
+    [Fact]
+    public void Unparseable_Cobalt_Color_Throws_Rather_Than_Silently_Ignoring()
+    {
+        var ex = Assert.Throws<ArgumentException>(
+            () => TerminalCapabilities.Detect(Env(("COBALT_COLOR", "purple"))));
+
+        Assert.Contains("COBALT_COLOR", ex.Message);
+        Assert.Contains("purple", ex.Message);
+    }
 }

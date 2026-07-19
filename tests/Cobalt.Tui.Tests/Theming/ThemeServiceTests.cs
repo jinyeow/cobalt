@@ -66,12 +66,17 @@ public class ThemeServiceTests
     public void SetCapabilities_Publishes_Detected_Capabilities_For_The_Ambient_Reader()
     {
         var detected = new TerminalCapabilities(ColorSupport.Ansi16, UnicodeSafe: false);
+        try
+        {
+            ThemeService.SetCapabilities(detected);
 
-        ThemeService.SetCapabilities(detected);
-
-        Assert.Equal(detected, ThemeService.Capabilities);
-
-        // Restore the default so a leaked static does not perturb order-dependent sibling tests.
-        ThemeService.SetCapabilities(new TerminalCapabilities(ColorSupport.Full, UnicodeSafe: true));
+            Assert.Equal(detected, ThemeService.Capabilities);
+        }
+        finally
+        {
+            // Restore the default even if the assert fails, so the leaked static cannot perturb
+            // order-dependent sibling tests sharing this non-parallel collection.
+            ThemeService.SetCapabilities(new TerminalCapabilities(ColorSupport.Full, UnicodeSafe: true));
+        }
     }
 }

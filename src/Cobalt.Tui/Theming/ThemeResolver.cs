@@ -9,9 +9,6 @@ namespace Cobalt.Tui.Theming;
 /// </summary>
 public static class ThemeResolver
 {
-    private static readonly ThemePreset DarkPreset = new("Default", DiffPalette.Dark);
-    private static readonly ThemePreset LightPreset = new("Light", DiffPalette.Light);
-
     /// <summary>
     /// Resolves a preset assuming full truecolor support. Kept as a delegating overload so callers
     /// that predate colour degradation (and parallel work units) still compile; it is equivalent to
