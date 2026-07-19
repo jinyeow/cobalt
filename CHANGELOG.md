@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### Added
+- **Keybinding remap config.** A `[keys.<scope>]` table in `config.toml` overrides or extends
+  the default bindings, scoped to a lowercased `KeyScope` (`global`, `workitemlist`,
+  `workitemdetail`, `pullrequestlist`, `pullrequestdetail`, `diffreview`, `threadview`). Each
+  entry is `command-name = "token sequence"` or an array for multiple sequences (`move-down =
+  ["n", "g j"]`); a config entry **replaces** that command's default bindings in its scope
+  (not additive — repeat the default if you want it kept alongside a new one), and
+  `command-name = ""` unbinds it. An unknown scope or command, a sequence that conflicts with
+  another command's binding in the same scope, or binding a reserved sequence (`Esc`, or one
+  starting with a bare digit) fails startup with the offending scope/command/sequence named.
+  The keybar and `?` help render from the live binding table, so a remap needs no other
+  change — and it reaches the modal dialogs too. See
+  [ADR 0023](docs/adr/0023-keybinding-remap-config.md).
+- **`:` command palette completion.** `Tab` / `Shift-Tab` in the `:` palette complete and
+  cycle command names, and for `:context`/`:project`, their argument names too (known context
+  names, and project names drawn from the loaded lists).
+- **`:log` operations view.** `:log` opens a scrollable dialog listing recent Azure DevOps
+  requests — operation name, route shape, duration, and outcome — for transparency into what
+  cobalt is doing. The route shape masks numeric IDs and GUID path segments to `{id}` and
+  trims the query to `api-version`; headers, tokens, and any other query text never reach the
+  log, by construction (the only way to record an operation pipes it through the masking
+  function first).
+
+### Changed
+- **Helpful empty states.** The PR and work-item lists now explain an empty result instead of
+  just showing nothing: the Team PR tab (the default, and inherently org-setup-dependent)
+  reads as empty by design, not broken, and points at `]`/`:scope org`; a list narrowed to
+  zero by an active filter names the filter and how to clear it.
+- **Colour degradation.** cobalt now detects the terminal's colour support — truecolor,
+  16-colour ANSI, or monochrome — from `NO_COLOR`, `COLORTERM`, `TERM`, `TERM_PROGRAM`, and
+  `WT_SESSION`, and degrades the chrome and diff palette to match instead of assuming
+  truecolor. A `COBALT_COLOR=none|16|true|full` override forces a tier (an unrecognised value
+  fails at startup rather than being ignored). In monochrome, diff rows carry no colour tint —
+  the `+`/`-` gutter sign and attribute emphasis carry the meaning instead. See
+  [ADR 0019](docs/adr/0019-hybrid-theming.md).
+
 ### Changed
 - **The work-item list is capped at the first 200 assigned items**, matching the existing
   pull-request-list cap: a heavy assignee no longer pulls an unbounded id set (and that many

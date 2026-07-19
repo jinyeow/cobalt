@@ -68,6 +68,26 @@ Two more runtime filters narrow the lists:
   that none is set. Active `:done` / `:project` filters show in the work-item
   list header. The `/` substring filter still composes on top.
 
+Keys can be remapped or extended per scope with a `[keys.<scope>]` table (scopes are
+the lowercased `KeyScope` names: `global`, `workitemlist`, `workitemdetail`,
+`pullrequestlist`, `pullrequestdetail`, `diffreview`, `threadview`):
+
+```toml
+[keys.global]
+move-down = "n"           # replaces the default binding for move-down
+move-up = ["k", "p"]      # an array binds multiple sequences
+quit = ""                 # "" unbinds a command
+```
+
+A config entry **replaces** that command's default bindings in its scope (not
+additive) — repeat the default alongside the new one (`move-down = ["j", "n"]`) to
+keep it as an alias. An unknown scope or command, a sequence that conflicts with
+another command's binding in the same scope, or binding a reserved sequence (`Esc`,
+or one starting with a bare digit) fails at startup with the offending
+scope/command/sequence named. The keybar and `?` help always render from the live
+binding table, so a remap shows up with no other change — and it reaches the modal
+dialogs too. See [ADR 0023](docs/adr/0023-keybinding-remap-config.md).
+
 ## Themes
 
 `theme` picks the colours: `dark` (default — the original look), `light`, or `system`
@@ -76,6 +96,15 @@ Two more runtime filters narrow the lists:
 chrome and syntax highlighting, and its own palette for the diff tints, so both recolour
 together. `system` follows the OS live on **Windows** (via the light/dark registry setting);
 on macOS/Linux it falls back to `dark` for now (use `:theme` to switch manually). See
+[ADR 0019](docs/adr/0019-hybrid-theming.md).
+
+**Colour degrades to what the terminal actually supports** instead of assuming truecolor:
+full RGB where detected, a 16-colour ANSI palette otherwise, or monochrome under a non-empty
+`NO_COLOR` or an unsupported terminal. Detection reads `NO_COLOR`, `COLORTERM`, `TERM`,
+`TERM_PROGRAM`, and `WT_SESSION`; `COBALT_COLOR=none|16|true|full` overrides it explicitly
+(any other value fails at startup rather than being silently ignored). In monochrome, diff
+rows carry no colour tint — the `+`/`-` gutter sign and text attributes carry the meaning
+instead. See the colour-degradation extension in
 [ADR 0019](docs/adr/0019-hybrid-theming.md).
 
 ## Sign in
@@ -100,10 +129,11 @@ tab row with the active tab highlighted.
 
 `j/k` move · `gg`/`G` top/bottom · `Ctrl-d`/`Ctrl-u` half-page · `/` filter ·
 `Enter`/`o`/`l` open · `h`/`q` back/close · `gt`/`gT` next/prev section · `g1`/`g2` jump to Work Items /
-Pull Requests · `Tab` next tab · `:` command palette
+Pull Requests · `Tab` next tab · `:` command palette — `Tab`/`Shift-Tab` complete and cycle
+command names, and for `:context`/`:project`, their argument names too —
 (`:q` quit, `:context NAME` switch context, `:scope org|project` list breadth,
 `:done show|hide` completed work items, `:project NAME` narrow to one project,
-`:help`, `:messages`) · `?` help ·
+`:help`, `:messages`, `:log` recent Azure DevOps requests) · `?` help ·
 `r` refresh. On a work item (the highlighted list row or its detail): `s` state ·
 `c` comment · `a` assign · `t` tags; the detail additionally has `e` edit
 description in `$EDITOR`. In the PR section: `[`/`]` (or `Tab`) cycle the team /
@@ -162,6 +192,12 @@ remaining terminal width (reflowing on resize), so there's no dead right gutter.
   than one project (org scope) · title (fills) · iteration · changed date. Acting on a
   row (`s`/`c`/`a`/`t`/open) targets that item's own project, so cross-project drill-in
   stays correct under org scope.
+
+**Empty lists explain themselves.** An empty Team PR tab (the default, and inherently
+org-dependent — team-based review-request setup varies) reads as empty by design, not
+broken, and points at `]`/`:scope org`; a list narrowed to zero by an active `/`, `:done`,
+or `:project` filter names the filter and how to clear it. No message shows while a list is
+still loading or has failed to load.
 
 ## Editor
 
@@ -245,7 +281,6 @@ or `%LOCALAPPDATA%\cobalt\crash.log` on Windows. See
   over the tty — see [ADR 0009](docs/adr/0009-editor-suspend-resume.md)).
 - `:context` switching updates the status bar but does not yet reconnect the data
   screens to the new org/project (restart with `--context` for now).
-- Keybindings are fixed; a remapping config is post-v1.
 
 ## Development
 
