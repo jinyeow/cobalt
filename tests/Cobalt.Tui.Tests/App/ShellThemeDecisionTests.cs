@@ -14,7 +14,7 @@ public class ShellThemeDecisionTests
     [Fact]
     public void Following_System_Applies_The_Light_Preset_When_The_Os_Goes_Light()
     {
-        var preset = CobaltShell.OsFollowPreset(ThemeChoice.System, OsTheme.Light);
+        var preset = CobaltShell.OsFollowPreset(ThemeChoice.System, OsTheme.Light, ColorSupport.Full);
 
         Assert.NotNull(preset);
         Assert.Equal("Light", preset.TgThemeName);
@@ -24,11 +24,22 @@ public class ShellThemeDecisionTests
     [Fact]
     public void Following_System_Applies_The_Dark_Preset_When_The_Os_Goes_Dark()
     {
-        var preset = CobaltShell.OsFollowPreset(ThemeChoice.System, OsTheme.Dark);
+        var preset = CobaltShell.OsFollowPreset(ThemeChoice.System, OsTheme.Dark, ColorSupport.Full);
 
         Assert.NotNull(preset);
         Assert.Equal("Default", preset.TgThemeName);
         Assert.Equal(DiffPalette.Dark, preset.Diff);
+    }
+
+    [Fact]
+    public void Following_System_Degrades_The_Diff_To_Mono_Under_No_Colour()
+    {
+        // The colour tier the shell reads (ThemeService.Capabilities.Color) flows into the OS-follow
+        // resolve, so a monochrome terminal collapses the diff to the sign-only palette.
+        var preset = CobaltShell.OsFollowPreset(ThemeChoice.System, OsTheme.Dark, ColorSupport.None);
+
+        Assert.NotNull(preset);
+        Assert.Equal(DiffPalette.Mono, preset.Diff);
     }
 
     [Theory]
@@ -36,7 +47,7 @@ public class ShellThemeDecisionTests
     [InlineData(ThemeChoice.Light)]
     public void A_Fixed_Theme_Ignores_Os_Changes(ThemeChoice fixedChoice)
     {
-        Assert.Null(CobaltShell.OsFollowPreset(fixedChoice, OsTheme.Light));
-        Assert.Null(CobaltShell.OsFollowPreset(fixedChoice, OsTheme.Dark));
+        Assert.Null(CobaltShell.OsFollowPreset(fixedChoice, OsTheme.Light, ColorSupport.Full));
+        Assert.Null(CobaltShell.OsFollowPreset(fixedChoice, OsTheme.Dark, ColorSupport.Full));
     }
 }

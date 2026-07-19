@@ -1,3 +1,4 @@
+using Cobalt.Core.Config;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
@@ -66,5 +67,24 @@ public class ShellChromeTests
         shell.NewKeyDownEvent(new Key('j'));
 
         Assert.DoesNotContain("3", shell.StatusText);
+    }
+
+    [Fact]
+    public void Keybar_Reflects_The_Injected_Remap_Table()
+    {
+        // Unit E swaps KeyBindingTable.Shared for a ctor-injected table built from config. A shell
+        // given a table that rebinds move-down to "n" must render "n" (not the default "j") in the
+        // keybar — proving the injected table, not the shared default, is what the shell renders and
+        // routes from.
+        var keys = new KeysConfig(new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>
+        {
+            ["global"] = new Dictionary<string, IReadOnlyList<string>> { ["move-down"] = new[] { "n" } },
+        });
+        var vm = new ShellViewModel(["work"], "work");
+
+        using var shell = new CobaltShell(App, vm, bindings: KeyBindingTable.FromConfig(keys));
+
+        Assert.Contains("n/k:move", shell.KeybarText);
+        Assert.DoesNotContain("j/k:move", shell.KeybarText);
     }
 }

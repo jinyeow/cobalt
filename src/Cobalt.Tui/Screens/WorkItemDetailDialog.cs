@@ -19,7 +19,7 @@ public sealed class WorkItemDetailDialog
     private readonly WorkItemDetailViewModel _vm;
     private readonly WorkItemActions _actions;
     private readonly Action<string> _log;
-    private readonly KeyBindingTable _bindings = KeyBindingTable.Shared;
+    private readonly KeyBindingTable _bindings;
     private readonly KeymapRouter _router;
     private readonly CancellationTokenSource _cts = new();
     private bool _closed;
@@ -47,12 +47,15 @@ public sealed class WorkItemDetailDialog
 
     public WorkItemDetailDialog(
         IApplication app, WorkItemDetailViewModel vm, EditorService editor, Action<string> log,
-        ITextInput? textInput = null)
+        ITextInput? textInput = null, KeyBindingTable? bindings = null)
     {
         _app = app;
         _vm = vm;
         _log = log;
         _actions = new WorkItemActions(app, editor, log, textInput);
+        // The shell injects its (possibly remapped) table; a direct caller/test omits it and falls
+        // back to the process-wide defaults. Help within the dialog renders from this same table.
+        _bindings = bindings ?? KeyBindingTable.Shared;
         _router = new KeymapRouter(_bindings);
     }
 
@@ -176,7 +179,7 @@ public sealed class WorkItemDetailDialog
                 }
                 else
                 {
-                    TextDialog.Show(_app, "keys", HelpText.ForDialog(_bindings, KeyScope.WorkItemDetail));
+                    TextDialog.Show(_app, "keys", HelpText.ForDialog(_bindings, KeyScope.WorkItemDetail), _bindings);
                 }
                 return true;
             case AppCommand.ChangeState:

@@ -3,6 +3,7 @@ using Cobalt.Core.Ado;
 using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 using Cobalt.Tui.Editor;
+using Cobalt.Tui.Input;
 using Cobalt.Tui.Screens;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
@@ -601,6 +602,31 @@ public class DetailDialogKeyDeliveryTests
         dialog.SetFocus();
 
         dialog.NewKeyDownEvent(new Key('?'));
+
+        Assert.True(opened);
+    }
+
+    // ---- unit E: injected remap table reaches the modal dialogs ----
+
+    [Fact]
+    public void PrDialog_Router_Responds_To_A_Remapped_Key_From_The_Injected_Table()
+    {
+        // open-diff remapped d -> z in the PR-detail scope. The dialog builds its router from the
+        // injected table, so 'z' must reach the diff-open seam (proving the remap reaches modals,
+        // not just the shell's own keybar).
+        var keys = new KeysConfig(new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>
+        {
+            ["pullrequestdetail"] = new Dictionary<string, IReadOnlyList<string>> { ["open-diff"] = new[] { "z" } },
+        });
+        var vm = new PrDetailViewModel(new FakePrStore(), 42);
+        var detail = new PrDetailDialog(App, vm, NoopTextInput(), _ => { }, bindings: KeyBindingTable.FromConfig(keys));
+        var opened = false;
+        detail.DiffAction = () => opened = true;
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('z'));
 
         Assert.True(opened);
     }

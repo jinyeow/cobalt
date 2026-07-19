@@ -20,10 +20,11 @@ public sealed class ThreadViewDialog(
     PrDiffViewModel vm,
     ITextInput textInput,
     Action<string> log,
-    IReadOnlyList<PrThread> threads)
+    IReadOnlyList<PrThread> threads,
+    KeyBindingTable? bindings = null)
 {
     private readonly CancellationTokenSource _cts = new();
-    private readonly KeymapRouter _router = new(KeyBindingTable.Shared);
+    private readonly KeymapRouter _router = new(bindings ?? KeyBindingTable.Shared);
     private readonly IReadOnlyList<int> _threadIds = threads.Select(t => t.Id).ToList();
     private bool _closed;
     private Dialog? _dialog;
@@ -203,7 +204,7 @@ public sealed class ThreadViewDialog(
                 }
                 else
                 {
-                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.ThreadView));
+                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.ThreadView), _router.Table);
                 }
                 return true;
             case AppCommand.Comment:
