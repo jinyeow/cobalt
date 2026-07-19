@@ -27,12 +27,23 @@ public sealed class AdoHttp(HttpClient client, Action<AdoOperation>? operationOb
         {
             return;
         }
-        OperationObserver(new AdoOperation(
+        var operation = AdoOperation.FromRoute(
             method.Method,
-            RouteShape.Of(path),
+            path,
             Stopwatch.GetElapsedTime(startTimestamp),
             status.HasValue ? (int)status.Value : null,
-            DateTimeOffset.UtcNow));
+            DateTimeOffset.UtcNow);
+        try
+        {
+            OperationObserver(operation);
+        }
+        catch (Exception)
+        {
+            // A misbehaving :log subscriber is a bug in that subscriber, not in the request
+            // that just completed (or failed) — it must never mask the real outcome the caller
+            // is awaiting, so it is swallowed here rather than propagated (ADR 0013 carve-out
+            // for an optional, best-effort observer with no bearing on the ADO call itself).
+        }
     }
 
     /// <summary>
@@ -44,6 +55,9 @@ public sealed class AdoHttp(HttpClient client, Action<AdoOperation>? operationOb
     /// so an auth/network fault here must not reach the message bar or the crash log — the first
     /// real request hits the same fault and reports it with proper context. Anything outside the
     /// expected set is a bug and still propagates (ADR 0013).</para>
+    ///
+    /// <para>Deliberately does not report to <see cref="OperationObserver"/>: it is not a
+    /// request the user asked for, so it would only be noise in the <c>:log</c> view.</para>
     /// </summary>
     public async Task WarmUpAsync(CancellationToken cancellationToken = default)
     {

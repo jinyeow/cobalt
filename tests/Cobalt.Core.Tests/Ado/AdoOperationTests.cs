@@ -44,4 +44,50 @@ public class AdoOperationTests
 
         Assert.Equal("_apis/connectionData", shape);
     }
+
+    [Fact]
+    public void Absolute_Url_With_Credentials_Never_Leaks_Host_Userinfo_Or_Query()
+    {
+        var shape = RouteShape.Of("https://user:PAT@dev.azure.com/contoso/_apis/x?sig=SECRET");
+
+        Assert.DoesNotContain("PAT", shape);
+        Assert.DoesNotContain("SECRET", shape);
+        Assert.DoesNotContain("@", shape);
+        Assert.DoesNotContain("dev.azure.com", shape);
+    }
+
+    [Fact]
+    public void Malformed_ApiVersion_With_Smuggled_Segment_Drops_The_Whole_Query()
+    {
+        var shape = RouteShape.Of("_apis/wit/workitems/999?api-version=7.1;sig=SECRET");
+
+        Assert.Equal("_apis/wit/workitems/{id}", shape);
+        Assert.DoesNotContain("SECRET", shape);
+    }
+
+    [Theory]
+    [InlineData("7.2")]
+    [InlineData("7.2-preview")]
+    [InlineData("7.2-preview.1")]
+    public void WellFormed_ApiVersion_Shapes_Survive(string apiVersion)
+    {
+        var shape = RouteShape.Of($"_apis/connectionData?api-version={apiVersion}");
+
+        Assert.Equal($"_apis/connectionData?api-version={apiVersion}", shape);
+    }
+
+    [Fact]
+    public void FromRoute_Is_The_Only_Construction_Path_And_Always_Redacts()
+    {
+        // AdoOperation has no public constructor that accepts a raw route string — FromRoute
+        // is the sole entry point, and it always pipes the route through RouteShape.Of, so a
+        // caller cannot smuggle an unredacted secret into a stored operation.
+        var op = AdoOperation.FromRoute(
+            "PATCH", "https://user:PAT@dev.azure.com/contoso/_apis/x?sig=SECRET",
+            TimeSpan.FromMilliseconds(5), 200, DateTimeOffset.UnixEpoch);
+
+        Assert.DoesNotContain("PAT", op.RouteShape);
+        Assert.DoesNotContain("SECRET", op.RouteShape);
+        Assert.DoesNotContain("@", op.RouteShape);
+    }
 }
