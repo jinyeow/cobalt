@@ -2,6 +2,7 @@ using Cobalt.Core.Ado;
 using Cobalt.Core.Auth;
 using Cobalt.Core.Config;
 using Cobalt.Core.Models;
+using Cobalt.Tui.Input;
 using Cobalt.Tui.Theming;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
@@ -34,6 +35,10 @@ public static class CobaltTuiApp
     private static int RunCore(CobaltConfig config, string? contextOverride, ITokenProvider tokens)
     {
         var context = config.Resolve(contextOverride);
+        // Build the remapped key table up front: a bad [keys] section is a user config error, so
+        // FromConfig throws ConfigException here (before the terminal is touched), which propagates
+        // to Program.cs for a clean message rather than a mid-startup crash (ADR 0023).
+        var bindings = KeyBindingTable.FromConfig(config.Keys);
         var vm = new ShellViewModel(
             [.. config.Contexts.Keys.Order(StringComparer.Ordinal)], context.Name, context.PrScope, config.Theme);
 
@@ -58,25 +63,53 @@ public static class CobaltTuiApp
             new PolicyApi(connection.Http));
 
         var driverName = ResolveDriver(Environment.GetEnvironmentVariable, DriverRegistry.GetDriverNames().ToArray());
+        // Detect the terminal's colour depth and publish it before the first draw (ADR 0019
+        // extension), so the resolver below degrades the diff palette and Force16Colors degrades
+        // the chrome in step. Same pure env seam as ResolveDriver — never probes the terminal.
+        var caps = TerminalCapabilities.Detect(Environment.GetEnvironmentVariable);
+        ThemeService.SetCapabilities(caps);
         // Enable Terminal.Gui's theming (scoped to its embedded config) before Init so the driver
         // starts on the resolved theme; the initial preset is applied just below.
         ThemeService.Enable();
         using var app = Application.Create().Init(driverName);
+        // Below truecolor, force TG's chrome down to the 16-colour path so it matches the degraded
+        // diff palette (a truecolor terminal is byte-identical to before).
+        if (caps.Color < ColorSupport.Full)
+        {
+            // Driver is guaranteed non-null immediately after Init (its getter throws otherwise).
+            app.Driver!.Force16Colors = true;
+        }
         // Lower input latency: the default 25 iterations/sec adds up to ~40ms per
         // keystroke; 60 halves that to ~16ms for a snappier vim feel.
         Application.MaximumIterationsPerSecond = 60;
+        // Feed every ADO request into the :log view. The observer fires on threadpool continuation
+        // threads (AdoHttp's ConfigureAwait(false)), so marshal each record onto the UI thread
+        // before touching OperationLog's subscribers.
+        connection.Http.OperationObserver = OperationObserver(vm.Operations, app.Invoke);
         // Declared before the shell so disposal runs shell→monitor: the shell unsubscribes its
         // Changed handler before the monitor (whose watcher thread raises it) is disposed.
         using var monitor = OsThemeMonitor.Create();
-        ThemeService.Apply(ThemeResolver.Resolve(config.Theme, monitor.Current));
+        ThemeService.Apply(ThemeResolver.Resolve(config.Theme, monitor.Current, caps.Color));
         using var shell = new CobaltShell(
-            app, vm, workItems, pullRequests, editor: null, context: context, themeMonitor: monitor);
+            app, vm, workItems, pullRequests, editor: null, context: context, themeMonitor: monitor,
+            bindings: bindings);
 
         ResolveIdentityInBackground(app, vm, connection.GetIdentityAsync);
 
         app.Run(shell);
         return 0;
     }
+
+    /// <summary>
+    /// Builds the <c>AdoHttp.OperationObserver</c> that feeds the <c>:log</c> view: each recorded
+    /// operation is pushed to <paramref name="log"/> through <paramref name="marshal"/>. Production
+    /// passes <c>app.Invoke</c> so the threadpool-thread record lands on the UI thread before
+    /// <see cref="OperationLog"/>'s subscribers run; a test passes a synchronous marshal to assert
+    /// the record reaches the log. Split out as a pure seam because the real path needs a running
+    /// application (<c>app.Invoke</c> requires <c>Init</c>).
+    /// </summary>
+    internal static Action<AdoOperation> OperationObserver(OperationLog log, Action<Action> marshal) =>
+        operation => marshal(() => log.Add(operation));
 
     /// <summary>
     /// Resolves the Terminal.Gui driver. An explicit <c>COBALT_DRIVER</c> wins (matched
