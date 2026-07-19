@@ -38,6 +38,12 @@ public class PaletteCommandParserTests
     }
 
     [Fact]
+    public void Log_Opens_The_Operations_Log()
+    {
+        Assert.Equal(PaletteActionKind.Log, PaletteCommandParser.Parse("log").Kind);
+    }
+
+    [Fact]
     public void Unknown_Command_Reports_Error_With_Input()
     {
         var action = PaletteCommandParser.Parse("frob");

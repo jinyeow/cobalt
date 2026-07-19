@@ -21,6 +21,9 @@ public sealed class ShellViewModel(
 {
     public MessageLog Messages { get; } = new();
 
+    /// <summary>The <c>:log</c> dialog's source of truth, fed by <c>AdoHttp.OperationObserver</c>.</summary>
+    public OperationLog Operations { get; } = new();
+
     public AppSection ActiveSection { get; private set; } = AppSection.WorkItems;
     public string ContextName { get; private set; } = initialContext;
     public string? UserName { get; private set; }
@@ -42,6 +45,7 @@ public sealed class ShellViewModel(
     public event Action? QuitRequested;
     public event Action? HelpRequested;
     public event Action? MessagesRequested;
+    public event Action? LogRequested;
     public event Action? PickContextRequested;
 
     /// <summary>Raised with a validated context name; the shell performs the actual reconnect.</summary>
@@ -113,6 +117,9 @@ public sealed class ShellViewModel(
                 break;
             case PaletteActionKind.Messages:
                 MessagesRequested?.Invoke();
+                break;
+            case PaletteActionKind.Log:
+                LogRequested?.Invoke();
                 break;
             case PaletteActionKind.PickContext:
                 PickContextRequested?.Invoke();
