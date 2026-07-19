@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -9,8 +10,31 @@ namespace Cobalt.Core.Ado;
 /// Thin JSON transport over one org's HttpClient: source-generated (de)serialization
 /// and translation of ADO error envelopes into <see cref="AdoApiException"/>.
 /// </summary>
-public sealed class AdoHttp(HttpClient client)
+public sealed class AdoHttp(HttpClient client, Action<AdoOperation>? operationObserver = null)
 {
+    /// <summary>
+    /// Fires once per request made through <see cref="GetJsonAsync{T}"/>,
+    /// <see cref="SendJsonAsync{TRequest,TResponse}"/>, <see cref="GetTextOrNullAsync"/>, and
+    /// <see cref="SendRawAsync{TResponse}"/> — feeds the <c>:log</c> operations view. Never sees
+    /// headers or the full query string (<see cref="RouteShape"/> strips both), so it can never
+    /// leak a token.
+    /// </summary>
+    public Action<AdoOperation>? OperationObserver { get; set; } = operationObserver;
+
+    private void Report(HttpMethod method, string path, long startTimestamp, HttpStatusCode? status)
+    {
+        if (OperationObserver is null)
+        {
+            return;
+        }
+        OperationObserver(new AdoOperation(
+            method.Method,
+            RouteShape.Of(path),
+            Stopwatch.GetElapsedTime(startTimestamp),
+            status.HasValue ? (int)status.Value : null,
+            DateTimeOffset.UtcNow));
+    }
+
     /// <summary>
     /// Best-effort connection warm-up: pays the cold DNS + TCP + TLS cost (~700ms to
     /// dev.azure.com) on a cheap route so the first real API call does not. Callers
@@ -41,9 +65,19 @@ public sealed class AdoHttp(HttpClient client)
     public async Task<T> GetJsonAsync<T>(
         string path, JsonTypeInfo<T> type, CancellationToken cancellationToken = default)
     {
-        using var response = await client.GetAsync(
-            new Uri(path, UriKind.Relative), cancellationToken).ConfigureAwait(false);
-        return await ReadAsync(response, type, cancellationToken).ConfigureAwait(false);
+        var start = Stopwatch.GetTimestamp();
+        HttpStatusCode? status = null;
+        try
+        {
+            using var response = await client.GetAsync(
+                new Uri(path, UriKind.Relative), cancellationToken).ConfigureAwait(false);
+            status = response.StatusCode;
+            return await ReadAsync(response, type, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Report(HttpMethod.Get, path, start, status);
+        }
     }
 
     public async Task<TResponse> SendJsonAsync<TRequest, TResponse>(
@@ -59,32 +93,52 @@ public sealed class AdoHttp(HttpClient client)
         // charset=utf-8 so the wire Content-Type stays byte-identical to the old StringContent.
         var payload = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(body, requestType));
         payload.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType, "utf-8");
-        using var request = new HttpRequestMessage(method, new Uri(path, UriKind.Relative)) { Content = payload };
-        using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        return await ReadAsync(response, responseType, cancellationToken).ConfigureAwait(false);
+        var start = Stopwatch.GetTimestamp();
+        HttpStatusCode? status = null;
+        try
+        {
+            using var request = new HttpRequestMessage(method, new Uri(path, UriKind.Relative)) { Content = payload };
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            status = response.StatusCode;
+            return await ReadAsync(response, responseType, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Report(method, path, start, status);
+        }
     }
 
     /// <summary>GETs a text resource (e.g. a file blob). Returns null on 404 so callers can treat a missing side as empty.</summary>
     public async Task<string?> GetTextOrNullAsync(string path, CancellationToken cancellationToken = default)
     {
-        using var response = await client.GetAsync(
-            new Uri(path, UriKind.Relative), cancellationToken).ConfigureAwait(false);
+        var start = Stopwatch.GetTimestamp();
+        HttpStatusCode? status = null;
+        try
+        {
+            using var response = await client.GetAsync(
+                new Uri(path, UriKind.Relative), cancellationToken).ConfigureAwait(false);
+            status = response.StatusCode;
 
-        if (response.StatusCode == HttpStatusCode.NotFound)
-        {
-            return null;
-        }
-        if (response.StatusCode == HttpStatusCode.NonAuthoritativeInformation)
-        {
-            throw new AdoApiException(HttpStatusCode.Unauthorized, "Azure DevOps did not accept the access token");
-        }
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+            if (response.StatusCode == HttpStatusCode.NonAuthoritativeInformation)
+            {
+                throw new AdoApiException(HttpStatusCode.Unauthorized, "Azure DevOps did not accept the access token");
+            }
 
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new AdoApiException(response.StatusCode, $"Azure DevOps returned {(int)response.StatusCode}");
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new AdoApiException(response.StatusCode, $"Azure DevOps returned {(int)response.StatusCode}");
+            }
+            return body;
         }
-        return body;
+        finally
+        {
+            Report(HttpMethod.Get, path, start, status);
+        }
     }
 
     /// <summary>Sends a pre-serialized body (e.g. a JSON Patch document) and reads a typed response.</summary>
@@ -96,12 +150,22 @@ public sealed class AdoHttp(HttpClient client)
         string contentType = "application/json",
         CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(method, new Uri(path, UriKind.Relative))
+        var start = Stopwatch.GetTimestamp();
+        HttpStatusCode? status = null;
+        try
         {
-            Content = new StringContent(body, Encoding.UTF8, contentType),
-        };
-        using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        return await ReadAsync(response, responseType, cancellationToken).ConfigureAwait(false);
+            using var request = new HttpRequestMessage(method, new Uri(path, UriKind.Relative))
+            {
+                Content = new StringContent(body, Encoding.UTF8, contentType),
+            };
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            status = response.StatusCode;
+            return await ReadAsync(response, responseType, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Report(method, path, start, status);
+        }
     }
 
     private static async Task<T> ReadAsync<T>(

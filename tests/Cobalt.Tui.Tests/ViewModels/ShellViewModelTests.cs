@@ -117,6 +117,26 @@ public class ShellViewModelTests
     }
 
     [Fact]
+    public void Palette_Log_Raises_LogRequested()
+    {
+        var vm = Vm();
+        var requested = false;
+        vm.LogRequested += () => requested = true;
+
+        vm.HandlePaletteInput("log");
+
+        Assert.True(requested);
+    }
+
+    [Fact]
+    public void Operations_Starts_Empty()
+    {
+        var vm = Vm();
+
+        Assert.Empty(vm.Operations.History);
+    }
+
+    [Fact]
     public void ContextSwitched_Updates_Status()
     {
         var vm = Vm();
