@@ -133,4 +133,36 @@ public class PaletteSuggestionsViewModelTests
         Assert.Null(vm.Current);
         Assert.Equal("theme d", vm.Accept());
     }
+
+    [Fact]
+    public void Accept_Preserves_A_Leading_Colon_On_A_Successful_Completion()
+    {
+        var vm = Vm();
+
+        vm.SetInput(":th");
+
+        Assert.Equal(":theme", vm.Accept());
+    }
+
+    [Fact]
+    public void Accept_Preserves_A_Leading_Colon_On_An_Unmatched_Completion()
+    {
+        var vm = Vm();
+
+        vm.SetInput(":zzz");
+
+        Assert.Equal(":zzz", vm.Accept());
+    }
+
+    [Fact]
+    public void Double_Space_Before_The_Argument_Still_Completes()
+    {
+        // PaletteCommandParser.Parse tolerates extra whitespace (TrimEntries); completion must too.
+        var vm = Vm(contexts: ["work", "oss"]);
+
+        vm.SetInput("context  w");
+
+        Assert.Equal("work", vm.Current);
+        Assert.Equal("context work", vm.Accept());
+    }
 }

@@ -13,6 +13,7 @@ public sealed class PaletteSuggestionsViewModel(
     Func<IReadOnlyList<string>> contexts, Func<IReadOnlyList<string>> projects)
 {
     private string _rawInput = "";
+    private string _leadingColons = "";
     private IReadOnlyList<string> _candidates = [];
     private int _index = -1;
     private bool _completingArgument;
@@ -24,6 +25,7 @@ public sealed class PaletteSuggestionsViewModel(
     {
         _rawInput = input;
         var trimmed = input.TrimStart(':');
+        _leadingColons = input[..(input.Length - trimmed.Length)];
         var spaceIndex = trimmed.IndexOf(' ');
 
         if (spaceIndex < 0)
@@ -34,8 +36,10 @@ public sealed class PaletteSuggestionsViewModel(
         }
         else
         {
-            var commandWord = trimmed[..spaceIndex];
-            var argumentText = trimmed[(spaceIndex + 1)..];
+            // Match PaletteCommandParser.Parse's TrimEntries split: extra whitespace around
+            // either half (e.g. "context  w") must not break completion.
+            var commandWord = trimmed[..spaceIndex].Trim();
+            var argumentText = trimmed[(spaceIndex + 1)..].Trim();
             var entry = PaletteCommandParser.Catalog.FirstOrDefault(
                 e => e.Name == commandWord || e.Aliases.Contains(commandWord));
             var provider = entry.Name is null ? null : ArgumentProvider(entry.ArgKind);
@@ -76,10 +80,12 @@ public sealed class PaletteSuggestionsViewModel(
     }
 
     /// <summary>
-    /// Returns the completed input text. Argument completion always yields
-    /// "&lt;command&gt; &lt;value&gt;"; top-level command completion adds a trailing space only
-    /// when that command takes a provider-backed argument (so Tab can keep completing).
-    /// Leaves the raw input unchanged when there is no candidate.
+    /// Returns the completed input text, preserving the raw input's exact leading-colon
+    /// prefix (typed `:` is tolerated the same way <see cref="PaletteCommandParser.Parse"/>
+    /// tolerates it). Argument completion always yields "&lt;command&gt; &lt;value&gt;";
+    /// top-level command completion adds a trailing space only when that command takes a
+    /// provider-backed argument (so Tab can keep completing). Leaves the raw input unchanged
+    /// when there is no candidate.
     /// </summary>
     public string Accept()
     {
@@ -90,10 +96,12 @@ public sealed class PaletteSuggestionsViewModel(
         }
         if (_completingArgument)
         {
-            return _acceptedPrefix + current;
+            return _leadingColons + _acceptedPrefix + current;
         }
         var entry = PaletteCommandParser.Catalog.First(e => e.Name == current);
-        return entry.ArgKind == PaletteArgKind.None ? current : $"{current} ";
+        return entry.ArgKind == PaletteArgKind.None
+            ? _leadingColons + current
+            : $"{_leadingColons}{current} ";
     }
 
     private Func<IReadOnlyList<string>>? ArgumentProvider(PaletteArgKind argKind) => argKind switch

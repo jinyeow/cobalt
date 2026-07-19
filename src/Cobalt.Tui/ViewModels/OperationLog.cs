@@ -9,18 +9,33 @@ namespace Cobalt.Tui.ViewModels;
 /// </summary>
 public sealed class OperationLog(int capacity = 200)
 {
+    private readonly object _lock = new();
     private readonly List<AdoOperation> _history = [];
 
     public event Action? Changed;
 
-    public IReadOnlyList<AdoOperation> History => _history;
+    /// <summary>A snapshot, not the live list — the observer that feeds <see cref="Add"/> can
+    /// fire from threadpool continuation threads (AdoHttp's <c>ConfigureAwait(false)</c>).</summary>
+    public IReadOnlyList<AdoOperation> History
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _history.ToArray();
+            }
+        }
+    }
 
     public void Add(AdoOperation operation)
     {
-        _history.Add(operation);
-        if (_history.Count > capacity)
+        lock (_lock)
         {
-            _history.RemoveRange(0, _history.Count - capacity);
+            _history.Add(operation);
+            if (_history.Count > capacity)
+            {
+                _history.RemoveRange(0, _history.Count - capacity);
+            }
         }
         Changed?.Invoke();
     }
