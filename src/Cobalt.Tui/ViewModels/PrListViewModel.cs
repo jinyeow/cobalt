@@ -75,6 +75,38 @@ public sealed class PrListViewModel(IPullRequestSource source)
     public PullRequest? Selected =>
         Rows.Count == 0 ? null : Rows[Math.Clamp(_selectedIndex, 0, Rows.Count - 1)];
 
+    /// <summary>
+    /// Guidance for an empty list — non-null only once loading/error are ruled out, so it never
+    /// flickers over a transient state. A client-side filter narrowed to zero names the filter and
+    /// how to clear it; a genuinely empty Team tab (the org-dependent default — see the class doc
+    /// comment) explains that it's empty by design rather than broken; any other genuinely empty
+    /// tab gets a plain fallback.
+    /// </summary>
+    public string? EmptyStateText
+    {
+        get
+        {
+            if (IsLoading || Error is not null || Rows.Count != 0)
+            {
+                return null;
+            }
+
+            if (_repositoryFilter.Length != 0)
+            {
+                return $"0 of {_all.Count} PRs match repo \"{_repositoryFilter}\" — clear the repo filter to see them all.";
+            }
+
+            if (_projectFilter.Length != 0)
+            {
+                return $"0 of {_all.Count} PRs in project \"{_projectFilter}\" — clear with :project (no argument).";
+            }
+
+            return ActiveTab == PrListFilter.Team
+                ? "No PRs waiting on your teams — empty, not broken: team-based review-request setup varies by org. Try :scope org, or ] for mine/active."
+                : "Nothing here.";
+        }
+    }
+
     public Task LoadAsync(CancellationToken ct) => LoadTabAsync(ActiveTab, ct);
 
     public Task SetTabAsync(PrListFilter tab, CancellationToken ct) => LoadTabAsync(tab, ct);

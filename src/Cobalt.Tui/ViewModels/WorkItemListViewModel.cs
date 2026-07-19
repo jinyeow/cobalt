@@ -78,6 +78,36 @@ public sealed class WorkItemListViewModel(IWorkItemSource source, bool includeCo
     public WorkItem? Selected =>
         Rows.Count == 0 ? null : Rows[Math.Clamp(_selectedIndex, 0, Rows.Count - 1)];
 
+    /// <summary>
+    /// Guidance for an empty list — non-null only once loading/error are ruled out, so it never
+    /// flickers over a transient state. The client-side substring filter or the server-side
+    /// project filter narrowing to zero names itself and how to clear it; otherwise the list is
+    /// genuinely empty ("assigned to you" is inherently narrow), so the message points at the
+    /// two knobs most likely to widen it: showing completed items and broadening the org scope.
+    /// </summary>
+    public string? EmptyStateText
+    {
+        get
+        {
+            if (IsLoading || Error is not null || Rows.Count != 0)
+            {
+                return null;
+            }
+
+            if (_filter.Length != 0)
+            {
+                return $"0 of {_all.Count} work items match \"{_filter}\" — clear the search (Esc) to see them all.";
+            }
+
+            if (_projectFilter is not null)
+            {
+                return $"No work items in project \"{_projectFilter}\" — clear with :project (no argument).";
+            }
+
+            return "No work items assigned to you — :done show includes completed states; :scope org widens the query.";
+        }
+    }
+
     public async Task LoadAsync(CancellationToken ct)
     {
         // Remember the token so a filter setter can reload on its own later.

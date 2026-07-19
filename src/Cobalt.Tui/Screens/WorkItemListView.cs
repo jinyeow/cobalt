@@ -20,6 +20,7 @@ public sealed class WorkItemListView : View
     private readonly CancellationTokenSource _cts = new();
     private int _lastWidth = -1;
     private IReadOnlyList<WorkItem>? _renderedRows;
+    private IReadOnlyList<string> _rendered = [];
     private bool _filtering;
     private bool _disposed;
 
@@ -186,6 +187,9 @@ public sealed class WorkItemListView : View
     /// <summary>Test-only seam (MISSED-A): identity changes exactly when the row list is rebuilt.</summary>
     internal IListDataSource? ListSource => _list.Source;
 
+    internal string RowText(int index) =>
+        index >= 0 && index < _rendered.Count ? _rendered[index] : "";
+
     internal void Render()
     {
         if (_vm.IsLoading)
@@ -225,8 +229,17 @@ public sealed class WorkItemListView : View
             // row first and restore it (clamped) — otherwise a background reload snaps
             // the highlight back to the top. The list is the source of truth.
             var target = _list.SelectedItem ?? _vm.SelectedIndex;
-            var cols = WorkItemColumns.For(_vm.Rows);
-            var rows = new ObservableCollection<string>(_vm.Rows.Select(item => WorkItemRowFormatter.Format(item, width, cols)));
+            if (_vm.Rows.Count == 0 && _vm.EmptyStateText is { } emptyText)
+            {
+                // Helpful-empty-states (item 3): explain why the list is empty instead of a blank body.
+                _rendered = [emptyText];
+            }
+            else
+            {
+                var cols = WorkItemColumns.For(_vm.Rows);
+                _rendered = [.. _vm.Rows.Select(item => WorkItemRowFormatter.Format(item, width, cols))];
+            }
+            var rows = new ObservableCollection<string>(_rendered);
             _list.SetSource(rows);
             if (_vm.Rows.Count > 0)
             {

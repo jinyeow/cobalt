@@ -330,6 +330,83 @@ public class PrListViewModelTests
     }
 
     [Fact]
+    public async Task EmptyStateText_Is_Null_While_Loading()
+    {
+        var source = new GatedSource();
+        var vm = new PrListViewModel(source);
+        var gate = source.Gate(PrListFilter.Team);
+        var loading = vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(vm.IsLoading);
+        Assert.Null(vm.EmptyStateText);
+
+        gate.SetResult([]);
+        await loading;
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Is_Null_On_Error()
+    {
+        var source = new FakeSource { Throw = new HttpRequestException("boom") };
+        var vm = new PrListViewModel(source);
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.Error);
+        Assert.Null(vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_On_Empty_Team_Tab_Explains_Org_Dependent_Setup()
+    {
+        var vm = new PrListViewModel(new FakeSource());
+        await vm.LoadAsync(TestContext.Current.CancellationToken); // Team tab, empty by default
+
+        Assert.Equal(PrListFilter.Team, vm.ActiveTab);
+        Assert.Contains("empty, not broken", vm.EmptyStateText);
+        Assert.Contains(":scope org", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_On_Empty_NonTeam_Tab_Is_Plain()
+    {
+        var vm = new PrListViewModel(new FakeSource());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        await vm.SetTabAsync(PrListFilter.Mine, TestContext.Current.CancellationToken);
+
+        Assert.Equal("Nothing here.", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Names_Repo_Filter_When_Filtered_To_Zero()
+    {
+        var source = new FakeSource();
+        source.ByFilter[PrListFilter.Team] = [Pr(1, "a", "web")];
+        var vm = new PrListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.RepositoryFilter = "no-such-repo";
+
+        Assert.Empty(vm.Rows);
+        Assert.Contains("no-such-repo", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Names_Project_Filter_When_Filtered_To_Zero()
+    {
+        var source = new FakeSource();
+        source.ByFilter[PrListFilter.Team] = [Pr(1, "a", "web", "Fabrikam")];
+        var vm = new PrListViewModel(source);
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.ProjectFilter = "Contoso";
+
+        Assert.Empty(vm.Rows);
+        Assert.Contains("Contoso", vm.EmptyStateText);
+        Assert.Contains(":project", vm.EmptyStateText);
+    }
+
+    [Fact]
     public async Task ProjectFilter_Is_Exact_Not_Substring()
     {
         // `:project Web` must exclude a "WebApps" PR (exact, case-insensitive), matching the

@@ -105,4 +105,18 @@ public class WorkItemListRenderGuardTests
 
         Assert.NotSame(before, view.ListSource);
     }
+
+    [Fact]
+    public async Task Render_Shows_The_Vm_EmptyStateText_As_The_Placeholder_Row()
+    {
+        var vm = new WorkItemListViewModel(new FakeWiSource([])); // no items — genuinely empty
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var view = new WorkItemListView(App, vm);
+        var window = new Window();
+        window.Add(view);
+        window.Layout(new System.Drawing.Size(60, 20));
+
+        Assert.Equal(vm.EmptyStateText, view.RowText(0));
+    }
 }

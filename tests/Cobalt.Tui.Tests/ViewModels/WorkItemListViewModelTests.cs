@@ -213,6 +213,68 @@ public class WorkItemListViewModelTests
         Assert.Equal(before, source.Calls);
     }
 
+    [Fact]
+    public async Task EmptyStateText_Is_Null_While_Loading()
+    {
+        var source = new GatedSource();
+        var vm = new WorkItemListViewModel(source);
+        var gate = source.NextGate();
+        var loading = vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(vm.IsLoading);
+        Assert.Null(vm.EmptyStateText);
+
+        gate.SetResult([]);
+        await loading;
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Is_Null_On_Error()
+    {
+        var vm = new WorkItemListViewModel(new FakeSource([]) { Throw = new HttpRequestException("boom") });
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.Error);
+        Assert.Null(vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_On_Genuinely_Empty_Suggests_Done_And_Scope()
+    {
+        var vm = new WorkItemListViewModel(new FakeSource([]));
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains(":done show", vm.EmptyStateText);
+        Assert.Contains(":scope org", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Names_Substring_Filter_When_Filtered_To_Zero()
+    {
+        var vm = new WorkItemListViewModel(new FakeSource([Item(1, "Fix login", "Active")]));
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.Filter = "no-such-title";
+
+        Assert.Empty(vm.Rows);
+        Assert.Contains("no-such-title", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Names_Project_Filter_When_Filtered_To_Zero()
+    {
+        var vm = new WorkItemListViewModel(new FakeSource([]));
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.ProjectFilter = "Contoso";
+
+        Assert.Empty(vm.Rows);
+        Assert.Contains("Contoso", vm.EmptyStateText);
+        Assert.Contains(":project", vm.EmptyStateText);
+    }
+
     private sealed class GatedSource : IWorkItemSource
     {
         private readonly Queue<TaskCompletionSource<IReadOnlyList<WorkItem>>> _gates = new();
