@@ -7,8 +7,9 @@ namespace Cobalt.Tui.ViewModels;
 /// Tab-completion / fuzzy-filter state for the `:` command palette. Pure (ADR 0004) — the
 /// shell renders <see cref="Current"/> inline and calls <see cref="Accept"/> on Tab.
 /// Completes command names from <see cref="PaletteCommandParser.Catalog"/>, and the argument
-/// for commands whose <see cref="PaletteArgKind"/> has a provider (<c>:context</c>,
-/// <c>:project</c>) against the real names the ctor functions return.
+/// for commands whose <see cref="PaletteArgKind"/> has a provider: <c>:context</c> and
+/// <c>:project</c> against the real names the ctor functions return, <c>:theme</c> against
+/// <see cref="ThemeChoices.Names"/>.
 /// </summary>
 public sealed class PaletteSuggestionsViewModel(
     Func<IReadOnlyList<string>> contexts, Func<IReadOnlyList<string>> projects)

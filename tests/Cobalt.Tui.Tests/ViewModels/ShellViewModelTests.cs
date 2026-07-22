@@ -378,6 +378,20 @@ public class ShellViewModelTests
     }
 
     [Fact]
+    public void Palette_Theme_Rejects_A_Comma_Combined_Value()
+    {
+        // Enum.TryParse parses "dark,light" as a flags-style combination (== Light); the
+        // vocabulary is exact single names only.
+        var vm = Vm();
+
+        vm.HandlePaletteInput("theme dark,light");
+
+        Assert.Equal(MessageLevel.Error, vm.Messages.Current?.Level);
+        Assert.Contains("unknown theme", vm.Messages.Current?.Text);
+        Assert.Equal(ThemeChoice.Dark, vm.CurrentTheme);
+    }
+
+    [Fact]
     public void Palette_Theme_System_Reissued_Resyncs_And_Raises_Again()
     {
         var vm = Vm();

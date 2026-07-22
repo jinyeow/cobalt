@@ -163,14 +163,12 @@ public static class ConfigLoader
         {
             return ThemeChoice.Dark;
         }
-        return (raw as string)?.Trim().ToLowerInvariant() switch
+        if (raw is string text && ThemeChoices.TryParse(text.Trim(), out var choice))
         {
-            "dark" => ThemeChoice.Dark,
-            "light" => ThemeChoice.Light,
-            "system" => ThemeChoice.System,
-            _ => throw new ConfigException(
-                $"theme must be \"dark\", \"light\", or \"system\", got '{raw}'"),
-        };
+            return choice;
+        }
+        throw new ConfigException(
+            $"theme must be one of {string.Join(", ", ThemeChoices.Names.Select(n => $"\"{n}\""))}, got '{raw}'");
     }
 
     private static AdoContext ParseContext(string name, TomlTable table)

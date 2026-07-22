@@ -189,9 +189,8 @@ public sealed class ShellViewModel(
             return;
         }
         // The accepted names come from the ThemeChoice enum itself (as does Tab-completion), so a
-        // new member needs no edit here. The letter guard keeps Enum.TryParse from accepting a
-        // numeric value ("0" parses as Dark).
-        if (!char.IsLetter(argument[0]) || !Enum.TryParse<ThemeChoice>(argument, ignoreCase: true, out var next))
+        // new member needs no edit here.
+        if (!ThemeChoices.TryParse(argument, out var next))
         {
             Messages.Error($"unknown theme '{argument}' (use: {ThemeNamesHint})");
             return;
