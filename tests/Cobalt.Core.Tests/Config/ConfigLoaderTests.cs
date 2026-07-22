@@ -276,6 +276,55 @@ public class ConfigLoaderTests
     }
 
     [Fact]
+    public void Unknown_Root_Table_Is_An_Error()
+    {
+        // UAT repro: the typo'd root table [key.global] (for [keys.global]) was silently
+        // ignored, so its remaps vanished with no signal — the config has exactly one
+        // consumer, so unknown root keys are typos, not forward-compat.
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+
+            [key.global]
+            move-down = "n"
+            """));
+
+        Assert.Contains("'key'", ex.Message);
+        Assert.Contains("keys", ex.Message); // the valid-key list makes the error actionable
+    }
+
+    [Fact]
+    public void Unknown_Root_Scalar_Is_An_Error()
+    {
+        // Placed before the [contexts.*] tables so it genuinely binds at root level.
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            $"""
+            them = "dark"
+
+            {ValidToml}
+            """));
+
+        Assert.Contains("'them'", ex.Message);
+        Assert.Contains("theme", ex.Message);
+    }
+
+    [Fact]
+    public void Unknown_Key_Inside_A_Context_Is_An_Error()
+    {
+        // The same typo class one level down: a key appended after a [contexts.*] header
+        // binds to that context table (TOML), where it used to be silently ignored.
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+            them = "dark"
+            """));
+
+        Assert.Contains("[contexts.oss]", ex.Message);
+        Assert.Contains("'them'", ex.Message);
+        Assert.Contains("pr_scope", ex.Message);
+    }
+
+    [Fact]
     public void Duplicate_Scope_Table_Is_An_Error()
     {
         // UAT repro: a second [keys.global] table was silently ignored (first-wins), so half

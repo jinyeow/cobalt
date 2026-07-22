@@ -50,6 +50,17 @@ public static class ConfigLoader
             throw new ConfigException("config file is empty");
         }
 
+        // Unknown root keys are typos, not forward-compat (this config has exactly one
+        // consumer): [key.global] silently dropping a whole remap block proved that at UAT.
+        foreach (var key in root.Keys)
+        {
+            if (!ValidRootKeys.Contains(key))
+            {
+                throw new ConfigException(
+                    $"unknown config key '{key}' (valid: {string.Join(", ", ValidRootKeys)})");
+            }
+        }
+
         var defaultContext = root.TryGetValue("default_context", out var dc) ? dc as string : null;
 
         var contexts = new Dictionary<string, AdoContext>(StringComparer.Ordinal);
@@ -77,6 +88,8 @@ public static class ConfigLoader
 
         return new CobaltConfig(defaultContext, contexts, ParseTheme(root), ParseKeys(root));
     }
+
+    private static readonly string[] ValidRootKeys = ["contexts", "default_context", "keys", "theme"];
 
     private static KeysConfig ParseKeys(TomlTable root)
     {
@@ -195,6 +208,17 @@ public static class ConfigLoader
 
         var organization = table.TryGetValue("organization", out var o) ? o as string : null;
         var project = table.TryGetValue("project", out var p) ? p as string : null;
+
+        // The same typo class as unknown root keys, one level down: a key appended after a
+        // [contexts.*] header binds to that table in TOML, so it must not vanish silently.
+        foreach (var key in table.Keys)
+        {
+            if (key is not ("organization" or "project" or "pr_scope"))
+            {
+                throw new ConfigException(
+                    $"[contexts.{name}] has an unknown key '{key}' (valid: organization, project, pr_scope)");
+            }
+        }
 
         if (string.IsNullOrWhiteSpace(organization))
         {
