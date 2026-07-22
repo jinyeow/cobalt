@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-07-22
 
 ### Added
 - **Keybinding remap config.** A `[keys.<scope>]` table in `config.toml` overrides or extends
@@ -155,7 +155,7 @@
   filter itself remains in the client for a future config-enabled view.)
 - Section tab labels no longer carry the `g1`/`g2` jump chords (UAT feedback) —
   the chords remain discoverable via `?` help.
-- Version bumped to 0.3.0 (unreleased).
+- Version bumped to 0.3.0.
 - **Themes.** `theme = "dark" | "light" | "system"` in `config.toml` (default `dark`, the
   original look), switchable live with `:theme`. Terminal.Gui's built-in themes colour the app
   chrome + syntax highlighting; a cobalt `DiffPalette` colours the diff tints, so both recolour
