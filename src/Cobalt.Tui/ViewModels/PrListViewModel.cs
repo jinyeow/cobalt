@@ -1,4 +1,3 @@
-using Cobalt.Core.Ado;
 using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 
@@ -164,22 +163,9 @@ public sealed class PrListViewModel(IPullRequestSource source, Func<PrScope>? sc
         _all = cached;
         ApplyFilter();
 
-        IReadOnlyList<PullRequest>? result = null;
         string? error = null;
-        try
-        {
-            result = await source.ListPullRequestsAsync(tab, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
-        {
-            throw; // genuine user/dialog cancel (carries our token) stays silent
-        }
-        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
-        {
-            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
-            // surfaced as an expected error rather than a silent no-data pane (L2).
-            error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
-        }
+        var result = await VmGuard.RunAsync(
+            () => source.ListPullRequestsAsync(tab, ct), ct, m => error = m).ConfigureAwait(false);
 
         // Commit under the lock so the supersede-check and cache write are atomic w.r.t. a newer
         // load or an InvalidateCache (a :scope flip): a superseded or invalidated load must neither
