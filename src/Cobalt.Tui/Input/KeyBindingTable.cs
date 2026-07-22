@@ -291,8 +291,12 @@ public sealed class KeyBindingTable
         {
             return true;
         }
-        // A single rune (one UTF-16 unit, or a surrogate pair for astral-plane characters).
-        return System.Text.Rune.TryGetRuneAt(token, 0, out var rune) && rune.Utf16SequenceLength == token.Length;
+        // A single rune (one UTF-16 unit, or a surrogate pair for astral-plane characters) —
+        // but only a printable one: the tokenizer never emits raw control runes (Ctrl-A is the
+        // "C-a" chord; a TOML-escaped control char would be another permanently dead binding).
+        return System.Text.Rune.TryGetRuneAt(token, 0, out var rune)
+            && rune.Utf16SequenceLength == token.Length
+            && !System.Text.Rune.IsControl(rune);
     }
 
     public void Bind(KeyScope scope, string sequence, AppCommand command)

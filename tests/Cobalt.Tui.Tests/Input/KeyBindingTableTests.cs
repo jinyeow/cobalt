@@ -118,16 +118,31 @@ public class KeyBindingTableTests
         }
     }
 
-    [Fact]
-    public void FromConfig_Rejects_A_Token_The_Tokenizer_Can_Never_Emit()
+    [Theory]
+    [InlineData("5j")]       // one two-char token — the tokenizer emits "5" then "j"
+    public void FromConfig_Rejects_A_Token_The_Tokenizer_Can_Never_Emit(string token)
     {
-        // UAT repro: move-down = "5j" — "5j" is one two-char token, which no keypress ever
-        // produces (the tokenizer emits "5" then "j"), so the binding is permanently dead
-        // and, worse, it silently replaced the default. Must fail startup instead.
+        // UAT repro: a token no keypress ever produces makes the binding permanently dead
+        // and, worse, silently replaces the command's defaults. Must fail startup instead.
         var ex = Assert.Throws<ConfigException>(
-            () => KeyBindingTable.FromConfig(Keys("global", ("move-down", "5j"))));
+            () => KeyBindingTable.FromConfig(Keys("global", ("move-down", token))));
 
-        Assert.Contains("5j", ex.Message);
+        Assert.Contains(token, ex.Message);
+    }
+
+    [Theory]
+    [InlineData(0x01)] // a TOML-escaped control char: a single rune, but never printable
+    [InlineData(0x7F)] // DEL - outside the tokenizer's printable range
+    public void FromConfig_Rejects_A_Control_Rune_Token(int codePoint)
+    {
+        // Review finding: the tokenizer only emits runes TryGetPrintableRune accepts, so an
+        // escaped control character is the same dead-binding class as "5j" through a side door.
+        var token = ((char)codePoint).ToString();
+
+        var ex = Assert.Throws<ConfigException>(
+            () => KeyBindingTable.FromConfig(Keys("global", ("move-down", token))));
+
+        Assert.Contains("keypress", ex.Message);
     }
 
     [Theory]
@@ -136,6 +151,8 @@ public class KeyBindingTableTests
     [InlineData("prev-tab", "S-Tab")]  // shifted named key
     [InlineData("move-down", "Down")]  // cursor named key
     [InlineData("refresh", "g r")]     // multi-token sequence
+    [InlineData("refresh", "é")]       // printable non-ASCII rune
+    [InlineData("refresh", "𝄞")]       // astral-plane rune (surrogate pair, still one rune)
     public void FromConfig_Accepts_Every_Token_Shape_The_Tokenizer_Emits(string command, string sequence)
     {
         // Chords, named keys, and multi-token sequences are all real tokenizer output
