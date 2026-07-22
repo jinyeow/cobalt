@@ -21,11 +21,12 @@ public sealed class PrDetailDialog(
     ITextInput textInput,
     Action<string> log,
     IPrDiffSource? diffSource = null,
-    AdoContext? context = null)
+    AdoContext? context = null,
+    KeyBindingTable? bindings = null)
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly PrActions _actions = new(app, log);
-    private readonly KeymapRouter _router = new(KeyBindingTable.Shared);
+    private readonly KeymapRouter _router = new(bindings ?? KeyBindingTable.Shared);
     private bool _closed;
     private Dialog? _dialog;
 #pragma warning disable CS0618 // read-only scrollable pane; see WorkItemDetailDialog
@@ -180,7 +181,7 @@ public sealed class PrDetailDialog(
                 }
                 else
                 {
-                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.PullRequestDetail));
+                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.PullRequestDetail), _router.Table);
                 }
                 return true;
             case AppCommand.Vote:
@@ -406,7 +407,7 @@ public sealed class PrDetailDialog(
             return;
         }
         var diffVm = new PrDiffViewModel(diffSource, vm.PullRequest);
-        new DiffReviewDialog(app, diffVm, textInput, log, context).Show();
+        new DiffReviewDialog(app, diffVm, textInput, log, context, _router.Table).Show();
     }
 
     private void OpenBranch()

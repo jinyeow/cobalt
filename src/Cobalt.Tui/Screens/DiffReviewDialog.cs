@@ -20,10 +20,11 @@ namespace Cobalt.Tui.Screens;
 /// Tab cycles the panes, and j/k/gg/G/Ctrl-d/u scroll the focused pane.
 /// </summary>
 public sealed class DiffReviewDialog(
-    IApplication app, PrDiffViewModel vm, ITextInput textInput, Action<string> log, AdoContext? context = null)
+    IApplication app, PrDiffViewModel vm, ITextInput textInput, Action<string> log, AdoContext? context = null,
+    KeyBindingTable? bindings = null)
 {
     private readonly CancellationTokenSource _cts = new();
-    private readonly KeymapRouter _router = new(KeyBindingTable.Shared);
+    private readonly KeymapRouter _router = new(bindings ?? KeyBindingTable.Shared);
     private bool _closed;
     private Dialog? _dialog;
     private ListView _fileList = null!;
@@ -386,7 +387,7 @@ public sealed class DiffReviewDialog(
                 }
                 else
                 {
-                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.DiffReview));
+                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.DiffReview), _router.Table);
                 }
                 return true;
             case AppCommand.ScrollLeft:
@@ -594,7 +595,7 @@ public sealed class DiffReviewDialog(
         }
         else
         {
-            new ThreadViewDialog(app, vm, textInput, log, threads).Show();
+            new ThreadViewDialog(app, vm, textInput, log, threads, _router.Table).Show();
         }
     }
 

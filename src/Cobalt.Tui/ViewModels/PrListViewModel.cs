@@ -1,4 +1,5 @@
 using Cobalt.Core.Ado;
+using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 
 namespace Cobalt.Tui.ViewModels;
@@ -8,8 +9,15 @@ public interface IPullRequestSource
     Task<IReadOnlyList<PullRequest>> ListPullRequestsAsync(PrListFilter filter, CancellationToken ct);
 }
 
-/// <summary>The PR tabs (review queue / team / mine / active) with async load, error, repo filter.</summary>
-public sealed class PrListViewModel(IPullRequestSource source)
+/// <summary>
+/// The PR tabs (review queue / team / mine / active) with async load, error, repo filter.
+/// <paramref name="scope"/> reads the shell's current PR/WI scope so
+/// <see cref="EmptyStateText"/> only suggests <c>:scope org</c> when it would actually change
+/// anything (Project scope) — org is the product default, so a caller that omits this behaves
+/// as if scope were always Org. Unit E: pass <c>() =&gt; _vm.Scope</c> (<c>ShellViewModel.Scope</c>)
+/// when constructing this view-model.
+/// </summary>
+public sealed class PrListViewModel(IPullRequestSource source, Func<PrScope>? scope = null)
 {
     /// <summary>
     /// The canonical sub-tab cycle order ([ / ] / Tab walk it). The tab strip renders
@@ -25,6 +33,7 @@ public sealed class PrListViewModel(IPullRequestSource source)
     private IReadOnlyList<PullRequest> _all = [];
     private string _repositoryFilter = "";
     private string _projectFilter = "";
+    private readonly Func<PrScope> _scope = scope ?? (() => PrScope.Org);
     private int _selectedIndex;
     private int _loadSeq;
 
@@ -74,6 +83,41 @@ public sealed class PrListViewModel(IPullRequestSource source)
 
     public PullRequest? Selected =>
         Rows.Count == 0 ? null : Rows[Math.Clamp(_selectedIndex, 0, Rows.Count - 1)];
+
+    /// <summary>
+    /// Guidance for an empty list — non-null only once loading/error are ruled out, so it never
+    /// flickers over a transient state. A client-side filter narrowed to zero names the filter and
+    /// how to clear it (only when the server actually returned something to narrow — otherwise the
+    /// filter isn't the cause); a genuinely empty Team tab (the org-dependent default — see the
+    /// class doc comment) explains that it's empty by design rather than broken; any other
+    /// genuinely empty tab gets a plain fallback. RepositoryFilter has no palette command wired to
+    /// it yet, so it deliberately isn't named here (would send the reviewer to a command that
+    /// doesn't exist).
+    /// </summary>
+    public string? EmptyStateText
+    {
+        get
+        {
+            if (IsLoading || Error is not null || Rows.Count != 0)
+            {
+                return null;
+            }
+
+            if (_projectFilter.Length != 0 && _all.Count != 0)
+            {
+                return $"0 of {_all.Count} PRs in project \"{_projectFilter}\" — clear with :project (no argument).";
+            }
+
+            if (ActiveTab != PrListFilter.Team)
+            {
+                return "Nothing here.";
+            }
+
+            // :scope org is only offered when it would actually change something.
+            var scopeHint = _scope() == PrScope.Project ? " Try :scope org, or ] for mine/active." : " Try ] for mine/active.";
+            return "No PRs waiting on your teams — empty, not broken: team-based review-request setup varies by org." + scopeHint;
+        }
+    }
 
     public Task LoadAsync(CancellationToken ct) => LoadTabAsync(ActiveTab, ct);
 

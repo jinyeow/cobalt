@@ -70,6 +70,52 @@ public class CliArgsTests
     }
 
     [Fact]
+    public void ConfigOption_SetsConfigPathAndLaunchesTui()
+    {
+        var result = CliArgs.Parse(["--config", @"C:\tmp\uat.toml"]);
+
+        Assert.Equal(CliCommand.Tui, result.Command);
+        Assert.Equal(@"C:\tmp\uat.toml", result.ConfigPath);
+        Assert.Null(result.Error);
+    }
+
+    [Fact]
+    public void ConfigOption_WithoutValue_IsAnError()
+    {
+        var result = CliArgs.Parse(["--config"]);
+
+        Assert.NotNull(result.Error);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("--version")]
+    public void ConfigOption_WithEmptyOrOptionLikeValue_IsAnError(string value)
+    {
+        var result = CliArgs.Parse(["--config", value]);
+
+        Assert.NotNull(result.Error);
+    }
+
+    [Fact]
+    public void ConfigOption_Repeated_IsAnError()
+    {
+        var result = CliArgs.Parse(["--config", "a.toml", "--config", "b.toml"]);
+
+        Assert.NotNull(result.Error);
+    }
+
+    [Fact]
+    public void ConfigOption_CombinesWithContextAndAuth()
+    {
+        var result = CliArgs.Parse(["--config", "uat.toml", "--context", "work", "auth", "status"]);
+
+        Assert.Equal(CliCommand.AuthStatus, result.Command);
+        Assert.Equal("uat.toml", result.ConfigPath);
+        Assert.Equal("work", result.Context);
+    }
+
+    [Fact]
     public void AuthLogin_IsRecognized()
     {
         var result = CliArgs.Parse(["auth", "login"]);

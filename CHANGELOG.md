@@ -1,14 +1,49 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-07-22
 
-### Fixed
-- **Vim `j`/`k` no longer needs two presses per move on a bare terminal.** Terminal.Gui
-  2.4.17's auto-detect selects its new `ansi` driver, whose input path drops every other
-  keypress. Cobalt now pins the platform default explicitly (`windows` on Windows, `dotnet`
-  elsewhere) instead of falling through to auto-detect; `COBALT_DRIVER` still overrides
-  everything, including `=ansi`. See
-  [ADR 0016](docs/adr/0016-terminal-driver-selection.md).
+### Added
+- **Keybinding remap config.** A `[keys.<scope>]` table in `config.toml` overrides or extends
+  the default bindings, scoped to a lowercased `KeyScope` (`global`, `workitemlist`,
+  `workitemdetail`, `pullrequestlist`, `pullrequestdetail`, `diffreview`, `threadview`). Each
+  entry is `command-name = "token sequence"` or an array for multiple sequences (`move-down =
+  ["n", "g j"]`); a config entry **replaces** that command's default bindings in its scope
+  (not additive — repeat the default if you want it kept alongside a new one), and
+  `command-name = ""` unbinds it. An unknown scope or command, a sequence that conflicts with
+  another command's binding in the same scope, or binding a reserved sequence (`Esc`, or one
+  starting with a bare digit) fails startup with the offending scope/command/sequence named.
+  The keybar and `?` help render from the live binding table, so a remap needs no other
+  change — and it reaches the modal dialogs too. See
+  [ADR 0023](docs/adr/0023-keybinding-remap-config.md).
+- **`:` command palette completion.** `Tab` / `Shift-Tab` in the `:` palette complete and
+  cycle command names, and for `:context`/`:project`/`:theme`, their argument names too (known
+  context names, project names drawn from the loaded lists, and the theme names).
+- **`--config <path>`.** Launch (or `auth login`/`auth status`) against a specific config.toml
+  instead of the default location — useful for trying a `[keys]` remap or a different context
+  set without editing your real config. A missing file fails with the usual clear config error.
+- **Config typos fail loud.** An unknown root-level key or table (`[key.global]` for
+  `[keys.global]`), an unknown key inside a `[contexts.*]` section, a repeated table header,
+  or a keybinding token no keypress can produce (`"5j"`, an escaped control character) now
+  all fail at startup naming the offender — previously each was silently ignored.
+- **`:log` operations view.** `:log` opens a scrollable dialog listing recent Azure DevOps
+  requests — operation name, route shape, duration, and outcome — for transparency into what
+  cobalt is doing. The route shape masks numeric IDs and GUID path segments to `{id}` and
+  trims the query to `api-version`; headers, tokens, and any other query text never reach the
+  log, by construction (the only way to record an operation pipes it through the masking
+  function first).
+
+### Changed
+- **Helpful empty states.** The PR and work-item lists now explain an empty result instead of
+  just showing nothing: the Team PR tab (the default, and inherently org-setup-dependent)
+  reads as empty by design, not broken, and points at `]`/`:scope org`; a list narrowed to
+  zero by an active filter names the filter and how to clear it.
+- **Colour degradation.** cobalt now detects the terminal's colour support — truecolor,
+  16-colour ANSI, or monochrome — from `NO_COLOR`, `COLORTERM`, `TERM`, `TERM_PROGRAM`, and
+  `WT_SESSION`, and degrades the chrome and diff palette to match instead of assuming
+  truecolor. A `COBALT_COLOR=none|16|true|full` override forces a tier (an unrecognised value
+  fails at startup rather than being ignored). In monochrome, diff rows carry no colour tint —
+  the `+`/`-` gutter sign and attribute emphasis carry the meaning instead. See
+  [ADR 0019](docs/adr/0019-hybrid-theming.md).
 
 ### Changed
 - **The work-item list is capped at the first 200 assigned items**, matching the existing
@@ -59,6 +94,12 @@
   install was indistinguishable from a fresh one.
 
 ### Fixed
+- **Vim `j`/`k` no longer needs two presses per move on a bare terminal.** Terminal.Gui
+  2.4.17's auto-detect selects its new `ansi` driver, whose input path drops every other
+  keypress. Cobalt now pins the platform default explicitly (`windows` on Windows, `dotnet`
+  elsewhere) instead of falling through to auto-detect; `COBALT_DRIVER` still overrides
+  everything, including `=ansi`. See
+  [ADR 0016](docs/adr/0016-terminal-driver-selection.md).
 - **Comments, thread replies and mark-viewed could act on the wrong file.** Moving to a file whose
   diff is still loading left the cursor on the new file while the previous one was still on screen.
   Anything done in that window — adding a line comment, opening and replying to a thread, marking
@@ -114,7 +155,7 @@
   filter itself remains in the client for a future config-enabled view.)
 - Section tab labels no longer carry the `g1`/`g2` jump chords (UAT feedback) —
   the chords remain discoverable via `?` help.
-- Version bumped to 0.3.0 (unreleased).
+- Version bumped to 0.3.0.
 - **Themes.** `theme = "dark" | "light" | "system"` in `config.toml` (default `dark`, the
   original look), switchable live with `:theme`. Terminal.Gui's built-in themes colour the app
   chrome + syntax highlighting; a cobalt `DiffPalette` colours the diff tints, so both recolour

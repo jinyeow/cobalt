@@ -185,16 +185,23 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
         var foreground = style.IsGutter
             ? style.LineKind switch
             {
-                DiffLineKind.Added => palette.AddedGutterForeground,
-                DiffLineKind.Removed => palette.RemovedGutterForeground,
+                // A null gutter foreground inherits normal (mono: the +/- sign carries the meaning).
+                DiffLineKind.Added => palette.AddedGutterForeground ?? normal.Foreground,
+                DiffLineKind.Removed => palette.RemovedGutterForeground ?? normal.Foreground,
                 _ => normal.Foreground,
             }
             : roleForeground;
 
-        // A search hit wins the background so matches stand out over the diff tint.
+        // A search hit wins the background so matches stand out over the diff tint; its paired
+        // foreground (when set) keeps the match legible where the run's own foreground would clash
+        // with the hit background (mono: black-on-white).
         var background = style.SearchHit
             ? palette.SearchHitBackground
             : BackgroundFor(style.LineKind, style.Emphasis, normal.Background, palette);
+        if (style.SearchHit && palette.SearchHitForeground is { } hitForeground)
+        {
+            foreground = hitForeground;
+        }
         return new Attribute(foreground, background);
     }
 
@@ -221,11 +228,13 @@ public sealed class DiffListDataSource(IReadOnlyList<StyledLine> lines, Func<Dif
         _ => VisualRole.Normal,
     };
 
+    // A null diff background inherits the context/normal background — the mono palette uses this so
+    // added/removed rows carry no colour tint (the +/- sign gutters carry add/remove instead).
     private static Color BackgroundFor(DiffLineKind kind, bool emphasis, Color contextBackground, DiffPalette palette) =>
         kind switch
         {
-            DiffLineKind.Added => emphasis ? palette.AddedEmphasisBackground : palette.AddedBackground,
-            DiffLineKind.Removed => emphasis ? palette.RemovedEmphasisBackground : palette.RemovedBackground,
+            DiffLineKind.Added => (emphasis ? palette.AddedEmphasisBackground : palette.AddedBackground) ?? contextBackground,
+            DiffLineKind.Removed => (emphasis ? palette.RemovedEmphasisBackground : palette.RemovedBackground) ?? contextBackground,
             _ => contextBackground,
         };
 }

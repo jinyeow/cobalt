@@ -70,8 +70,11 @@ Also required on the machine: the `az` CLI (for the reuse path), a browser
    latestFeature). Verify: `dotnet --version`.
 2. **Install cobalt** (command name is `cobalt`, package id `cobalt-tui`):
    ```sh
-   dotnet tool install -g cobalt-tui                      # from nuget.org, or:
-   dotnet tool install -g cobalt-tui --add-source ./nupkg # from the repo's local package
+   # from the latest GitHub release (the package is not on nuget.org yet):
+   gh release download --repo jinyeow/cobalt --pattern '*.nupkg' --dir .
+   dotnet tool install -g cobalt-tui --add-source .
+   # or from a local pack (`dotnet pack -o nupkg` first):
+   dotnet tool install -g cobalt-tui --add-source ./nupkg
    ```
    Alternatively run from source: `dotnet run --project src/Cobalt -- --help`.
 3. **Create the config** at `~/.config/cobalt/config.toml`

@@ -1,4 +1,5 @@
 using System.Text;
+using Cobalt.Core.Config;
 using Cobalt.Tui.Input;
 
 namespace Cobalt.Tui.App;
@@ -21,7 +22,7 @@ public static class HelpText
         [AppCommand.Refresh] = "refresh",
         [AppCommand.Help] = "this help",
         [AppCommand.CommandPalette] =
-            "command palette (:q, :context NAME, :scope, :done, :project NAME, :theme dark|light|system)",
+            $"command palette (:q, :context NAME, :scope, :done, :project NAME, :theme {string.Join('|', ThemeChoices.Names)})",
         [AppCommand.FilterStart] = "filter list",
         [AppCommand.NextTab] = "next tab",
         [AppCommand.PrevTab] = "previous tab",

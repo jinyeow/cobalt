@@ -1,3 +1,4 @@
+using Cobalt.Core.Config;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
 
@@ -54,5 +55,20 @@ public class HelpTextTests
         Assert.Contains("refresh", help);
         Assert.Contains("filter list", help);
         Assert.Contains("next section", help);
+    }
+
+    [Fact]
+    public void A_Remapped_Table_Renders_The_New_Key_In_Help_Without_Formatter_Changes()
+    {
+        // Same guarantee as the keybar: `?` help derives from the live table, so a config
+        // remap (move-down -> "n") surfaces automatically (ticket #30).
+        var commands = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal) { ["move-down"] = ["n"] };
+        var scopes = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.OrdinalIgnoreCase) { ["global"] = commands };
+        var table = KeyBindingTable.FromConfig(new KeysConfig(scopes));
+
+        var help = HelpText.For(table, KeyScope.WorkItemList);
+
+        Assert.Contains("n        move down", help);
+        Assert.DoesNotContain("j        move down", help);
     }
 }
