@@ -32,8 +32,12 @@ Terminal.Gui, so the interesting logic is unit-tested (808 tests). See
 
 ## Install
 
+Install from the latest [GitHub release](https://github.com/jinyeow/cobalt/releases)
+(the package is not on nuget.org yet):
+
 ```sh
-dotnet tool install -g cobalt-tui   # command is `cobalt`
+gh release download --repo jinyeow/cobalt --pattern '*.nupkg' --dir .
+dotnet tool install -g cobalt-tui --add-source .   # command is `cobalt`
 ```
 
 ## Configure
