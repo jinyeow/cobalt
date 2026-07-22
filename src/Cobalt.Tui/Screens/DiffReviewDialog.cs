@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 using Cobalt.Core.Text;
-using Cobalt.Core.Text.Syntax;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Editor;
 using Cobalt.Tui.Input;
@@ -45,13 +44,13 @@ public sealed class DiffReviewDialog(
     // unified line index → the first _diffRows index showing it (any of LineIndex/LeftIndex/
     // RightIndex), rebuilt with _diffRows so IsLineVisible / SelectDiffLine are O(1) rather than
     // an O(rows) scan on every n/N, hunk/thread nav and search hop (RENDER-7).
-    private Dictionary<int, int> _lineToRow = new();
+    private IReadOnlyDictionary<int, int> _lineToRow = new Dictionary<int, int>();
     private string? _searchQuery;
     private IReadOnlyList<(int LineIndex, LineSpan Span)> _searchMatches = [];
     private int _searchIndex;
     private int _lastDialogWidth = -1;
     private int _diffContentWidth = 1;
-    private readonly DiffStyleCache _styleCache = new();
+    private readonly DiffPaneComposer _composer = new();
     private readonly CoalescingGate _statsRefresh = new();
     private int _prefetchLaunched;
 
@@ -759,33 +758,6 @@ public sealed class DiffReviewDialog(
 
     private bool IsLineVisible(int lineIndex) => _lineToRow.ContainsKey(lineIndex);
 
-    /// <summary>
-    /// The unified line index → first row showing it, keyed on every side a row exposes
-    /// (unified <see cref="DiffRow.LineIndex"/>, or side-by-side left/right). First row wins, so a
-    /// lookup matches the same row the old first-match scan did. Rebuilt with <c>_diffRows</c>.
-    /// </summary>
-    private static Dictionary<int, int> BuildLineToRow(IReadOnlyList<DiffRow> rows)
-    {
-        var map = new Dictionary<int, int>(rows.Count);
-        for (var i = 0; i < rows.Count; i++)
-        {
-            var row = rows[i];
-            if (row.LineIndex is { } li)
-            {
-                map.TryAdd(li, i);
-            }
-            if (row.LeftIndex is { } le)
-            {
-                map.TryAdd(le, i);
-            }
-            if (row.RightIndex is { } ri)
-            {
-                map.TryAdd(ri, i);
-            }
-        }
-        return map;
-    }
-
     /// <summary>]c/[c: move the diff-pane selection to the next/previous change hunk, count-aware.</summary>
     private void NavHunk(bool forward, int count)
     {
@@ -944,15 +916,6 @@ public sealed class DiffReviewDialog(
         return -1;
     }
 
-    /// <summary>A dim placeholder row standing in for a run of hidden context lines.</summary>
-    private static StyledLine FoldMarkerLine(int hidden)
-    {
-        var text = $"    ··· {hidden} lines ···";
-        return new StyledLine(
-            text,
-            [new StyledRun(0, text.Length, new RunStyle(TokenKind.Comment, DiffLineKind.Context, Emphasis: false, IsGutter: false))]);
-    }
-
     /// <summary>
     /// The unified diff-line index the diff-pane cursor points at, in either mode (new side
     /// preferred). Returns -1 for an anchorless row (a fold marker) so comment/thread guards
@@ -1031,10 +994,11 @@ public sealed class DiffReviewDialog(
     /// <see cref="PrDiffViewModel.Error"/>, so retaining the prior text would leave a stale "vote
     /// failed" error on screen after the error was cleared (RENDER-4).
     /// </summary>
-    private void WriteDiffHeader()
+    private void WriteDiffHeader((FileDiff Diff, string Path)? snapshot)
     {
-        if (vm.CurrentDiff is { } diff && vm.CurrentDiffPath is { } path)
+        if (snapshot is { } snap)
         {
+            var (diff, path) = snap;
             var mode = _sideBySide ? "  (side-by-side)" : "";
             _diffHeader.Text = $" {path}   +{diff.Additions} -{diff.Deletions}" +
                 (diff.IsBinary ? "  (binary)" : diff.TooLarge ? "  (too large)" : mode);
@@ -1073,11 +1037,19 @@ public sealed class DiffReviewDialog(
             _dialog.Title = TitleFor();
         }
 
+        // Read the displayed diff and its path once, atomically (ADR 0008): CurrentDiff and
+        // CurrentDiffPath read the DiffState reference separately, so an overlapping select could
+        // tear the pair — this file's diff under the next file's path. The whole render path (header
+        // and pane alike) then describes the one snapshot, never the file-tree cursor: SelectFileAsync
+        // moves the cursor to the new file and publishes its diff only once fetched, so keying on it
+        // would anchor this file's lines to the next file's comment threads.
+        var snapshot = vm.CurrentDiffSnapshot;
+
         // Set in one place, on every render: a partial (chrome-only) refresh describes the same
         // file as a full one, so marking a file viewed cannot leave a stale error where the path
         // belongs. The error text is the fallback for having no diff to show — an expected failure
         // reaches the reviewer through the message bar (ADR 0013), which is its surface.
-        WriteDiffHeader();
+        WriteDiffHeader(snapshot);
 
         if (includeFileList)
         {
@@ -1086,17 +1058,12 @@ public sealed class DiffReviewDialog(
             RebuildFileList(SelectedFileNodePath());
         }
 
-        // Everything below describes the diff on screen, so it keys off the path that diff came
-        // from — never the file-tree cursor. SelectFileAsync moves the cursor to the new file and
-        // publishes its diff only once fetched, so in that window vm.SelectedFile is already the
-        // next file while this is still the previous one; keying on it would anchor this file's
-        // lines to the next file's comment threads.
-        if (includeDiffPane && vm.CurrentDiff is { } diff && vm.CurrentDiffPath is { } diffPath)
+        if (includeDiffPane && snapshot is { } snap)
         {
             // Rebuild the diff pane (thread markers may have changed after a comment),
             // but preserve the reviewer's line position on a same-file refresh; reset
             // to the top only when the displayed file actually changed.
-            var sameFile = diffPath == _renderedDiffPath;
+            var sameFile = snap.Path == _renderedDiffPath;
             var keepLine = sameFile ? _diffPane.SelectedItem : 0;
             if (!sameFile)
             {
@@ -1104,70 +1071,22 @@ public sealed class DiffReviewDialog(
                 _searchQuery = null;
                 _searchMatches = [];
             }
-            _renderedDiffPath = diffPath;
+            _renderedDiffPath = snap.Path;
 
-            // Point the style cache at this render's inputs: it reuses every composition whose
-            // line, language and thread marker are unchanged, so a render that only expands a
-            // fold, filters the tree or lands a comment no longer re-tokenizes the whole file.
-            // The commented lines are looked up once here rather than scanned per line.
-            var language = LanguageDetector.FromPath(diffPath);
-            var (commentedLeft, commentedRight) = vm.CommentedLinesFor(diffPath);
-            _styleCache.Prepare(diff.Lines, language, commentedLeft, commentedRight);
-            var rows = new List<DiffRow>();
-            List<StyledLine> styled;
-            if (_sideBySide)
+            // All mode/fold/search branching lives in the pure composer (ADR 0004). The dialog only
+            // decides fold reuse — pass the retained state on a same-file refresh so e/E expansions
+            // survive (thread markers, mark-viewed), or null to rebuild — and stores what it returns.
+            var (commentedLeft, commentedRight) = vm.CommentedLinesFor(snap.Path);
+            var composition = _composer.Compose(new DiffPaneRequest(
+                snap.Diff, snap.Path, _sideBySide, sameFile ? _foldState : null,
+                _searchMatches, _diffContentWidth, commentedLeft, commentedRight));
+            _foldState = composition.FoldState;
+            _diffRows = composition.Rows;
+            _lineToRow = composition.LineToRow;
+            _diffPane.Source = new DiffListDataSource(composition.Styled);
+            if (composition.Styled.Count > 0)
             {
-                // Side-by-side shows full context (no fold), so drop any fold state.
-                _foldState = null;
-                var sbs = SideBySideComposer.Pair(diff.Lines);
-                foreach (var r in sbs)
-                {
-                    rows.Add(new DiffRow(null, r.LeftIndex, r.RightIndex, null, null));
-                }
-                var columnWidth = Math.Max(1, (_diffContentWidth - SideBySideComposer.Separator.Length) / 2);
-                styled = [.. _styleCache.SideBySide(sbs, columnWidth)];
-            }
-            else
-            {
-                // Unified folds distant context (radius 3) by default; e/E expand. Rebuild the
-                // fold state only when the file changes (or after a mode toggle nulled it), so
-                // e/E expansions survive same-file refreshes (thread markers, mark-viewed).
-                if (!sameFile || _foldState is null)
-                {
-                    _foldState = DiffFoldState.Create(diff.Lines);
-                }
-                var hitsByLine = _searchMatches.Count == 0
-                    ? null
-                    : _searchMatches.GroupBy(m => m.LineIndex)
-                        .ToDictionary(g => g.Key, g => (IReadOnlyList<LineSpan>)[.. g.Select(m => m.Span)]);
-                styled = [];
-                foreach (var foldRow in _foldState.Rows())
-                {
-                    if (foldRow.Line is not null && foldRow.LineIndex is { } li)
-                    {
-                        rows.Add(new DiffRow(li, null, null, null, null));
-                        // Search hits stay an overlay on the cached composition: a query change
-                        // must not invalidate a line's styling, only decorate it.
-                        var composed = _styleCache.Unified(li);
-                        if (hitsByLine is not null && hitsByLine.TryGetValue(li, out var spans))
-                        {
-                            composed = DiffLineStyler.WithSearchHits(composed, spans, composed.Runs[0].Length);
-                        }
-                        styled.Add(composed);
-                    }
-                    else
-                    {
-                        rows.Add(new DiffRow(null, null, null, foldRow.FoldId, foldRow.HiddenCount));
-                        styled.Add(FoldMarkerLine(foldRow.HiddenCount ?? 0));
-                    }
-                }
-            }
-            _diffRows = rows;
-            _lineToRow = BuildLineToRow(rows);
-            _diffPane.Source = new DiffListDataSource(styled);
-            if (styled.Count > 0)
-            {
-                _diffPane.SelectedItem = Math.Clamp(keepLine ?? 0, 0, styled.Count - 1);
+                _diffPane.SelectedItem = Math.Clamp(keepLine ?? 0, 0, composition.Styled.Count - 1);
             }
         }
         _diffPane.SetNeedsDraw();
@@ -1335,20 +1254,6 @@ public sealed class DiffReviewDialog(
         var stats = row.Additions is { } a && row.Deletions is { } d ? $"  +{a} -{d}" : "";
         return $"{indent}{viewed}{glyph} {row.Label}{unresolved}{stats}";
     }
-}
-
-/// <summary>
-/// One visible diff-pane row mapped back to the original unified <see cref="DiffLine"/> list.
-/// The single map every consumer (comment/thread anchoring, hunk/thread/search navigation)
-/// resolves through, so anchoring stays correct across unified, folded, and side-by-side modes.
-/// A unified line sets <see cref="LineIndex"/>; a side-by-side row sets <see cref="LeftIndex"/>/
-/// <see cref="RightIndex"/>; a fold marker sets <see cref="FoldId"/>/<see cref="HiddenCount"/>
-/// and is anchorless.
-/// </summary>
-internal sealed record DiffRow(int? LineIndex, int? LeftIndex, int? RightIndex, int? FoldId, int? HiddenCount)
-{
-    /// <summary>The unified diff-line this row anchors to (new/right side preferred); null for a fold marker.</summary>
-    public int? Anchor => LineIndex ?? RightIndex ?? LeftIndex;
 }
 
 /// <summary>

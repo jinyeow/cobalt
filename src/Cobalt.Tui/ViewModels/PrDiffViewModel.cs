@@ -87,6 +87,12 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     /// <summary>The file path <see cref="CurrentDiff"/> belongs to; null when there is no diff.</summary>
     public string? CurrentDiffPath => _current?.Path;
 
+    /// <summary>The displayed diff and its path from a SINGLE read of the internal DiffState
+    /// reference (ADR 0008). CurrentDiff/CurrentDiffPath read the reference separately, so a
+    /// concurrent select can tear the pair; render paths must use this.</summary>
+    public (FileDiff Diff, string Path)? CurrentDiffSnapshot
+    { get { var current = _current; return current is null ? null : (current.Diff, current.Path); } }
+
     public event Action? Changed;
 
     /// <summary>
