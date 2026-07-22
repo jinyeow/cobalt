@@ -540,7 +540,9 @@ public sealed class DiffReviewDialog(
 
     private async Task CommentAsync()
     {
-        if (vm.CurrentDiff is null || vm.CurrentDiff.Lines.Count == 0)
+        // Single read of the DiffState reference (ADR 0008): pair diff+path in one snapshot rather
+        // than double-reading CurrentDiff, which a concurrent select could tear.
+        if (vm.CurrentDiffSnapshot is not { } snap || snap.Diff.Lines.Count == 0)
         {
             return;
         }
@@ -597,7 +599,7 @@ public sealed class DiffReviewDialog(
         }
         else
         {
-            new ThreadViewDialog(app, vm, textInput, log, threads, _router.Table).Show();
+            new ThreadViewDialog(app, vm, textInput, log, threads, _router.Table, _post).Show();
         }
     }
 
@@ -775,19 +777,22 @@ public sealed class DiffReviewDialog(
     /// <summary>]t/[t: move the diff-pane selection to the next/previous commented line, count-aware.</summary>
     private void NavThread(bool forward, int count)
     {
-        if (vm.CurrentDiff is not { Lines.Count: > 0 } diff || vm.CurrentDiffPath is not { } path)
+        // Single read of the DiffState reference (ADR 0008): CommentedLinesFor(snap.Path) must probe
+        // the same file the diff lines belong to, so pair diff+path in one snapshot rather than
+        // reading CurrentDiff and CurrentDiffPath separately (which a concurrent select could tear).
+        if (vm.CurrentDiffSnapshot is not { } snap || snap.Diff.Lines.Count == 0)
         {
             return;
         }
         // Looked up once, then probed by set: the predicate runs on every line of the file, and
         // scanning every thread per line (allocating a list each time) made ]t/[t cost O(lines ×
         // threads) per keypress. Keyed on the displayed file, like the pane it navigates.
-        var (commentedLeft, commentedRight) = vm.CommentedLinesFor(path);
-        bool HasThread(int i) => DiffThreadAnchor.HasThread(diff.Lines[i], commentedLeft, commentedRight);
+        var (commentedLeft, commentedRight) = vm.CommentedLinesFor(snap.Path);
+        bool HasThread(int i) => DiffThreadAnchor.HasThread(snap.Diff.Lines[i], commentedLeft, commentedRight);
         var from = CurrentUnifiedLine();
         var target = forward
-            ? DiffNavigator.NextThread(diff.Lines, from, HasThread, count)
-            : DiffNavigator.PrevThread(diff.Lines, from, HasThread, count);
+            ? DiffNavigator.NextThread(snap.Diff.Lines, from, HasThread, count)
+            : DiffNavigator.PrevThread(snap.Diff.Lines, from, HasThread, count);
         EnsureVisibleAndSelect(target);
     }
 

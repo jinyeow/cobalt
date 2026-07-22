@@ -517,7 +517,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new PrDetailViewModel(_pullRequests, id);
-        new PrDetailDialog(_app, detailVm, _textInput, _vm.Messages.Info, _pullRequests, _context, _bindings).Show();
+        new PrDetailDialog(_app, detailVm, _textInput, _vm.Messages.Info, _pullRequests, _context, _bindings, _post).Show();
         _prList?.RefreshAfterMutation(); // reflect any votes/edits back into the list, dropping stale cache
     }
 
@@ -528,7 +528,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new WorkItemDetailViewModel(_workItems, id, project);
-        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _textInput, _bindings).Show();
+        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _textInput, _bindings, _post).Show();
         _workItemList?.OnRefresh(); // reflect any edits back into the list
     }
 

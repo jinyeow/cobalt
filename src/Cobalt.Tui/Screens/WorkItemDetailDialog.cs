@@ -16,8 +16,8 @@ namespace Cobalt.Tui.Screens;
 public sealed class WorkItemDetailDialog
 {
     private readonly IApplication _app;
-    // UI-thread marshalling seam for background continuations (M2); Terminal.Gui (_app) is still held
-    // for dialog construction / RequestStop.
+    // UI-thread marshalling seam for all pure Invoke marshalling (M2); Terminal.Gui (_app) is still
+    // held for its non-marshalling uses — dialog construction, RequestStop, help/child dialogs.
     private readonly IUiPost _post;
     private readonly WorkItemDetailViewModel _vm;
     private readonly WorkItemActions _actions;
@@ -50,10 +50,10 @@ public sealed class WorkItemDetailDialog
 
     public WorkItemDetailDialog(
         IApplication app, WorkItemDetailViewModel vm, EditorService editor, Action<string> log,
-        ITextInput? textInput = null, KeyBindingTable? bindings = null)
+        ITextInput? textInput = null, KeyBindingTable? bindings = null, IUiPost? post = null)
     {
         _app = app;
-        _post = new ApplicationUiPost(app);
+        _post = post ?? new ApplicationUiPost(app);
         _vm = vm;
         _log = log;
         _actions = new WorkItemActions(app, editor, log, textInput);
@@ -120,7 +120,7 @@ public sealed class WorkItemDetailDialog
         return dialog;
     }
 
-    private void OnChanged() => _app.Invoke(() =>
+    private void OnChanged() => _post.Post(() =>
     {
         if (!_closed && _body is not null && _dialog is not null)
         {
