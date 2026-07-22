@@ -5,9 +5,10 @@ using Terminal.Gui.Drivers;
 namespace Cobalt.Tui.Tests.App;
 
 /// <summary>
-/// The COBALT_DRIVER escape hatch: forces a specific Terminal.Gui driver (needed under
-/// terminal multiplexers like zellij/tmux, where TG's default Win32-console 'windows'
-/// driver drops keystrokes and mishandles the editor suspend/resume). Unset = TG default.
+/// Driver selection (ADR 0016): an explicit COBALT_DRIVER wins; a multiplexer/RDP session
+/// selects 'dotnet'; otherwise the platform default is pinned explicitly ('windows' on
+/// Windows, 'dotnet' elsewhere) — never Terminal.Gui's auto-detect, whose 2.4.17 pick (the
+/// new 'ansi' driver) drops every other keypress.
 /// </summary>
 public class DriverResolutionTests
 {
@@ -29,33 +30,49 @@ public class DriverResolutionTests
         };
 
     [Fact]
-    public void Unset_Resolves_To_Null_Default()
+    public void Unset_Pins_The_Windows_Driver_On_Windows()
     {
-        Assert.Null(CobaltTuiApp.ResolveDriver(Env(null), Known));
+        // Never null: null would hand selection to TG auto-detect, which picks 'ansi' in
+        // 2.4.17 — and the ansi driver eats every other keypress (the j/k double-press bug).
+        Assert.Equal("windows", CobaltTuiApp.ResolveDriver(Env(null), Known, isWindows: true));
     }
 
     [Fact]
-    public void Blank_Resolves_To_Null_Default()
+    public void Unset_Pins_The_Dotnet_Driver_Off_Windows()
     {
-        Assert.Null(CobaltTuiApp.ResolveDriver(Env("   "), Known));
+        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(Env(null), Known, isWindows: false));
+    }
+
+    [Fact]
+    public void Blank_Pins_The_Platform_Default()
+    {
+        Assert.Equal("windows", CobaltTuiApp.ResolveDriver(Env("   "), Known, isWindows: true));
     }
 
     [Fact]
     public void Valid_Value_Resolves_And_Trims()
     {
-        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(Env("  dotnet  "), Known));
+        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(Env("  dotnet  "), Known, isWindows: true));
     }
 
     [Fact]
     public void Value_Is_Case_Insensitive_And_Canonicalized()
     {
-        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(Env("DotNet"), Known));
+        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(Env("DotNet"), Known, isWindows: true));
+    }
+
+    [Fact]
+    public void Explicit_Ansi_Is_Still_Honoured()
+    {
+        // The pin only governs the default; an explicit COBALT_DRIVER=ansi is a deliberate
+        // user choice (e.g. to retest the upstream bug) and passes through.
+        Assert.Equal("ansi", CobaltTuiApp.ResolveDriver(Env("ansi"), Known, isWindows: true));
     }
 
     [Fact]
     public void Unknown_Value_Throws_With_Actionable_Message()
     {
-        var ex = Assert.Throws<ConfigException>(() => CobaltTuiApp.ResolveDriver(Env("dotnett"), Known));
+        var ex = Assert.Throws<ConfigException>(() => CobaltTuiApp.ResolveDriver(Env("dotnett"), Known, isWindows: true));
         Assert.Contains("dotnett", ex.Message);
         Assert.Contains("windows", ex.Message);
         Assert.Contains("dotnet", ex.Message);
@@ -64,34 +81,42 @@ public class DriverResolutionTests
     [Fact]
     public void Zellij_Selects_The_Dotnet_Driver()
     {
-        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(EnvVars(zellij: "0"), Known));
+        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(EnvVars(zellij: "0"), Known, isWindows: true));
     }
 
     [Fact]
     public void Tmux_Selects_The_Dotnet_Driver()
     {
-        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(EnvVars(tmux: "/tmp/tmux-1000/default,1234,0"), Known));
+        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(EnvVars(tmux: "/tmp/tmux-1000/default,1234,0"), Known, isWindows: true));
     }
 
     [Fact]
-    public void Multiplexer_Without_A_Dotnet_Driver_Falls_Back_To_Null()
+    public void Multiplexer_Without_A_Dotnet_Driver_Falls_Back_To_The_Platform_Pin()
     {
-        // Defensive: if a future Terminal.Gui drops/renames the 'dotnet' driver, auto-detect
-        // degrades to TG's default rather than throwing (which would hit the crash boundary).
-        Assert.Null(CobaltTuiApp.ResolveDriver(EnvVars(zellij: "0"), ["windows", "ansi"]));
+        // Defensive: if a future Terminal.Gui drops/renames the 'dotnet' driver, degrade to
+        // the deterministic platform pin — never to TG auto-detect.
+        Assert.Equal("windows", CobaltTuiApp.ResolveDriver(EnvVars(zellij: "0"), ["windows", "ansi"], isWindows: true));
+    }
+
+    [Fact]
+    public void Platform_Pin_Missing_From_The_Registry_Falls_Back_To_Null()
+    {
+        // Last resort only: with even the pinned driver unregistered, null lets TG pick
+        // rather than throwing into the crash boundary.
+        Assert.Null(CobaltTuiApp.ResolveDriver(EnvVars(), ["ansi"], isWindows: true));
     }
 
     [Fact]
     public void Explicit_Value_Overrides_Multiplexer_Detection()
     {
         // COBALT_DRIVER=windows forces the Win32 driver even inside a multiplexer.
-        Assert.Equal("windows", CobaltTuiApp.ResolveDriver(EnvVars(cobaltDriver: "windows", zellij: "0"), Known));
+        Assert.Equal("windows", CobaltTuiApp.ResolveDriver(EnvVars(cobaltDriver: "windows", zellij: "0"), Known, isWindows: true));
     }
 
     [Fact]
-    public void No_Override_And_No_Multiplexer_Is_Null()
+    public void No_Override_And_No_Multiplexer_Pins_The_Platform_Default()
     {
-        Assert.Null(CobaltTuiApp.ResolveDriver(EnvVars(), Known));
+        Assert.Equal("windows", CobaltTuiApp.ResolveDriver(EnvVars(), Known, isWindows: true));
     }
 
     [Theory]
@@ -103,27 +128,28 @@ public class DriverResolutionTests
         // A remote/RDP session (e.g. a Windows 365 Cloud PC) paints through ConPTY's
         // console-buffer translation on the Win32 'windows' driver — expensive over a
         // latency link on a GPU-less host. The stdio/ANSI 'dotnet' driver skips it.
-        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(EnvVars(sessionName: sessionName), Known));
+        Assert.Equal("dotnet", CobaltTuiApp.ResolveDriver(EnvVars(sessionName: sessionName), Known, isWindows: true));
     }
 
     [Fact]
-    public void Console_Session_Stays_On_The_Default_Driver()
+    public void Console_Session_Pins_The_Windows_Driver()
     {
-        // A physical console (SESSIONNAME=Console) is unchanged: null → TG picks 'windows'.
-        Assert.Null(CobaltTuiApp.ResolveDriver(EnvVars(sessionName: "Console"), Known));
+        // A physical console (SESSIONNAME=Console) gets the same explicit pin as any
+        // non-multiplexed Windows terminal.
+        Assert.Equal("windows", CobaltTuiApp.ResolveDriver(EnvVars(sessionName: "Console"), Known, isWindows: true));
     }
 
     [Fact]
     public void Explicit_Value_Overrides_Rdp_Detection()
     {
         // COBALT_DRIVER=windows forces the Win32 driver even in a remote session.
-        Assert.Equal("windows", CobaltTuiApp.ResolveDriver(EnvVars(cobaltDriver: "windows", sessionName: "RDP-Tcp#0"), Known));
+        Assert.Equal("windows", CobaltTuiApp.ResolveDriver(EnvVars(cobaltDriver: "windows", sessionName: "RDP-Tcp#0"), Known, isWindows: true));
     }
 
     [Fact]
-    public void Rdp_Session_Without_A_Dotnet_Driver_Falls_Back_To_Null()
+    public void Rdp_Session_Without_A_Dotnet_Driver_Falls_Back_To_The_Platform_Pin()
     {
-        Assert.Null(CobaltTuiApp.ResolveDriver(EnvVars(sessionName: "RDP-Tcp#0"), ["windows", "ansi"]));
+        Assert.Equal("windows", CobaltTuiApp.ResolveDriver(EnvVars(sessionName: "RDP-Tcp#0"), ["windows", "ansi"], isWindows: true));
     }
 
     [Fact]

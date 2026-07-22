@@ -65,7 +65,22 @@ was dropped before any handler ran. The record is corrected here and in the code
   misses, set `COBALT_DRIVER=dotnet`. And `COBALT_DRIVER` always wins — including
   `COBALT_DRIVER=windows` to force the Win32 driver back inside a multiplexer.
 
-### Targeted redraw on vim movement (round 2, INPUT-1) — needs both-driver UAT
+- **Pin the platform default explicitly; never fall through to TG auto-detect (amended
+  2026-07-22).** Terminal.Gui 2.4.17 added an `ansi` driver, and its auto-detect now selects
+  it (verified empirically: `IDriver.GetName()` reports `ansi` after `Init(null)` on a bare
+  Windows Terminal — the "`null` → TG picks `windows`" claims above describe 2.4.16 and are
+  superseded). The ansi driver's input path drops every other keypress: vim `j`/`k` moves
+  once per two presses (the second press moves 1 row, both lists, persistent — input eaten,
+  not a repaint lag). Reproduces identically on `main` and on feature branches under
+  `COBALT_DRIVER=ansi`, while `windows` and `dotnet` are clean, so it is the driver, not
+  cobalt logic. `ResolveDriver` therefore pins the pre-2.4.17 platform default explicitly
+  (`windows` on Windows, `dotnet` elsewhere) when no override and no multiplexer/RDP
+  detection applies — and the multiplexer/RDP path degrades to that same pin (never to TG
+  auto) if the `dotnet` driver is ever unregistered. `null` (TG picks) remains only as the
+  last resort when even the pinned driver is missing. `COBALT_DRIVER=ansi` still passes
+  through for retesting the upstream bug.
+
+### Targeted redraw on vim movement (round 2, INPUT-1) — both-driver UAT passed
 
 The earlier `LayoutAndDraw(false)→(true)` change (`fb5b777`, see Context above) forced a full
 `Application.LayoutAndDraw(true)` on every vim move to dodge a driver dirty-flag quirk, even
@@ -74,12 +89,11 @@ moved list view calls `SetNeedsDraw()` on itself, and the app then runs
 `Application.LayoutAndDraw(false)` — no forced full-app repaint — relying on the explicit dirty
 flag to cover what `force:true` was compensating for on a programmatic `InvokeCommand` move.
 
-This is **not yet confirmed safe on both drivers** and must be UAT'd on the `windows` driver and
-the `dotnet` driver before it can be trusted — a headless test can assert `SetNeedsDraw()` was
-called, but not that the real driver actually repaints the moved row without the old `force:true`
-backstop, which is exactly the class of defect this ADR exists to catch (dropped input/redraw
-behaviour that only reproduces against a real console or pty). Until that UAT runs, treat the
-change as at-risk of resurrecting the redraw side of the original driver quirk.
+**UAT passed 2026-07-22** on both the `windows` and `dotnet` drivers: vim `j`/`k` movement
+paints correctly on the first press with INPUT-1's targeted redraw in place. (The double-press
+observed at that UAT was the 2.4.17 `ansi` auto-detect driver — see the 2026-07-22 pin above —
+initially misattributed to INPUT-1 precisely because the symptom matched the original
+`fb5b777`-era report. INPUT-1 is exonerated.)
 
 ## Consequences
 
