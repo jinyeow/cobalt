@@ -1,3 +1,4 @@
+using Cobalt.Core.Config;
 using Cobalt.Tui.Input;
 
 namespace Cobalt.Tui.ViewModels;
@@ -108,6 +109,7 @@ public sealed class PaletteSuggestionsViewModel(
     {
         PaletteArgKind.Context => contexts,
         PaletteArgKind.Project => projects,
+        PaletteArgKind.Theme => static () => ThemeChoices.Names,
         _ => null,
     };
 

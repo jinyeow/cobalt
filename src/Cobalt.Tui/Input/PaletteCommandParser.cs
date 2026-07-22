@@ -27,6 +27,9 @@ public enum PaletteArgKind
 
     /// <summary>Argument completes against known project names.</summary>
     Project,
+
+    /// <summary>Argument completes against the theme names (derived from <c>ThemeChoice</c>).</summary>
+    Theme,
 }
 
 /// <summary>One palette command's name, aliases, argument kind, and resulting action — the single
@@ -50,7 +53,7 @@ public static class PaletteCommandParser
         new("scope", [], PaletteArgKind.None, PaletteActionKind.SetScope),
         new("done", [], PaletteArgKind.None, PaletteActionKind.ToggleDone),
         new("project", [], PaletteArgKind.Project, PaletteActionKind.SetProjectFilter),
-        new("theme", [], PaletteArgKind.None, PaletteActionKind.SetTheme),
+        new("theme", [], PaletteArgKind.Theme, PaletteActionKind.SetTheme),
     ];
 
     public static PaletteAction Parse(string input)

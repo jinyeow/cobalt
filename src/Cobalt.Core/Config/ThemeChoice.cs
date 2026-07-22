@@ -16,3 +16,14 @@ public enum ThemeChoice
     /// <summary>Follow the operating system's light/dark setting (best-effort per platform).</summary>
     System,
 }
+
+/// <summary>
+/// The theme vocabulary, derived from <see cref="ThemeChoice"/> itself so a new enum member is
+/// automatically accepted by <c>:theme</c> and offered by its Tab-completion — no other edits.
+/// </summary>
+public static class ThemeChoices
+{
+    /// <summary>All theme names, lowercased, in declaration order.</summary>
+    public static readonly IReadOnlyList<string> Names =
+        [.. Enum.GetNames<ThemeChoice>().Select(n => n.ToLowerInvariant())];
+}

@@ -1,3 +1,4 @@
+using Cobalt.Core.Config;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
 
@@ -24,9 +25,9 @@ public class PaletteSuggestionsViewModelTests
     {
         var vm = Vm();
 
-        vm.SetInput("th");
+        vm.SetInput("sco");
 
-        Assert.Equal("theme", vm.Accept());
+        Assert.Equal("scope", vm.Accept());
     }
 
     [Fact]
@@ -128,10 +129,38 @@ public class PaletteSuggestionsViewModelTests
     {
         var vm = Vm();
 
-        vm.SetInput("theme d");
+        vm.SetInput("scope d");
 
         Assert.Null(vm.Current);
-        Assert.Equal("theme d", vm.Accept());
+        Assert.Equal("scope d", vm.Accept());
+    }
+
+    [Fact]
+    public void Theme_Argument_Completes_Against_The_ThemeChoice_Names()
+    {
+        var vm = Vm();
+
+        vm.SetInput("theme d");
+
+        Assert.Equal("dark", vm.Current);
+        Assert.Equal("theme dark", vm.Accept());
+    }
+
+    [Fact]
+    public void Bare_Theme_With_Trailing_Space_Lists_Every_ThemeChoice_Name()
+    {
+        // Candidates derive from the enum itself, so a new ThemeChoice member is
+        // Tab-completable with no completion-side edit.
+        var vm = Vm();
+
+        vm.SetInput("theme ");
+
+        foreach (var name in ThemeChoices.Names)
+        {
+            Assert.Equal(name, vm.Current);
+            vm.CycleNext();
+        }
+        Assert.Equal(ThemeChoices.Names[0], vm.Current); // wrapped
     }
 
     [Fact]
@@ -139,9 +168,9 @@ public class PaletteSuggestionsViewModelTests
     {
         var vm = Vm();
 
-        vm.SetInput(":th");
+        vm.SetInput(":sco");
 
-        Assert.Equal(":theme", vm.Accept());
+        Assert.Equal(":scope", vm.Accept());
     }
 
     [Fact]

@@ -365,6 +365,19 @@ public class ShellViewModelTests
     }
 
     [Fact]
+    public void Palette_Theme_Rejects_A_Numeric_Value()
+    {
+        // Enum.TryParse would happily parse "0" as ThemeChoice.Dark; the guard must not.
+        var vm = Vm();
+
+        vm.HandlePaletteInput("theme 0");
+
+        Assert.Equal(MessageLevel.Error, vm.Messages.Current?.Level);
+        Assert.Contains("unknown theme", vm.Messages.Current?.Text);
+        Assert.Equal(ThemeChoice.Dark, vm.CurrentTheme);
+    }
+
+    [Fact]
     public void Palette_Theme_System_Reissued_Resyncs_And_Raises_Again()
     {
         var vm = Vm();

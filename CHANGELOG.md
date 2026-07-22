@@ -16,8 +16,8 @@
   change — and it reaches the modal dialogs too. See
   [ADR 0023](docs/adr/0023-keybinding-remap-config.md).
 - **`:` command palette completion.** `Tab` / `Shift-Tab` in the `:` palette complete and
-  cycle command names, and for `:context`/`:project`, their argument names too (known context
-  names, and project names drawn from the loaded lists).
+  cycle command names, and for `:context`/`:project`/`:theme`, their argument names too (known
+  context names, project names drawn from the loaded lists, and the theme names).
 - **`:log` operations view.** `:log` opens a scrollable dialog listing recent Azure DevOps
   requests — operation name, route shape, duration, and outcome — for transparency into what
   cobalt is doing. The route shape masks numeric IDs and GUID path segments to `{id}` and

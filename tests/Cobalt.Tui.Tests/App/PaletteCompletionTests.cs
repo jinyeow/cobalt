@@ -31,9 +31,13 @@ public class PaletteCompletionTests
         var field = shell.OpenPaletteForTest();
         field.Text = ":th";
 
+        // Trailing space: `theme` takes a provider-backed argument, so Tab keeps completing.
         field.NewKeyDownEvent(Key.Tab);
+        Assert.Equal(":theme ", field.Text.ToString());
 
-        Assert.Equal(":theme", field.Text.ToString());
+        // The next Tab chains into the theme names (derived from the ThemeChoice enum).
+        field.NewKeyDownEvent(Key.Tab);
+        Assert.Equal(":theme dark", field.Text.ToString());
     }
 
     [Fact]
