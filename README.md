@@ -38,7 +38,9 @@ dotnet tool install -g cobalt-tui   # command is `cobalt`
 
 ## Configure
 
-Create `~/.config/cobalt/config.toml` (XDG-aware; `%APPDATA%` on Windows):
+Create `~/.config/cobalt/config.toml` (XDG-aware; `%APPDATA%` on Windows). `cobalt --config
+<path>` uses a specific file instead — handy for trying config changes (e.g. a `[keys]` remap)
+without touching your real one:
 
 ```toml
 default_context = "work"

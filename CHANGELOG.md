@@ -18,6 +18,9 @@
 - **`:` command palette completion.** `Tab` / `Shift-Tab` in the `:` palette complete and
   cycle command names, and for `:context`/`:project`/`:theme`, their argument names too (known
   context names, project names drawn from the loaded lists, and the theme names).
+- **`--config <path>`.** Launch (or `auth login`/`auth status`) against a specific config.toml
+  instead of the default location — useful for trying a `[keys]` remap or a different context
+  set without editing your real config. A missing file fails with the usual clear config error.
 - **`:log` operations view.** `:log` opens a scrollable dialog listing recent Azure DevOps
   requests — operation name, route shape, duration, and outcome — for transparency into what
   cobalt is doing. The route shape masks numeric IDs and GUID path segments to `{id}` and

@@ -13,12 +13,17 @@ public sealed record CliArgs
 {
     public CliCommand Command { get; init; } = CliCommand.Tui;
     public string? Context { get; init; }
+
+    /// <summary>An explicit config.toml path (<c>--config</c>), or null for the default location.</summary>
+    public string? ConfigPath { get; init; }
+
     public string? Error { get; init; }
 
     public static CliArgs Parse(IReadOnlyList<string> args)
     {
         var command = CliCommand.Tui;
         string? context = null;
+        string? configPath = null;
 
         for (var i = 0; i < args.Count; i++)
         {
@@ -39,6 +44,17 @@ public sealed record CliArgs
                     }
                     context = args[++i];
                     break;
+                case "--config":
+                    if (i + 1 >= args.Count || args[i + 1].Length == 0 || args[i + 1].StartsWith('-'))
+                    {
+                        return Fail("--config requires a value (a path to a config.toml).");
+                    }
+                    if (configPath is not null)
+                    {
+                        return Fail("--config was given more than once.");
+                    }
+                    configPath = args[++i];
+                    break;
                 case "auth":
                     if (i + 1 >= args.Count || args[i + 1] is not ("login" or "status"))
                     {
@@ -51,7 +67,7 @@ public sealed record CliArgs
             }
         }
 
-        return new CliArgs { Command = command, Context = context };
+        return new CliArgs { Command = command, Context = context, ConfigPath = configPath };
 
         static CliArgs Fail(string message) => new() { Error = message };
     }
