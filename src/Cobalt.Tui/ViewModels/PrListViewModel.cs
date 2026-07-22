@@ -52,6 +52,12 @@ public sealed class PrListViewModel(IPullRequestSource source, Func<PrScope>? sc
     public string? Error { get; private set; }
     public IReadOnlyList<PullRequest> Rows { get; private set; } = [];
 
+    /// <summary>
+    /// Raised when the row set / loading state changes. May fire on a threadpool continuation (an ADO
+    /// list load completing), so a subscriber that touches Terminal.Gui must marshal onto the UI
+    /// thread via <see cref="App.IUiPost"/> — never <c>IApplication</c>, which this UI-free
+    /// view-model (ADR 0004) deliberately does not reference.
+    /// </summary>
     public event Action? Changed;
 
     public string RepositoryFilter

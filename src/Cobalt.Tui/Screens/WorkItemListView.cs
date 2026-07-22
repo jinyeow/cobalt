@@ -1,8 +1,8 @@
 using System.Collections.ObjectModel;
 using Cobalt.Core.Models;
+using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
-using Terminal.Gui.App;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -11,7 +11,7 @@ namespace Cobalt.Tui.Screens;
 /// <summary>The "my work items" list: a header, a bound ListView, and a filter line.</summary>
 public sealed class WorkItemListView : View
 {
-    private readonly IApplication _app;
+    private readonly IUiPost _post;
     private readonly WorkItemListViewModel _vm;
     private readonly Label _header;
     private readonly ListView _list;
@@ -28,9 +28,9 @@ public sealed class WorkItemListView : View
     private bool _filtering;
     private bool _disposed;
 
-    public WorkItemListView(IApplication app, WorkItemListViewModel vm)
+    public WorkItemListView(IUiPost post, WorkItemListViewModel vm)
     {
-        _app = app;
+        _post = post;
         _vm = vm;
         Width = Dim.Fill();
         Height = Dim.Fill();
@@ -100,7 +100,7 @@ public sealed class WorkItemListView : View
         {
             return; // a late background completion after a section switch
         }
-        _app.Invoke(() =>
+        _post.Post(() =>
         {
             if (!_disposed)
             {

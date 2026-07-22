@@ -12,6 +12,12 @@ public sealed class OperationLog(int capacity = 200)
     private readonly object _lock = new();
     private readonly List<AdoOperation> _history = [];
 
+    /// <summary>
+    /// Raised when the log changes. Fires on a threadpool continuation (the AdoHttp observer runs on
+    /// <c>ConfigureAwait(false)</c> continuations), so a subscriber that touches Terminal.Gui must
+    /// marshal onto the UI thread via <see cref="App.IUiPost"/> — never <c>IApplication</c>, which
+    /// this UI-free view-model (ADR 0004) deliberately does not reference.
+    /// </summary>
     public event Action? Changed;
 
     /// <summary>A snapshot, not the live list — the observer that feeds <see cref="Add"/> can

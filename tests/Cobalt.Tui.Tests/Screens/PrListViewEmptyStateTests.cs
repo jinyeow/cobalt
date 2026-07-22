@@ -1,7 +1,7 @@
 using Cobalt.Core.Models;
 using Cobalt.Tui.Screens;
+using Cobalt.Tui.Tests.App;
 using Cobalt.Tui.ViewModels;
-using Terminal.Gui.App;
 using Terminal.Gui.Views;
 
 namespace Cobalt.Tui.Tests.Screens;
@@ -9,7 +9,9 @@ namespace Cobalt.Tui.Tests.Screens;
 /// <summary>View-level, headless: the empty-list placeholder shows the VM's <see cref="PrListViewModel.EmptyStateText"/>.</summary>
 public class PrListViewEmptyStateTests
 {
-    private static readonly IApplication App = Application.Create();
+    // Undrained by design: mirrors today's headless "Invoke never drains" so the views' posted
+    // renders never fire on their own — tests call view.Render() explicitly (M2).
+    private static readonly RecordingUiPost App = new();
 
     private sealed class FakePrSource(IReadOnlyList<PullRequest> items) : IPullRequestSource
     {

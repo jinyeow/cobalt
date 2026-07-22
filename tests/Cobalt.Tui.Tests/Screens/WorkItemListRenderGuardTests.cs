@@ -2,8 +2,8 @@ using System.Text.Json;
 using Cobalt.Core.Ado;
 using Cobalt.Core.Models;
 using Cobalt.Tui.Screens;
+using Cobalt.Tui.Tests.App;
 using Cobalt.Tui.ViewModels;
-using Terminal.Gui.App;
 using Terminal.Gui.Views;
 
 namespace Cobalt.Tui.Tests.Screens;
@@ -15,7 +15,9 @@ namespace Cobalt.Tui.Tests.Screens;
 /// </summary>
 public class WorkItemListRenderGuardTests
 {
-    private static readonly IApplication App = Application.Create();
+    // Undrained by design: mirrors today's headless "Invoke never drains" so the views' posted
+    // renders never fire on their own — tests call view.Render() explicitly (M2).
+    private static readonly RecordingUiPost App = new();
 
     private static WorkItem Wi(long id) =>
         new(id, new Dictionary<string, JsonElement>

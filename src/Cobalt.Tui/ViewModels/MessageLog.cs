@@ -17,6 +17,12 @@ public sealed class MessageLog(int capacity = 200, TimeProvider? time = null)
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly List<Message> _history = [];
 
+    /// <summary>
+    /// Raised when the log changes. May fire on a threadpool continuation (an ADO call completing),
+    /// so a subscriber that touches Terminal.Gui must marshal onto the UI thread via
+    /// <see cref="App.IUiPost"/> — never <c>IApplication</c>, which this UI-free view-model (ADR 0004)
+    /// deliberately does not reference.
+    /// </summary>
     public event Action? Changed;
 
     public Message? Current { get; private set; }

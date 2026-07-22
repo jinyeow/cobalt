@@ -21,8 +21,11 @@ namespace Cobalt.Tui.Screens;
 /// </summary>
 public sealed class DiffReviewDialog(
     IApplication app, PrDiffViewModel vm, ITextInput textInput, Action<string> log, AdoContext? context = null,
-    KeyBindingTable? bindings = null)
+    KeyBindingTable? bindings = null, IUiPost? post = null)
 {
+    // Terminal.Gui (app) is still needed for Run/RequestStop/MessageBox/child dialogs; only the
+    // pure marshalling Invoke sites route through this seam (M2).
+    private readonly IUiPost _post = post ?? new ApplicationUiPost(app);
     private readonly CancellationTokenSource _cts = new();
     private readonly KeymapRouter _router = new(bindings ?? KeyBindingTable.Shared);
     private bool _closed;
@@ -259,7 +262,7 @@ public sealed class DiffReviewDialog(
         return dialog;
     }
 
-    private void OnChanged() => app.Invoke(() =>
+    private void OnChanged() => _post.Post(() =>
     {
         if (!_closed)
         {
@@ -271,11 +274,11 @@ public sealed class DiffReviewDialog(
     // chrome and skip the diff-pane rebuild — the displayed file's diff is unchanged. The prefetch
     // raises this once per file and each refresh rebuilds the whole file tree, so a burst collapses
     // into one queued refresh rather than one per file competing with the reviewer's keys.
-    private void OnStatsChanged()
+    internal void OnStatsChanged()
     {
         if (_statsRefresh.TryQueue())
         {
-            app.Invoke(RunQueuedStatsRefresh);
+            _post.Post(RunQueuedStatsRefresh);
         }
     }
 
@@ -283,7 +286,7 @@ public sealed class DiffReviewDialog(
     // repaint the chrome (busy indicator + error header) without re-tokenizing the open file or
     // re-flattening the file tree. The mutation's trailing Changed still fully rebuilds when the
     // refreshed threads land (RENDER-4). Without this the mutation-start repaint was dropped.
-    private void OnBusyChanged() => app.Invoke(RunBusyRefresh);
+    private void OnBusyChanged() => _post.Post(RunBusyRefresh);
 
     // FilesLoaded fires once, the instant the changed-file list is assigned — before the threads
     // and first diff settle — so the background diff prefetch starts earlier (ASYNC-3). Posted off
@@ -475,7 +478,7 @@ public sealed class DiffReviewDialog(
                 Vote();
                 return true;
             case AppCommand.Comment:
-                _ = FireAndForget.Observe(CommentAsync(), app, log);
+                _ = FireAndForget.Observe(CommentAsync(), _post, log);
                 return true;
             case AppCommand.OpenBranch:
                 OpenSourceBranch();
@@ -520,7 +523,7 @@ public sealed class DiffReviewDialog(
         {
             return;
         }
-        _ = FireAndForget.Observe(vm.PrefetchAllDiffsAsync(Token).IgnoreCancellationAsync(), app, log);
+        _ = FireAndForget.Observe(vm.PrefetchAllDiffsAsync(Token).IgnoreCancellationAsync(), _post, log);
     }
 
     /// <summary>Test seam: how many times the background prefetch has actually been launched (fire-once).</summary>
@@ -557,7 +560,7 @@ public sealed class DiffReviewDialog(
         }
         catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
-            app.Invoke(() => log($"editor failed: {ex.Message}"));
+            _post.Post(() => log($"editor failed: {ex.Message}"));
             return;
         }
         if (string.IsNullOrWhiteSpace(text))
@@ -565,7 +568,7 @@ public sealed class DiffReviewDialog(
             return;
         }
         await vm.AddCommentAtLineAsync(lineIndex, text.Trim(), Token).ConfigureAwait(false);
-        app.Invoke(() => log(vm.Error is { } e ? $"comment failed: {e}" : "line comment added"));
+        _post.Post(() => log(vm.Error is { } e ? $"comment failed: {e}" : "line comment added"));
     }
 
     /// <summary>o/Enter on the diff pane: show the existing comment thread(s) anchored to the selected line.</summary>
@@ -919,14 +922,14 @@ public sealed class DiffReviewDialog(
                 VoteAction(vote);
                 return;
             }
-            _ = FireAndForget.Observe(RunVoteAsync(vote, VoteLabels[index]), app, log);
+            _ = FireAndForget.Observe(RunVoteAsync(vote, VoteLabels[index]), _post, log);
         }
     }
 
     private async Task RunVoteAsync(PrVote vote, string label)
     {
         await vm.VoteAsync(vote, Token).ConfigureAwait(false);
-        app.Invoke(() => log(vm.Error is { } e ? $"vote failed: {e}" : $"voted: {label}"));
+        _post.Post(() => log(vm.Error is { } e ? $"vote failed: {e}" : $"voted: {label}"));
     }
 
     private int FileIndexForPath(string path)

@@ -24,6 +24,9 @@ public sealed class ThreadViewDialog(
     KeyBindingTable? bindings = null)
 {
     private readonly CancellationTokenSource _cts = new();
+    // UI-thread marshalling seam for background continuations (M2); Terminal.Gui (app) is still held
+    // for dialog construction / RequestStop.
+    private readonly IUiPost _post = new ApplicationUiPost(app);
     private readonly KeymapRouter _router = new(bindings ?? KeyBindingTable.Shared);
     private readonly IReadOnlyList<int> _threadIds = threads.Select(t => t.Id).ToList();
     private bool _closed;
@@ -214,7 +217,7 @@ public sealed class ThreadViewDialog(
                 }
                 else
                 {
-                    _ = FireAndForget.Observe(ReplyAsync(), app, log);
+                    _ = FireAndForget.Observe(ReplyAsync(), _post, log);
                 }
                 return true;
             case AppCommand.ResolveThread:
@@ -225,7 +228,7 @@ public sealed class ThreadViewDialog(
                 else
                 {
                     _ = FireAndForget.Observe(
-                        RunAndLog(vm.ResolveThreadAsync(threads[0].Id, Token), "thread resolved"), app, log);
+                        RunAndLog(vm.ResolveThreadAsync(threads[0].Id, Token), "thread resolved"), _post, log);
                 }
                 return true;
             case AppCommand.ReactivateThread:
@@ -236,7 +239,7 @@ public sealed class ThreadViewDialog(
                 else
                 {
                     _ = FireAndForget.Observe(
-                        RunAndLog(vm.ReactivateThreadAsync(threads[0].Id, Token), "thread reactivated"), app, log);
+                        RunAndLog(vm.ReactivateThreadAsync(threads[0].Id, Token), "thread reactivated"), _post, log);
                 }
                 return true;
             default:

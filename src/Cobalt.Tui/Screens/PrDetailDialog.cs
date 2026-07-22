@@ -25,6 +25,9 @@ public sealed class PrDetailDialog(
     KeyBindingTable? bindings = null)
 {
     private readonly CancellationTokenSource _cts = new();
+    // UI-thread marshalling seam for background continuations (M2); Terminal.Gui (app) is still held
+    // for dialog construction / RequestStop.
+    private readonly IUiPost _post = new ApplicationUiPost(app);
     private readonly PrActions _actions = new(app, log);
     private readonly KeymapRouter _router = new(bindings ?? KeyBindingTable.Shared);
     private bool _closed;
@@ -185,7 +188,7 @@ public sealed class PrDetailDialog(
                 }
                 return true;
             case AppCommand.Vote:
-                _ = FireAndForget.Observe(_actions.VoteAsync(vm, Token), app, log);
+                _ = FireAndForget.Observe(_actions.VoteAsync(vm, Token), _post, log);
                 return true;
             case AppCommand.Comment:
                 if (ReplyAction is not null)
@@ -194,7 +197,7 @@ public sealed class PrDetailDialog(
                 }
                 else
                 {
-                    _ = FireAndForget.Observe(ReplyAsync(), app, log);
+                    _ = FireAndForget.Observe(ReplyAsync(), _post, log);
                 }
                 return true;
             case AppCommand.AddPrComment:
@@ -204,14 +207,14 @@ public sealed class PrDetailDialog(
                 }
                 else
                 {
-                    _ = FireAndForget.Observe(AddCommentAsync(), app, log);
+                    _ = FireAndForget.Observe(AddCommentAsync(), _post, log);
                 }
                 return true;
             case AppCommand.ResolveThread:
-                _ = FireAndForget.Observe(ThreadStatusAsync(resolve: true), app, log);
+                _ = FireAndForget.Observe(ThreadStatusAsync(resolve: true), _post, log);
                 return true;
             case AppCommand.ReactivateThread:
-                _ = FireAndForget.Observe(ThreadStatusAsync(resolve: false), app, log);
+                _ = FireAndForget.Observe(ThreadStatusAsync(resolve: false), _post, log);
                 return true;
             case AppCommand.AbandonPr:
                 (AbandonAction ?? ConfirmAbandon)();
@@ -381,7 +384,7 @@ public sealed class PrDetailDialog(
         var confirm = MessageBox.Query(app, "abandon PR", "Abandon this pull request?", "cancel", "abandon");
         if (confirm == 1)
         {
-            _ = FireAndForget.Observe(RunAndLog(vm.AbandonAsync(Token), "PR abandoned"), app, log);
+            _ = FireAndForget.Observe(RunAndLog(vm.AbandonAsync(Token), "PR abandoned"), _post, log);
         }
     }
 
@@ -394,7 +397,7 @@ public sealed class PrDetailDialog(
             var confirm = MessageBox.Query(app, "complete PR", $"Complete with {strategies[i]}?", "cancel", "complete");
             if (confirm == 1)
             {
-                _ = FireAndForget.Observe(RunAndLog(vm.CompleteAsync(strategies[i], deleteSource: false, Token), "PR completed"), app, log);
+                _ = FireAndForget.Observe(RunAndLog(vm.CompleteAsync(strategies[i], deleteSource: false, Token), "PR completed"), _post, log);
             }
         }
     }
