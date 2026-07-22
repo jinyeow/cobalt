@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Cobalt.Core.Ado;
 using Cobalt.Core.Auth;
 using Cobalt.Core.Config;
@@ -57,7 +58,10 @@ public static class CobaltTuiApp
             context.PrScope,
             new PolicyApi(connection.Http));
 
-        var driverName = ResolveDriver(Environment.GetEnvironmentVariable, DriverRegistry.GetDriverNames().ToArray());
+        var driverName = ResolveDriver(
+            Environment.GetEnvironmentVariable,
+            DriverRegistry.GetDriverNames().ToArray(),
+            RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
         // Enable Terminal.Gui's theming (scoped to its embedded config) before Init so the driver
         // starts on the resolved theme; the initial preset is applied just below.
         ThemeService.Enable();
@@ -84,7 +88,11 @@ public static class CobaltTuiApp
     /// unknown value throws an actionable <see cref="ConfigException"/>). Otherwise the
     /// <c>dotnet</c> driver is selected when a terminal multiplexer (<c>ZELLIJ</c>/<c>TMUX</c>)
     /// or a remote/RDP session (<c>SESSIONNAME=RDP-*</c>) is detected. Failing all of these,
-    /// <see langword="null"/> lets TG auto-detect (<c>windows</c> on Windows).
+    /// the platform default is pinned explicitly — <c>windows</c> on Windows, <c>dotnet</c>
+    /// elsewhere — never Terminal.Gui's auto-detect: since 2.4.17 auto-detect selects the new
+    /// <c>ansi</c> driver, whose input path drops every other keypress (vim <c>j</c>/<c>k</c>
+    /// needs two presses per move; diagnosed 2026-07-22). <see langword="null"/> (TG picks) is
+    /// only the last resort when even the pinned driver is unregistered.
     ///
     /// <para>The Win32-console <c>windows</c> driver is unreliable through a multiplexer's
     /// pseudo-terminal — it drops keystrokes and mishandles the editor suspend/resume — and
@@ -94,7 +102,8 @@ public static class CobaltTuiApp
     /// Set <c>COBALT_DRIVER</c> explicitly to override (e.g. <c>=windows</c> to force it back,
     /// or for an environment this detection misses). See ADR 0016.</para>
     /// </summary>
-    internal static string? ResolveDriver(Func<string, string?> env, IReadOnlyCollection<string> knownDrivers)
+    internal static string? ResolveDriver(
+        Func<string, string?> env, IReadOnlyCollection<string> knownDrivers, bool isWindows)
     {
         var requested = env("COBALT_DRIVER")?.Trim();
         if (!string.IsNullOrEmpty(requested))
@@ -111,11 +120,23 @@ public static class CobaltTuiApp
         // expensive over a latency link on a GPU-less host, where the terminal renders in
         // software. The stdio/ANSI 'dotnet' driver writes VT straight to stdout and skips it.
         var inRemoteSession = env("SESSIONNAME")?.StartsWith("RDP-", StringComparison.OrdinalIgnoreCase) == true;
-        return inMultiplexer || inRemoteSession
-            // FirstOrDefault, not First: if 'dotnet' is somehow unregistered, fall back to
-            // TG's default (null) rather than throwing into the crash boundary.
-            ? knownDrivers.FirstOrDefault(d => d.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
-            : null;
+        if (inMultiplexer || inRemoteSession)
+        {
+            var dotnet = knownDrivers.FirstOrDefault(d => d.Equals("dotnet", StringComparison.OrdinalIgnoreCase));
+            if (dotnet is not null)
+            {
+                return dotnet;
+            }
+            // 'dotnet' unregistered: fall through to the platform pin — deterministic beats
+            // TG auto-detect (the broken 'ansi' driver).
+        }
+
+        // Pin the pre-2.4.17 platform default rather than returning null: null hands the
+        // choice to TG auto-detect, which since 2.4.17 lands on the keypress-dropping 'ansi'
+        // driver. FirstOrDefault, not First: with even this driver unregistered, null (TG
+        // picks) is still better than throwing into the crash boundary.
+        var preferred = isWindows ? "windows" : "dotnet";
+        return knownDrivers.FirstOrDefault(d => d.Equals(preferred, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

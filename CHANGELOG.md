@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+- **Vim `j`/`k` no longer needs two presses per move on a bare terminal.** Terminal.Gui
+  2.4.17's auto-detect selects its new `ansi` driver, whose input path drops every other
+  keypress. Cobalt now pins the platform default explicitly (`windows` on Windows, `dotnet`
+  elsewhere) instead of falling through to auto-detect; `COBALT_DRIVER` still overrides
+  everything, including `=ansi`. See
+  [ADR 0016](docs/adr/0016-terminal-driver-selection.md).
+
 ### Changed
 - **The work-item list is capped at the first 200 assigned items**, matching the existing
   pull-request-list cap: a heavy assignee no longer pulls an unbounded id set (and that many
@@ -20,8 +28,8 @@
   precomputed once per thread refresh instead of scanning every file's threads on each render,
   and the intra-line word diff skips its expensive comparison on line pairs whose lengths are
   too mismatched for the result to be useful. Vim movement now redraws only the moved list
-  instead of repainting the whole app on every keystroke (needs both-driver UAT before it's
-  fully trusted — see [ADR 0016](docs/adr/0016-terminal-driver-selection.md)). Per-keystroke
+  instead of repainting the whole app on every keystroke (both-driver UAT passed 2026-07-22 —
+  see [ADR 0016](docs/adr/0016-terminal-driver-selection.md)). Per-keystroke
   input handling (the key router and tokenizer) no longer allocates on the hot path. These are
   structural fixes verified by allocation/call-count tests, not measured against a live org.
 - **Fewer round-trips on work items.** Opening the work-item detail now fetches its comments and

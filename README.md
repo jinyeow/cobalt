@@ -196,11 +196,14 @@ A full-screen editor gets a clean terminal (the TUI suspends while it runs).
 
 ## Terminal multiplexers (zellij / tmux) and remote sessions
 
+On a bare terminal cobalt pins the platform default driver itself — `windows` on Windows,
+`dotnet` elsewhere — rather than deferring to Terminal.Gui's auto-detect, which (since
+TG 2.4.17) selects an `ansi` driver that drops every other keypress.
+
 Inside a multiplexer, cobalt runs against a pseudo-terminal rather than a real Win32
-console, and Terminal.Gui's default `windows` driver (Win32 console APIs) drops
-keystrokes and breaks the `$EDITOR` handoff there. cobalt **auto-detects zellij and
-tmux** (`ZELLIJ`/`TMUX`) and switches to the stdio/ANSI `dotnet` driver, so it works
-there with no configuration.
+console, and the Win32 `windows` driver (console APIs) drops keystrokes and breaks the
+`$EDITOR` handoff there. cobalt **auto-detects zellij and tmux** (`ZELLIJ`/`TMUX`) and
+switches to the stdio/ANSI `dotnet` driver, so it works there with no configuration.
 
 **Remote / RDP sessions** (including a Windows 365 Cloud PC) get the same treatment:
 cobalt detects them via `SESSIONNAME=RDP-*` and switches to `dotnet`. On the `windows`
