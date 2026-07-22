@@ -12,7 +12,7 @@ public class TerminalCapabilitiesTests
 {
     private static Func<string, string?> Env(params (string Key, string Value)[] pairs)
     {
-        var map = pairs.ToDictionary(p => p.Key, p => (string?)p.Value, StringComparer.Ordinal);
+        var map = pairs.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
         return key => map.TryGetValue(key, out var value) ? value : null;
     }
 

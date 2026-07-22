@@ -49,21 +49,20 @@ public class ShellIntegrationWiringTests
             Task.FromResult<IReadOnlyList<WorkItem>>([]);
     }
 
-    private static WorkItemStoreAdapter WorkItemAdapter()
-    {
-        var httpClient = new HttpClient(new EmptyHandler()) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
-        return new WorkItemStoreAdapter(new WorkItemsApi(new AdoHttp(httpClient), Context), PrScope.Project);
-    }
+    // One class-lifetime client: the stub handler is stateless, and a shared instance keeps
+    // the adapters' plumbing out of each test's dispose bookkeeping.
+    private static readonly HttpClient StubClient =
+        new(new EmptyHandler()) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
 
-    private static PullRequestStoreAdapter PrAdapter()
-    {
-        var httpClient = new HttpClient(new EmptyHandler()) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
-        return new PullRequestStoreAdapter(
-            new GitApi(new AdoHttp(httpClient), Context),
+    private static WorkItemStoreAdapter WorkItemAdapter() =>
+        new(new WorkItemsApi(new AdoHttp(StubClient), Context), PrScope.Project);
+
+    private static PullRequestStoreAdapter PrAdapter() =>
+        new(
+            new GitApi(new AdoHttp(StubClient), Context),
             _ => Task.FromResult(Guid.Empty),
             _ => Task.FromResult(new TeamDirectory([])),
             project: Context.Project);
-    }
 
     [Fact]
     public void Operation_Observer_Marshals_Each_Record_Into_The_Log()

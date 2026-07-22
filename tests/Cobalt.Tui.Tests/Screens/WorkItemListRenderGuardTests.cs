@@ -41,7 +41,7 @@ public class WorkItemListRenderGuardTests
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         var view = new WorkItemListView(App, vm);
-        var window = new Window();
+        using var window = new Window();
         window.Add(view);
         window.Layout(new System.Drawing.Size(60, 20));
 
@@ -63,7 +63,7 @@ public class WorkItemListRenderGuardTests
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         var view = new WorkItemListView(App, vm);
-        var window = new Window();
+        using var window = new Window();
         window.Add(view);
         window.Layout(new System.Drawing.Size(60, 20));
 
@@ -85,7 +85,7 @@ public class WorkItemListRenderGuardTests
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         var view = new WorkItemListView(App, vm);
-        var window = new Window();
+        using var window = new Window();
         window.Add(view);
         window.Layout(new System.Drawing.Size(60, 20));
 
@@ -113,7 +113,7 @@ public class WorkItemListRenderGuardTests
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         var view = new WorkItemListView(App, vm);
-        var window = new Window();
+        using var window = new Window();
         window.Add(view);
         window.Layout(new System.Drawing.Size(60, 20));
 
@@ -149,7 +149,7 @@ public class WorkItemListRenderGuardTests
         await firstLoad;
 
         var view = new WorkItemListView(App, vm);
-        var window = new Window();
+        using var window = new Window();
         window.Add(view);
         window.Layout(new System.Drawing.Size(60, 20));
 

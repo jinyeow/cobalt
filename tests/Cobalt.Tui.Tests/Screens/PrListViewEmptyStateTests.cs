@@ -24,7 +24,7 @@ public class PrListViewEmptyStateTests
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         var view = new PrListView(App, vm);
-        var window = new Window();
+        using var window = new Window();
         window.Add(view);
         window.Layout(new System.Drawing.Size(80, 20));
 
