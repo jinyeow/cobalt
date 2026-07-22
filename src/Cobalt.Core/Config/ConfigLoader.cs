@@ -30,6 +30,15 @@ public static class ConfigLoader
         TomlTable? root;
         try
         {
+            // Validate the syntax first and surface its diagnostics: the deserializer alone
+            // silently keeps the FIRST definition on a spec violation like a duplicate table
+            // header ([keys.global] twice), which would drop half a user's remaps with no
+            // signal. The semantic validation pass catches those — fail loud instead.
+            var syntax = Tomlyn.Parsing.SyntaxParser.Parse(toml, sourceName: "config.toml", validate: true);
+            if (syntax.Diagnostics.HasErrors)
+            {
+                throw new ConfigException($"config is not valid TOML: {string.Join("; ", syntax.Diagnostics)}");
+            }
             root = TomlSerializer.Deserialize<TomlTable>(toml);
         }
         catch (TomlException ex)

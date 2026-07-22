@@ -83,10 +83,15 @@ quit = ""                 # "" unbinds a command
 
 A config entry **replaces** that command's default bindings in its scope (not
 additive) — repeat the default alongside the new one (`move-down = ["j", "n"]`) to
-keep it as an alias. An unknown scope or command, a sequence that conflicts with
-another command's binding in the same scope, or binding a reserved sequence (`Esc`,
-or one starting with a bare digit) fails at startup with the offending
-scope/command/sequence named. The keybar and `?` help always render from the live
+keep it as an alias. A scope's own binding still shadows a global remap inside that
+scope (the same precedence that makes `Tab` cycle panes in diff review): with the
+alias above, `n` stays search-next inside diff review — remap `[keys.diffreview]`
+too if the alias should follow you there. An unknown scope or command, a sequence
+that conflicts with another command's binding in the same scope, a token no keypress
+produces (`"5j"` is one dead token, not the two keys `"5 j"` — tokens are single keys,
+`C-x` chords, or Enter/Tab/S-Tab/Up/Down, space-separated), a duplicate
+`[keys.<scope>]` table, or binding a reserved sequence (`Esc`, or one starting with a
+bare digit) fails at startup with the offending scope/command/sequence named. The keybar and `?` help always render from the live
 binding table, so a remap shows up with no other change — and it reaches the modal
 dialogs too. See [ADR 0023](docs/adr/0023-keybinding-remap-config.md).
 

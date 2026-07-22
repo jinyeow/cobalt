@@ -276,6 +276,26 @@ public class ConfigLoaderTests
     }
 
     [Fact]
+    public void Duplicate_Scope_Table_Is_An_Error()
+    {
+        // UAT repro: a second [keys.global] table was silently ignored (first-wins), so half
+        // the user's remaps vanished with no signal. Duplicate table headers are invalid
+        // TOML — surface it as the usual config error instead of swallowing it.
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            $"""
+            {ValidToml}
+
+            [keys.global]
+            move-down = "n"
+
+            [keys.global]
+            move-up = "p"
+            """));
+
+        Assert.Contains("keys.global", ex.Message);
+    }
+
+    [Fact]
     public void Parses_An_Array_Of_Key_Sequences()
     {
         var config = ConfigLoader.Parse(

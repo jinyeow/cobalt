@@ -46,11 +46,17 @@ with the built-in defaults, and how conflicts are reported.
   Deliberate cross-scope shadowing (a scoped binding reusing a global key, e.g.
   `DiffReview`'s `h` over `Global`'s `h`) stays legal — `KeymapRouter` resolves it by
   scoped-bindings-enumerate-first, so it is not a conflict. A sequence `KeymapRouter`
-  could never deliver — containing `"Esc"` (always short-circuits to cancel) or starting
-  with a bare digit `0`-`9` (always consumed as a count prefix) — is also rejected at
-  `FromConfig` time rather than silently installed as a dead binding. A duplicate
-  `[keys.<scope>]` table differing only by TOML key case (`[keys.global]` +
-  `[keys.Global]`) is rejected by `ConfigLoader` before it can silently drop one.
+  could never deliver — containing `"Esc"` (always short-circuits to cancel), starting
+  with a bare digit `0`-`9` (always consumed as a count prefix), or containing a token
+  `KeyTokenizer` can never emit (amended 2026-07-22 after UAT: `"5j"` is one dead
+  two-character token, not the two keys `"5 j"`; valid tokens are a single rune, a
+  `C-a`..`C-z` chord, or Enter/Tab/S-Tab/Up/Down) — is rejected at `FromConfig` time
+  rather than silently installed as a dead binding. A duplicate `[keys.<scope>]` table is
+  rejected whether it differs by TOML key case (`[keys.global]` + `[keys.Global]`,
+  `ConfigLoader`'s case check) or repeats exactly (`[keys.global]` twice — invalid TOML
+  that the deserializer alone silently resolves first-wins; `ConfigLoader` now runs the
+  parser's semantic validation pass and fails loud on its diagnostics — amended
+  2026-07-22 after UAT caught the second table being dropped without a signal).
 - **Zero-touch surfacing**: the bottom keybar (`KeybarFormatter`) and the `?` help
   overlay (`HelpText`) already render from the live `KeyBindingTable` (ADR 0021), so a
   remapped table shows the new key with no changes to either formatter.
@@ -64,10 +70,13 @@ with the built-in defaults, and how conflicts are reported.
   unbind meaningful and matches "remap" as the primary use case.
 - Config command names are validated against the current `AppCommand` enum, so a typo or
   a renamed command fails at startup instead of silently doing nothing.
-- Token syntax itself (e.g. malformed chord literals) is not separately validated here —
-  an unrecognized token simply never matches a keystroke via `KeyTokenizer`, the same as
-  today's hard-coded table. A stricter token-syntax check is deferred until it proves
-  needed.
+- Token syntax IS validated (the deferral above expired 2026-07-22): UAT showed
+  `move-down = "5j"` silently replacing the default with a dead binding — losing `j`
+  entirely — so `FromConfig` now rejects any token `KeyTokenizer` cannot emit.
+- A scope's own default still shadows a global remap inside that scope — the same
+  legal scoped-over-global precedence as ever: with `[keys.global] move-down = ["j",
+  "n"]`, `n` stays search-next inside diff review. Remap `[keys.diffreview]` too when
+  the alias should follow into a scope that already binds the key.
 - A config binding that legally shadows a *default* global binding it didn't ask to
   shadow (e.g. remapping a `WorkItemList` command onto a key some other default global
   binding already uses) is not warned about — it's the same legal scoped-over-global

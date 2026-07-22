@@ -106,6 +106,29 @@ public class DetailDialogKeyDeliveryTests
     }
 
     [Fact]
+    public void PrDialog_Honours_A_Global_Remap_Alias()
+    {
+        // UAT repro guard: [keys.global] move-down = ["j", "n"] — the alias must be live
+        // inside the modal dialog exactly like the default "j". The dialog's router matching
+        // (and dispatching) the key is observable as the event being handled; an unbound "n"
+        // falls through unhandled to the ReadOnly TextView.
+        var keys = new KeysConfig(new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["global"] = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
+            {
+                ["move-down"] = ["j", "n"],
+            },
+        });
+        var vm = new PrDetailViewModel(new FakePrStore(), 42);
+        var detail = new PrDetailDialog(App, vm, NoopTextInput(), _ => { }, bindings: KeyBindingTable.FromConfig(keys));
+        var dialog = detail.Build();
+        dialog.Layout(new Size(80, 24));
+        dialog.SetFocus();
+
+        Assert.True(dialog.NewKeyDownEvent(new Key('n')));
+    }
+
+    [Fact]
     public void PrDialog_D_Reaches_The_Diff_Open_Path()
     {
         var detail = NewPrDialog();

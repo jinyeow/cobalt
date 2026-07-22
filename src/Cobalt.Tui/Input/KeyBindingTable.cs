@@ -260,6 +260,39 @@ public sealed class KeyBindingTable
                 $"[keys.{scopeLabel}] {commandName} = \"{rawSequence}\" starts with a digit, which the router " +
                 "always consumes as a count prefix; this binding could never fire");
         }
+        foreach (var token in tokens)
+        {
+            if (!IsEmittableToken(token))
+            {
+                throw new ConfigException(
+                    $"[keys.{scopeLabel}] {commandName} = \"{rawSequence}\" contains \"{token}\", which no " +
+                    "keypress produces — tokens are single keys (\"j\"), control chords (\"C-d\"), or the " +
+                    "named keys Enter, Tab, S-Tab, Up, Down, separated by spaces (\"5j\" is the two keys \"5 j\")");
+            }
+        }
+    }
+
+    // The named tokens KeyTokenizer emits besides single runes and C-a..C-z chords ("Esc" is
+    // rejected above before this list matters).
+    private static readonly string[] NamedTokens = ["Enter", "Tab", "S-Tab", "Up", "Down"];
+
+    /// <summary>
+    /// True when <c>KeyTokenizer</c> can actually emit <paramref name="token"/> for some
+    /// keypress: a single rune, a <c>C-a</c>..<c>C-z</c> chord, or a named key. Anything else
+    /// (e.g. the two-character "5j") would sit in the table forever without ever matching.
+    /// </summary>
+    private static bool IsEmittableToken(string token)
+    {
+        if (NamedTokens.Contains(token))
+        {
+            return true;
+        }
+        if (token.Length == 3 && token.StartsWith("C-", StringComparison.Ordinal) && token[2] is >= 'a' and <= 'z')
+        {
+            return true;
+        }
+        // A single rune (one UTF-16 unit, or a surrogate pair for astral-plane characters).
+        return System.Text.Rune.TryGetRuneAt(token, 0, out var rune) && rune.Utf16SequenceLength == token.Length;
     }
 
     public void Bind(KeyScope scope, string sequence, AppCommand command)

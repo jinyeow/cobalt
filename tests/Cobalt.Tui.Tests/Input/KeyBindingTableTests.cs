@@ -91,6 +91,59 @@ public class KeyBindingTableTests
     }
 
     [Fact]
+    public void FromConfig_Global_Alias_Matches_From_Every_Scope()
+    {
+        // UAT repro: [keys.global] move-down = ["j", "n"] — the new alias must fall through
+        // into the modal scopes (PR detail, diff review) exactly like the default "j" does.
+        var keys = new KeysConfig(new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["global"] = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
+            {
+                ["move-down"] = ["j", "n"],
+            },
+        });
+        var router = new KeymapRouter(KeyBindingTable.FromConfig(keys));
+
+        foreach (var scope in Enum.GetValues<KeyScope>())
+        {
+            var result = router.Feed("n", scope);
+            Assert.Equal(KeyResultKind.Matched, result.Kind);
+            // A scope's own default still shadows a global remap — deliberately, the same
+            // precedence that lets diff review's Tab mean cycle-pane: "n" stays search-next
+            // there. Every other scope sees the new global alias.
+            Assert.Equal(
+                scope == KeyScope.DiffReview ? AppCommand.SearchNext : AppCommand.MoveDown,
+                result.Command);
+            router.Reset();
+        }
+    }
+
+    [Fact]
+    public void FromConfig_Rejects_A_Token_The_Tokenizer_Can_Never_Emit()
+    {
+        // UAT repro: move-down = "5j" — "5j" is one two-char token, which no keypress ever
+        // produces (the tokenizer emits "5" then "j"), so the binding is permanently dead
+        // and, worse, it silently replaced the default. Must fail startup instead.
+        var ex = Assert.Throws<ConfigException>(
+            () => KeyBindingTable.FromConfig(Keys("global", ("move-down", "5j"))));
+
+        Assert.Contains("5j", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("refresh", "C-r")]     // control chord
+    [InlineData("open", "Enter")]      // named key
+    [InlineData("prev-tab", "S-Tab")]  // shifted named key
+    [InlineData("move-down", "Down")]  // cursor named key
+    [InlineData("refresh", "g r")]     // multi-token sequence
+    public void FromConfig_Accepts_Every_Token_Shape_The_Tokenizer_Emits(string command, string sequence)
+    {
+        // Chords, named keys, and multi-token sequences are all real tokenizer output
+        // (sequences chosen not to collide with the remaining defaults).
+        _ = KeyBindingTable.FromConfig(Keys("global", (command, sequence)));
+    }
+
+    [Fact]
     public void FromConfig_With_No_Overrides_Matches_The_Default_Table_In_Every_Scope()
     {
         var table = KeyBindingTable.FromConfig(KeysConfig.Empty);
