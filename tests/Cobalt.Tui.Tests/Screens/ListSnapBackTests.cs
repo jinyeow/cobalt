@@ -4,8 +4,8 @@ using Cobalt.Core.Models;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.Screens;
+using Cobalt.Tui.Tests.App;
 using Cobalt.Tui.ViewModels;
-using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -20,7 +20,9 @@ namespace Cobalt.Tui.Tests.Screens;
 /// </summary>
 public class ListSnapBackTests
 {
-    private static readonly IApplication App = Application.Create();
+    // Undrained by design: mirrors today's headless "Invoke never drains" so the views' posted
+    // renders never fire on their own — tests call view.Render() explicitly (M2).
+    private static readonly RecordingUiPost App = new();
 
     // ---- (1) navigation routing regression ----
 

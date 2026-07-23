@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Cobalt.Core.Ado;
+using Cobalt.Core.Config;
 using Cobalt.Core.Models;
 using Cobalt.Tui.ViewModels;
 
@@ -211,6 +212,127 @@ public class WorkItemListViewModelTests
         vm.IncludeCompleted = false; // already false — no-op
 
         Assert.Equal(before, source.Calls);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Is_Null_While_Loading()
+    {
+        var source = new GatedSource();
+        var vm = new WorkItemListViewModel(source);
+        var gate = source.NextGate();
+        var loading = vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(vm.IsLoading);
+        Assert.Null(vm.EmptyStateText);
+
+        gate.SetResult([]);
+        await loading;
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Is_Null_On_Error()
+    {
+        var vm = new WorkItemListViewModel(new FakeSource([]) { Throw = new HttpRequestException("boom") });
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(vm.Error);
+        Assert.Null(vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_On_Genuinely_Empty_Suggests_Done_And_Scope_When_Project_Scoped()
+    {
+        var vm = new WorkItemListViewModel(new FakeSource([]), scope: () => PrScope.Project);
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains(":done show", vm.EmptyStateText);
+        Assert.Contains(":scope org", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Omits_Scope_Hint_When_Already_Org_Scoped()
+    {
+        // :scope org is a no-op when org is already the active scope (the default) — suggesting
+        // it would send the reviewer to run a command that changes nothing.
+        var vm = new WorkItemListViewModel(new FakeSource([]), scope: () => PrScope.Org);
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(":scope org", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Omits_Scope_Hint_By_Default_With_No_Scope_Accessor()
+    {
+        // Org is the product default (ADR/PrScope doc), so omitting the ctor param must behave
+        // the same as passing Org — never assume Project.
+        var vm = new WorkItemListViewModel(new FakeSource([]));
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(":scope org", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Omits_Done_Hint_When_Completed_Already_Shown()
+    {
+        // IncludeCompleted = true is already the widest :done setting — suggesting :done show
+        // again would be a no-op instruction.
+        var source = new FakeSource([]);
+        var vm = new WorkItemListViewModel(source, includeCompleted: true);
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(":done show", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Names_Substring_Filter_When_Filtered_To_Zero()
+    {
+        var vm = new WorkItemListViewModel(new FakeSource([Item(1, "Fix login", "Active")]));
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.Filter = "no-such-title";
+
+        Assert.Empty(vm.Rows);
+        Assert.Contains("no-such-title", vm.EmptyStateText);
+        // Esc only hides the filter field — it does not clear vm.Filter — so the hint must not
+        // claim it does; it must point at the action that actually clears the search.
+        Assert.DoesNotContain("Esc", vm.EmptyStateText);
+        Assert.Contains("reopen /", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Falls_Through_To_Genuine_Empty_When_Filter_Matches_Nothing_At_All()
+    {
+        // The server already returned zero rows — the substring filter did not cause the
+        // emptiness, so "0 of 0 match ... clear to see them all" would be a false claim.
+        var vm = new WorkItemListViewModel(new FakeSource([]));
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        vm.Filter = "anything";
+
+        Assert.Empty(vm.Rows);
+        Assert.DoesNotContain("0 of 0", vm.EmptyStateText);
+        Assert.Contains("assigned to you", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_Names_Project_Filter_When_Filtered_To_Zero()
+    {
+        // Seed the project filter via the ctor and await LoadAsync directly, rather than setting
+        // vm.ProjectFilter (which reloads via a fire-and-forget task with no awaitable handle) —
+        // asserting right after that setter is only deterministic because FakeSource resolves
+        // synchronously; this proves the same EmptyStateText behaviour without relying on that.
+        var vm = new WorkItemListViewModel(new FakeSource([]), projectFilter: "Contoso");
+
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Empty(vm.Rows);
+        Assert.Contains("Contoso", vm.EmptyStateText);
+        Assert.Contains(":project", vm.EmptyStateText);
     }
 
     private sealed class GatedSource : IWorkItemSource

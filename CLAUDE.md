@@ -107,9 +107,9 @@ a GET. Run it in a real terminal against a real org:
 The split is the point: a green suite proves the load's calls are *concurrent*, never that
 they are *fast*. Perf claims about round-trips belong in UAT, not in an xunit assertion.
 
-## Terminal.Gui gotchas (pinned 2.4.16)
+## Terminal.Gui gotchas (pinned 2.4.17)
 
-Don't guess its API — decompile/probe the package (`~/.nuget/packages/terminal.gui/2.4.16/`)
+Don't guess its API — decompile/probe the package (`~/.nuget/packages/terminal.gui/2.4.17/`)
 or write a headless probe. Known traps:
 
 - `TextView.Viewport.Y` is an unreliable scroll offset — assert `CurrentRow` instead.

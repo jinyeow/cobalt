@@ -21,7 +21,12 @@ public sealed class PrCommentCountEnricher(
     private readonly HashSet<string> _failed = [];
     private readonly object _lock = new();
 
-    /// <summary>Raised (with the PR id) whenever a fresh count is cached.</summary>
+    /// <summary>
+    /// Raised (with the PR id) whenever a fresh count is cached. Fires on a threadpool continuation
+    /// (the background fetch completing), so a subscriber that touches Terminal.Gui must marshal onto
+    /// the UI thread via <see cref="App.IUiPost"/> — never <c>IApplication</c>, which this UI-free
+    /// view-model (ADR 0004) deliberately does not reference.
+    /// </summary>
     public event Action<int>? CountAvailable;
 
     /// <summary>

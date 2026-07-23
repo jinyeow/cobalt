@@ -19,16 +19,27 @@ namespace Cobalt.Tui.App;
 public sealed class CobaltShell : Window
 {
     private readonly IApplication _app;
+    // Marshals background continuations onto the UI thread (ADR 0013). Terminal.Gui itself is kept
+    // for RequestStop/LayoutAndDraw/Clipboard/dialog construction; only the Invoke sites route here.
+    private readonly IUiPost _post;
     private readonly ShellViewModel _vm;
     private readonly WorkItemStoreAdapter? _workItems;
     private readonly PullRequestStoreAdapter? _pullRequests;
     private readonly EditorService _editor;
     private readonly ITextInput _textInput;
-    private readonly KeyBindingTable _bindings = KeyBindingTable.Shared;
+    private readonly KeyBindingTable _bindings;
     private readonly KeymapRouter _router;
+    private readonly PaletteSuggestionsViewModel _suggestions;
+    // The text the palette field held after the last Tab/S-Tab completion, so a subsequent Tab
+    // cycles the existing suggestions instead of re-filtering; a user edit (field != this) restarts.
+    private string? _lastCompletion;
 
     private WorkItemListView? _workItemList;
     private PrListView? _prList;
+    // The list view-models the shell built, kept so the `:` palette can offer their distinct
+    // project names for completion and so the empty-state scope accessor stays wired to _vm.Scope.
+    private PrListViewModel? _prListVm;
+    private WorkItemListViewModel? _workItemListVm;
     private Label? _placeholder;
     // CACHE-1: one enricher for the shell's lifetime so its comment-count cache survives section
     // toggles (the PR screen is kept alive, but the field makes the shared cache explicit).
@@ -55,20 +66,29 @@ public sealed class CobaltShell : Window
         PullRequestStoreAdapter? pullRequests = null,
         EditorService? editor = null,
         AdoContext? context = null,
-        IOsThemeMonitor? themeMonitor = null)
+        IOsThemeMonitor? themeMonitor = null,
+        KeyBindingTable? bindings = null,
+        IUiPost? post = null)
     {
         _app = app;
+        _post = post ?? new ApplicationUiPost(app);
         _vm = vm;
         _workItems = workItems;
         _pullRequests = pullRequests;
         _context = context;
         _themeMonitor = themeMonitor;
+        // The remapped key table (KeyBindingTable.FromConfig(config.Keys)) is injected by
+        // CobaltTuiApp; tests and any caller that omits it fall back to the process-wide defaults.
+        _bindings = bindings ?? KeyBindingTable.Shared;
         _editor = editor ?? new EditorService(new ProcessEditorLauncher(
             Environment.GetEnvironmentVariable, TerminalGuiSuspender.For(app)));
         // In-TUI text entry for comments/replies (ADR 0020) — no $EDITOR handoff. It holds
         // _editor for its Ctrl-E escape hatch; descriptions and tags still use _editor directly.
         _textInput = new TuiTextInput(_app, _editor);
         _router = new KeymapRouter(_bindings);
+        // `:` palette completion (ADR 0022): commands from the parser catalog, plus context names
+        // and the distinct project names of whatever the lists have loaded.
+        _suggestions = new PaletteSuggestionsViewModel(() => _vm.ContextNames, ProjectNames);
 
         Title = "cobalt";
         BorderStyle = Terminal.Gui.Drawing.LineStyle.None;
@@ -128,6 +148,19 @@ public sealed class CobaltShell : Window
     /// <summary>Test seam: the rendered bottom keybar text.</summary>
     internal string KeybarText => _keybar.Text;
 
+    /// <summary>Test seam: the PR list's view-model (built lazily on first PR-section show).</summary>
+    internal PrListViewModel? PrListVm => _prListVm;
+
+    /// <summary>Test seam: the work-item list's view-model (built lazily on first work-items show).</summary>
+    internal WorkItemListViewModel? WorkItemListVm => _workItemListVm;
+
+    /// <summary>Test seam: opens the `:` palette (headless palette-completion tests drive the field directly).</summary>
+    internal TextField OpenPaletteForTest()
+    {
+        OpenPalette();
+        return _palette;
+    }
+
     private void WireViewModel()
     {
         _vm.SectionChanged += () => { ShowSection(); RefreshChrome(); };
@@ -138,6 +171,7 @@ public sealed class CobaltShell : Window
         _vm.QuitRequested += _app.RequestStop;
         _vm.HelpRequested += ShowHelp;
         _vm.MessagesRequested += ShowMessages;
+        _vm.LogRequested += ShowLog;
         _vm.PickContextRequested += () =>
             _vm.Messages.Info($"contexts: {string.Join(", ", _vm.ContextNames)} — switch with :context NAME");
         _vm.ContextSwitchRequested += name =>
@@ -421,7 +455,7 @@ public sealed class CobaltShell : Window
     private async Task RunThenRefreshAsync(Task action, Action refresh)
     {
         await action.IgnoreCancellationAsync().ConfigureAwait(false);
-        _app.Invoke(refresh);
+        _post.Post(refresh);
     }
 
     private string? CurrentUrl()
@@ -483,7 +517,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new PrDetailViewModel(_pullRequests, id);
-        new PrDetailDialog(_app, detailVm, _textInput, _vm.Messages.Info, _pullRequests, _context).Show();
+        new PrDetailDialog(_app, detailVm, _textInput, _vm.Messages.Info, _pullRequests, _context, _bindings, _post).Show();
         _prList?.RefreshAfterMutation(); // reflect any votes/edits back into the list, dropping stale cache
     }
 
@@ -494,7 +528,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new WorkItemDetailViewModel(_workItems, id, project);
-        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _textInput).Show();
+        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _textInput, _bindings, _post).Show();
         _workItemList?.OnRefresh(); // reflect any edits back into the list
     }
 
@@ -518,7 +552,9 @@ public sealed class CobaltShell : Window
     private void OnThemeChangeRequested(ThemeChoice choice)
     {
         var os = _themeMonitor?.Current ?? OsTheme.Unknown;
-        ApplyPreset(ThemeResolver.Resolve(choice, os));
+        // Honour the detected colour tier (ADR 0019 extension) so a live :theme switch degrades
+        // the diff palette in step with the chrome, exactly as startup does.
+        ApplyPreset(ThemeResolver.Resolve(choice, os, ThemeService.Capabilities.Color));
     }
 
     /// <summary>Apply a theme preset and force a full repaint so every view re-resolves its scheme
@@ -534,7 +570,7 @@ public sealed class CobaltShell : Window
     /// (<c>theme = system</c>). Raised from the monitor's watcher thread, so marshal onto the UI
     /// thread before touching Terminal.Gui.
     /// </summary>
-    private void OnOsThemeChanged(OsTheme os) => _app.Invoke(() => ApplyOsFollow(os));
+    private void OnOsThemeChanged(OsTheme os) => _post.Post(() => ApplyOsFollow(os));
 
     /// <summary>
     /// Apply the OS-follow decision synchronously: when following the system, re-resolve for
@@ -543,7 +579,7 @@ public sealed class CobaltShell : Window
     /// </summary>
     internal void ApplyOsFollow(OsTheme os)
     {
-        if (OsFollowPreset(_vm.CurrentTheme, os) is not { } preset)
+        if (OsFollowPreset(_vm.CurrentTheme, os, ThemeService.Capabilities.Color) is not { } preset)
         {
             return;
         }
@@ -553,10 +589,12 @@ public sealed class CobaltShell : Window
     /// <summary>
     /// The preset to apply when the OS theme flips to <paramref name="os"/>, or
     /// <see langword="null"/> when the user isn't following the system — a fixed <c>dark</c>/
-    /// <c>light</c> choice ignores OS changes. Pure so the follow decision is testable headlessly.
+    /// <c>light</c> choice ignores OS changes. Takes the detected <paramref name="color"/> tier so
+    /// the follow decision degrades the diff palette (ADR 0019 extension). Pure so it is testable
+    /// headlessly.
     /// </summary>
-    internal static ThemePreset? OsFollowPreset(ThemeChoice current, OsTheme os) =>
-        current == ThemeChoice.System ? ThemeResolver.Resolve(ThemeChoice.System, os) : null;
+    internal static ThemePreset? OsFollowPreset(ThemeChoice current, OsTheme os, ColorSupport color) =>
+        current == ThemeChoice.System ? ThemeResolver.Resolve(ThemeChoice.System, os, color) : null;
 
     private void WirePalette()
     {
@@ -574,7 +612,81 @@ public sealed class CobaltShell : Window
                 ClosePalette();
                 key.Handled = true;
             }
+            else if (key.KeyCode == Terminal.Gui.Drivers.KeyCode.Tab)
+            {
+                CompletePalette(forward: true);
+                key.Handled = true; // else Tab would move focus off the field
+            }
+            else if (key.KeyCode == (Terminal.Gui.Drivers.KeyCode.Tab | Terminal.Gui.Drivers.KeyCode.ShiftMask))
+            {
+                CompletePalette(forward: false);
+                key.Handled = true;
+            }
         };
+    }
+
+    /// <summary>
+    /// One Tab/S-Tab step of `:` completion. Re-ranks suggestions for the current text when the
+    /// field changed since the last completion, OR when the last completion left a trailing space —
+    /// that space is how <see cref="PaletteSuggestionsViewModel.Accept"/> marks "this command takes
+    /// an argument, keep completing", so the next Tab must chain into ARGUMENT candidates (e.g.
+    /// <c>:context </c> → context names) rather than re-cycle the command list. Otherwise the field
+    /// is a settled candidate and Tab/S-Tab cycles the standing suggestions. The completed text
+    /// (leading colon and argument spacing preserved by Accept) is written back and the caret moved
+    /// to the end so the next Tab keeps completing.
+    /// </summary>
+    private void CompletePalette(bool forward)
+    {
+        var text = _palette.Text?.ToString() ?? "";
+        var chainIntoArgument = text == _lastCompletion && text.EndsWith(' ');
+        if (text != _lastCompletion || chainIntoArgument)
+        {
+            _suggestions.SetInput(text);
+            if (!forward)
+            {
+                _suggestions.CyclePrev(); // reverse-completing a fresh field lands on the last match
+            }
+        }
+        else if (forward)
+        {
+            _suggestions.CycleNext();
+        }
+        else
+        {
+            _suggestions.CyclePrev();
+        }
+
+        var completed = _suggestions.Accept();
+        _palette.Text = completed;
+        _palette.InsertionPoint = completed.Length;
+        _lastCompletion = completed;
+    }
+
+    /// <summary>Distinct project names across whatever the two lists have loaded — the `:project` completion pool.</summary>
+    private IReadOnlyList<string> ProjectNames()
+    {
+        var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (_prListVm is not null)
+        {
+            foreach (var pr in _prListVm.Rows)
+            {
+                if (pr.ProjectName.Length != 0)
+                {
+                    names.Add(pr.ProjectName);
+                }
+            }
+        }
+        if (_workItemListVm is not null)
+        {
+            foreach (var wi in _workItemListVm.Rows)
+            {
+                if (wi.TeamProject.Length != 0)
+                {
+                    names.Add(wi.TeamProject);
+                }
+            }
+        }
+        return [.. names];
     }
 
     private void OpenPalette()
@@ -582,6 +694,7 @@ public sealed class CobaltShell : Window
         _message.Visible = false;
         _palettePrompt.Visible = true;
         _palette.Text = "";
+        _lastCompletion = null; // a fresh palette always re-filters on the first Tab
         _palette.Visible = true;
         _palette.SetFocus();
     }
@@ -635,8 +748,12 @@ public sealed class CobaltShell : Window
     private WorkItemListView BuildWorkItemList(WorkItemStoreAdapter workItems)
     {
         // Seed the view-model with the shell's active filters so the first load honours :done / :project.
-        var listVm = new WorkItemListViewModel(workItems, _vm.IncludeCompletedWorkItems, _vm.ProjectFilter);
-        var view = new WorkItemListView(_app, listVm);
+        // scope: () => _vm.Scope keeps the empty-state hint honest — it only suggests :scope org when
+        // the shell is actually project-scoped (a no-op suggestion in org scope is worse than none).
+        var listVm = new WorkItemListViewModel(
+            workItems, _vm.IncludeCompletedWorkItems, _vm.ProjectFilter, () => _vm.Scope);
+        _workItemListVm = listVm;
+        var view = new WorkItemListView(_post, listVm);
         view.ItemActivated += OpenWorkItemDetail;
         view.Load();
         return view;
@@ -644,14 +761,15 @@ public sealed class CobaltShell : Window
 
     private PrListView BuildPrList(PullRequestStoreAdapter pullRequests)
     {
-        var listVm = new PrListViewModel(pullRequests) { ProjectFilter = _vm.ProjectFilter ?? "" };
+        var listVm = new PrListViewModel(pullRequests, () => _vm.Scope) { ProjectFilter = _vm.ProjectFilter ?? "" };
+        _prListVm = listVm;
         _prEnricher ??= new PrCommentCountEnricher(async (pr, ct) =>
         {
             var threads = await pullRequests.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct)
                 .ConfigureAwait(false);
             return threads.Sum(t => t.Comments.Count(c => !c.IsSystem));
         });
-        var view = new PrListView(_app, listVm, _prEnricher);
+        var view = new PrListView(_post, listVm, _prEnricher);
         view.ItemActivated += OpenPrDetail;
         view.Load();
         return view;
@@ -674,13 +792,28 @@ public sealed class CobaltShell : Window
         RefreshMessage();
     }
 
-    private void ShowHelp() => TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope));
+    private void ShowHelp() => TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope), _bindings);
 
     private void ShowMessages()
     {
         var lines = _vm.Messages.History
             .Select(m => $"{m.At:HH:mm:ss} {(m.Level == MessageLevel.Error ? "E" : "I")} {m.Text}");
-        TextDialog.Show(_app, "messages", string.Join("\n", lines));
+        TextDialog.Show(_app, "messages", string.Join("\n", lines), _bindings);
+    }
+
+    /// <summary>Test seam: replaces the real :log overlay (needs a run loop) so a headless test can
+    /// prove the shell is subscribed to <see cref="ShellViewModel.LogRequested"/>.</summary>
+    internal Action<OperationLog>? ShowLogOverride { get; set; }
+
+    /// <summary>:log — the ADO operations log (name, masked route, duration, outcome), same overlay as messages.</summary>
+    private void ShowLog()
+    {
+        if (ShowLogOverride is { } show)
+        {
+            show(_vm.Operations);
+            return;
+        }
+        OperationLogDialog.Show(_app, _vm.Operations, _bindings);
     }
 
     /// <summary>

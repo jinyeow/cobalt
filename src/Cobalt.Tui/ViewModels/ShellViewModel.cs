@@ -21,6 +21,9 @@ public sealed class ShellViewModel(
 {
     public MessageLog Messages { get; } = new();
 
+    /// <summary>The <c>:log</c> dialog's source of truth, fed by <c>AdoHttp.OperationObserver</c>.</summary>
+    public OperationLog Operations { get; } = new();
+
     public AppSection ActiveSection { get; private set; } = AppSection.WorkItems;
     public string ContextName { get; private set; } = initialContext;
     public string? UserName { get; private set; }
@@ -42,6 +45,7 @@ public sealed class ShellViewModel(
     public event Action? QuitRequested;
     public event Action? HelpRequested;
     public event Action? MessagesRequested;
+    public event Action? LogRequested;
     public event Action? PickContextRequested;
 
     /// <summary>Raised with a validated context name; the shell performs the actual reconnect.</summary>
@@ -114,6 +118,9 @@ public sealed class ShellViewModel(
             case PaletteActionKind.Messages:
                 MessagesRequested?.Invoke();
                 break;
+            case PaletteActionKind.Log:
+                LogRequested?.Invoke();
+                break;
             case PaletteActionKind.PickContext:
                 PickContextRequested?.Invoke();
                 break;
@@ -178,34 +185,32 @@ public sealed class ShellViewModel(
         // Bare `:theme` just reports the current value.
         if (argument.Length == 0)
         {
-            Messages.Info($"theme: {ThemeName(CurrentTheme)} (switch with :theme dark|light|system)");
+            Messages.Info($"theme: {ThemeName(CurrentTheme)} (switch with :theme {ThemeNamesHint})");
             return;
         }
-        switch (argument.ToLowerInvariant())
+        // The accepted names come from the ThemeChoice enum itself (as does Tab-completion), so a
+        // new member needs no edit here.
+        if (!ThemeChoices.TryParse(argument, out var next))
         {
-            case "dark":
-            case "light":
-            case "system":
-                var next = Enum.Parse<ThemeChoice>(argument, ignoreCase: true);
-                // `system` re-resolves against the live OS setting, so re-issuing it is a
-                // meaningful refresh (e.g. to recover if the OS-follow watcher stopped);
-                // re-issuing a fixed theme is a genuine no-op.
-                if (next == CurrentTheme && next != ThemeChoice.System)
-                {
-                    Messages.Info($"theme already {ThemeName(CurrentTheme)}");
-                    return;
-                }
-                CurrentTheme = next;
-                Messages.Info(next == ThemeChoice.System
-                    ? "theme: system (re-synced to OS)"
-                    : $"theme: {ThemeName(CurrentTheme)}");
-                ThemeChangeRequested?.Invoke(CurrentTheme);
-                break;
-            default:
-                Messages.Error($"unknown theme '{argument}' (use: dark, light, or system)");
-                break;
+            Messages.Error($"unknown theme '{argument}' (use: {ThemeNamesHint})");
+            return;
         }
+        // `system` re-resolves against the live OS setting, so re-issuing it is a
+        // meaningful refresh (e.g. to recover if the OS-follow watcher stopped);
+        // re-issuing a fixed theme is a genuine no-op.
+        if (next == CurrentTheme && next != ThemeChoice.System)
+        {
+            Messages.Info($"theme already {ThemeName(CurrentTheme)}");
+            return;
+        }
+        CurrentTheme = next;
+        Messages.Info(next == ThemeChoice.System
+            ? "theme: system (re-synced to OS)"
+            : $"theme: {ThemeName(CurrentTheme)}");
+        ThemeChangeRequested?.Invoke(CurrentTheme);
     }
+
+    private static string ThemeNamesHint => string.Join('|', ThemeChoices.Names);
 
     private static string ThemeName(ThemeChoice theme) => theme.ToString().ToLowerInvariant();
 

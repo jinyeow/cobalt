@@ -27,3 +27,4 @@ immutable once accepted; superseding decisions get a new number that links back.
 | [0020](0020-in-tui-text-input.md) | In-TUI text input for short entry; `$EDITOR` for long-form | Accepted |
 | [0021](0021-lazygit-inspired-shell-chrome.md) | Lazygit-inspired shell chrome: context keybar, showcmd, real tab strip | Accepted |
 | [0022](0022-lazygit-interaction-grammar-roadmap.md) | Adopt the lazygit interaction grammar (redesign roadmap) | Accepted |
+| [0023](0023-keybinding-remap-config.md) | Keybinding remap config: `[keys.<scope>]` in config.toml | Accepted |

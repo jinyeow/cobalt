@@ -117,6 +117,26 @@ public class ShellViewModelTests
     }
 
     [Fact]
+    public void Palette_Log_Raises_LogRequested()
+    {
+        var vm = Vm();
+        var requested = false;
+        vm.LogRequested += () => requested = true;
+
+        vm.HandlePaletteInput("log");
+
+        Assert.True(requested);
+    }
+
+    [Fact]
+    public void Operations_Starts_Empty()
+    {
+        var vm = Vm();
+
+        Assert.Empty(vm.Operations.History);
+    }
+
+    [Fact]
     public void ContextSwitched_Updates_Status()
     {
         var vm = Vm();
@@ -338,6 +358,33 @@ public class ShellViewModelTests
         var vm = Vm();
 
         vm.HandlePaletteInput("theme rainbow");
+
+        Assert.Equal(MessageLevel.Error, vm.Messages.Current?.Level);
+        Assert.Contains("unknown theme", vm.Messages.Current?.Text);
+        Assert.Equal(ThemeChoice.Dark, vm.CurrentTheme);
+    }
+
+    [Fact]
+    public void Palette_Theme_Rejects_A_Numeric_Value()
+    {
+        // Enum.TryParse would happily parse "0" as ThemeChoice.Dark; the guard must not.
+        var vm = Vm();
+
+        vm.HandlePaletteInput("theme 0");
+
+        Assert.Equal(MessageLevel.Error, vm.Messages.Current?.Level);
+        Assert.Contains("unknown theme", vm.Messages.Current?.Text);
+        Assert.Equal(ThemeChoice.Dark, vm.CurrentTheme);
+    }
+
+    [Fact]
+    public void Palette_Theme_Rejects_A_Comma_Combined_Value()
+    {
+        // Enum.TryParse parses "dark,light" as a flags-style combination (== Light); the
+        // vocabulary is exact single names only.
+        var vm = Vm();
+
+        vm.HandlePaletteInput("theme dark,light");
 
         Assert.Equal(MessageLevel.Error, vm.Messages.Current?.Level);
         Assert.Contains("unknown theme", vm.Messages.Current?.Text);

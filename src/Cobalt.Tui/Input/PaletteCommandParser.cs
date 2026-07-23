@@ -6,6 +6,7 @@ public enum PaletteActionKind
     Quit,
     Help,
     Messages,
+    Log,
     SwitchContext,
     PickContext,
     SetScope,
@@ -15,11 +16,46 @@ public enum PaletteActionKind
     Unknown,
 }
 
+/// <summary>The kind of value a palette command's argument names, for Tab-completion in the palette.</summary>
+public enum PaletteArgKind
+{
+    /// <summary>No structured argument provider — the raw text (if any) passes straight through.</summary>
+    None,
+
+    /// <summary>Argument completes against known context names.</summary>
+    Context,
+
+    /// <summary>Argument completes against known project names.</summary>
+    Project,
+
+    /// <summary>Argument completes against the theme names (derived from <c>ThemeChoice</c>).</summary>
+    Theme,
+}
+
+/// <summary>One palette command's name, aliases, argument kind, and resulting action — the single
+/// source both <see cref="PaletteCommandParser.Parse"/> and completion consume.</summary>
+public readonly record struct PaletteCommandCatalogEntry(
+    string Name, IReadOnlyList<string> Aliases, PaletteArgKind ArgKind, PaletteActionKind ActionKind);
+
 public readonly record struct PaletteAction(PaletteActionKind Kind, string Argument = "");
 
-/// <summary>Parses `:` command-palette input (`q`, `ctx NAME`, `scope`, `done`, `project`, `help`, `messages`).</summary>
+/// <summary>Parses `:` command-palette input (`q`, `ctx NAME`, `scope`, `done`, `project`, `theme`, `help`, `messages`, `log`).</summary>
 public static class PaletteCommandParser
 {
+    /// <summary>The full command vocabulary — one source for parsing and Tab-completion.</summary>
+    public static readonly IReadOnlyList<PaletteCommandCatalogEntry> Catalog =
+    [
+        new("quit", ["q"], PaletteArgKind.None, PaletteActionKind.Quit),
+        new("help", [], PaletteArgKind.None, PaletteActionKind.Help),
+        new("messages", [], PaletteArgKind.None, PaletteActionKind.Messages),
+        new("log", [], PaletteArgKind.None, PaletteActionKind.Log),
+        new("context", ["ctx"], PaletteArgKind.Context, PaletteActionKind.SwitchContext),
+        new("scope", [], PaletteArgKind.None, PaletteActionKind.SetScope),
+        new("done", [], PaletteArgKind.None, PaletteActionKind.ToggleDone),
+        new("project", [], PaletteArgKind.Project, PaletteActionKind.SetProjectFilter),
+        new("theme", [], PaletteArgKind.Theme, PaletteActionKind.SetTheme),
+    ];
+
     public static PaletteAction Parse(string input)
     {
         var trimmed = input.Trim().TrimStart(':').Trim();
@@ -29,22 +65,26 @@ public static class PaletteCommandParser
         }
 
         var parts = trimmed.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return (parts[0], parts.Length > 1 ? parts[1] : null) switch
+        var word = parts[0];
+        var argument = parts.Length > 1 ? parts[1] : null;
+
+        foreach (var entry in Catalog)
         {
-            ("q" or "quit", _) => new PaletteAction(PaletteActionKind.Quit),
-            ("help", _) => new PaletteAction(PaletteActionKind.Help),
-            ("messages", _) => new PaletteAction(PaletteActionKind.Messages),
-            ("ctx" or "context", null) => new PaletteAction(PaletteActionKind.PickContext),
-            ("ctx" or "context", var name) => new PaletteAction(PaletteActionKind.SwitchContext, name),
-            ("scope", null) => new PaletteAction(PaletteActionKind.SetScope, ""),
-            ("scope", var value) => new PaletteAction(PaletteActionKind.SetScope, value),
-            ("done", null) => new PaletteAction(PaletteActionKind.ToggleDone, ""),
-            ("done", var value) => new PaletteAction(PaletteActionKind.ToggleDone, value),
-            ("project", null) => new PaletteAction(PaletteActionKind.SetProjectFilter, ""),
-            ("project", var name) => new PaletteAction(PaletteActionKind.SetProjectFilter, name),
-            ("theme", null) => new PaletteAction(PaletteActionKind.SetTheme, ""),
-            ("theme", var value) => new PaletteAction(PaletteActionKind.SetTheme, value),
-            _ => new PaletteAction(PaletteActionKind.Unknown, $"unknown command: {trimmed}"),
-        };
+            if (entry.Name != word && !entry.Aliases.Contains(word))
+            {
+                continue;
+            }
+            return entry.ActionKind switch
+            {
+                PaletteActionKind.SwitchContext when argument is null => new PaletteAction(PaletteActionKind.PickContext),
+                PaletteActionKind.SwitchContext => new PaletteAction(PaletteActionKind.SwitchContext, argument),
+                PaletteActionKind.SetScope or PaletteActionKind.ToggleDone
+                    or PaletteActionKind.SetProjectFilter or PaletteActionKind.SetTheme =>
+                    new PaletteAction(entry.ActionKind, argument ?? ""),
+                _ => new PaletteAction(entry.ActionKind),
+            };
+        }
+
+        return new PaletteAction(PaletteActionKind.Unknown, $"unknown command: {trimmed}");
     }
 }
