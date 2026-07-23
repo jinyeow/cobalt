@@ -16,6 +16,9 @@ namespace Cobalt.Tui.Screens;
 public sealed class WorkItemDetailDialog
 {
     private readonly IApplication _app;
+    // UI-thread marshalling seam for all pure Invoke marshalling (M2); Terminal.Gui (_app) is still
+    // held for its non-marshalling uses — dialog construction, RequestStop, help/child dialogs.
+    private readonly IUiPost _post;
     private readonly WorkItemDetailViewModel _vm;
     private readonly WorkItemActions _actions;
     private readonly Action<string> _log;
@@ -47,9 +50,10 @@ public sealed class WorkItemDetailDialog
 
     public WorkItemDetailDialog(
         IApplication app, WorkItemDetailViewModel vm, EditorService editor, Action<string> log,
-        ITextInput? textInput = null, KeyBindingTable? bindings = null)
+        ITextInput? textInput = null, KeyBindingTable? bindings = null, IUiPost? post = null)
     {
         _app = app;
+        _post = post ?? new ApplicationUiPost(app);
         _vm = vm;
         _log = log;
         _actions = new WorkItemActions(app, editor, log, textInput);
@@ -116,7 +120,7 @@ public sealed class WorkItemDetailDialog
         return dialog;
     }
 
-    private void OnChanged() => _app.Invoke(() =>
+    private void OnChanged() => _post.Post(() =>
     {
         if (!_closed && _body is not null && _dialog is not null)
         {
@@ -183,7 +187,7 @@ public sealed class WorkItemDetailDialog
                 }
                 return true;
             case AppCommand.ChangeState:
-                _ = FireAndForget.Observe(_actions.ChangeStateAsync(_vm, Token), _app, _log);
+                _ = FireAndForget.Observe(_actions.ChangeStateAsync(_vm, Token), _post, _log);
                 return true;
             case AppCommand.Comment:
                 if (CommentAction is not null)
@@ -192,14 +196,14 @@ public sealed class WorkItemDetailDialog
                 }
                 else
                 {
-                    _ = FireAndForget.Observe(_actions.CommentAsync(_vm, Token), _app, _log);
+                    _ = FireAndForget.Observe(_actions.CommentAsync(_vm, Token), _post, _log);
                 }
                 return true;
             case AppCommand.EditInEditor:
-                _ = FireAndForget.Observe(_actions.EditDescriptionAsync(_vm, Token), _app, _log);
+                _ = FireAndForget.Observe(_actions.EditDescriptionAsync(_vm, Token), _post, _log);
                 return true;
             case AppCommand.Assign:
-                _ = FireAndForget.Observe(_actions.AssignAsync(_vm, Token), _app, _log);
+                _ = FireAndForget.Observe(_actions.AssignAsync(_vm, Token), _post, _log);
                 return true;
             case AppCommand.EditTags:
                 if (TagsAction is not null)
@@ -208,7 +212,7 @@ public sealed class WorkItemDetailDialog
                 }
                 else
                 {
-                    _ = FireAndForget.Observe(_actions.TagsAsync(_vm, Token), _app, _log);
+                    _ = FireAndForget.Observe(_actions.TagsAsync(_vm, Token), _post, _log);
                 }
                 return true;
             default:

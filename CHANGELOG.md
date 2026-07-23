@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **A diff-review render could pair one file's diff with another's path.** The render path read
+  `CurrentDiff` and `CurrentDiffPath` as two separate reads of the view model's diff state, so an
+  overlapping file select could tear the pair — this file's lines described under the next file's
+  name (and its comment threads). Every consumer that needs both now takes a single
+  `CurrentDiffSnapshot` read, which returns the diff and its path atomically. See
+  [ADR 0008](docs/adr/0008-client-side-diff-and-line-comments.md).
+
+### Internal
+- **UI-thread marshalling goes through a one-member `IUiPost` seam.** Background continuations
+  that touch widgets now post through `IUiPost.Post` instead of passing Terminal.Gui's
+  `IApplication` around solely for its `Invoke`. `Post` always queues onto the main loop (never
+  runs inline), which the coalescing gates in diff-review stats-refresh and PR-list count-badges
+  depend on. Enforced by the `ViewModelPurityTests` reflection backstop. See
+  [ADR 0004](docs/adr/0004-terminal-gui-v2-with-viewmodels.md).
+- **The timeout-vs-cancel scaffold is deduped into `VmGuard.RunAsync`**, so the several
+  view-model mutation paths that distinguish an operation timeout from a caller cancellation share
+  one implementation instead of repeating it.
+- **The diff-pane composition is extracted into a pure `DiffPaneComposer`.** All of
+  `DiffReviewDialog.Render`'s mode/fold/search branching now lives in a unit-testable, Terminal.Gui-free
+  composer; the view only decides fold reuse and stores what it returns (ADR 0004).
+
 ## 0.3.0 — 2026-07-22
 
 ### Added

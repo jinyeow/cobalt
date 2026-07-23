@@ -56,6 +56,14 @@ called out in the plan as the riskiest single item.
   header, so a torn read would show one file's stats under another file's path.
   Two adjacent assignments are not sufficient: continuations run on the thread
   pool, so concurrent selections can interleave between them.
+  - **Amendment (2026-07-22):** the write is atomic, but reading `CurrentDiff` and
+    `CurrentDiffPath` back as two separate property reads re-introduces the tear on
+    the *read* side. Any consumer that pairs the diff with its path **must** read
+    `PrDiffViewModel.CurrentDiffSnapshot`, which snapshots the diff-state reference
+    once and returns `(diff, path)` together. The view's `Render` / `WriteDiffHeader`
+    / `NavThread` / `CommentAsync` all go through it; the single-property reads
+    (`MarkViewed`/`MarkUnviewed`, `NavHunk`, `ApplySearch`) touch only one of the pair
+    and so cannot tear.
 
 ### Single-flight diff fetches
 

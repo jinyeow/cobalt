@@ -1,4 +1,3 @@
-using Cobalt.Core.Ado;
 using Cobalt.Core.Models;
 
 namespace Cobalt.Tui.ViewModels;
@@ -34,6 +33,12 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
     public int UnresolvedThreadCount =>
         Threads.Count(t => t.Status == PrThreadStatus.Active && !t.IsSystemOnly);
 
+    /// <summary>
+    /// Raised when the detail state changes. May fire on a threadpool continuation (an ADO
+    /// load/mutation completing), so a subscriber that touches Terminal.Gui must marshal onto the UI
+    /// thread via <see cref="App.IUiPost"/> — never <c>IApplication</c>, which this UI-free
+    /// view-model (ADR 0004) deliberately does not reference.
+    /// </summary>
     public event Action? Changed;
 
     public async Task LoadAsync(CancellationToken ct)
@@ -43,22 +48,15 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
         Changed?.Invoke();
         try
         {
-            PullRequest = await store.GetPullRequestAsync(id, ct).ConfigureAwait(false);
-            Threads = await store.GetThreadsAsync(
-                PullRequest.ProjectName, PullRequest.RepositoryId, id, ct).ConfigureAwait(false);
-            // Branch policies are secondary: an expected ADO failure here surfaces via Error
-            // (below) but leaves the already-loaded PR/threads intact rather than blanking the pane.
-            Policies = await store.GetPolicyEvaluationsAsync(PullRequest.ProjectId, id, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
-        {
-            throw; // genuine user/dialog cancel (carries our token) stays silent
-        }
-        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
-        {
-            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
-            // surfaced as an expected error rather than a silent no-data pane (L2).
-            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
+            await VmGuard.RunAsync(async () =>
+            {
+                PullRequest = await store.GetPullRequestAsync(id, ct).ConfigureAwait(false);
+                Threads = await store.GetThreadsAsync(
+                    PullRequest.ProjectName, PullRequest.RepositoryId, id, ct).ConfigureAwait(false);
+                // Branch policies are secondary: an expected ADO failure here surfaces via Error
+                // (below) but leaves the already-loaded PR/threads intact rather than blanking the pane.
+                Policies = await store.GetPolicyEvaluationsAsync(PullRequest.ProjectId, id, ct).ConfigureAwait(false);
+            }, ct, m => Error = m).ConfigureAwait(false);
         }
         finally
         {
@@ -112,22 +110,15 @@ public sealed class PrDetailViewModel(IPullRequestStore store, int id)
         Changed?.Invoke();
         try
         {
-            await action(project, repo).ConfigureAwait(false);
-            if (reload)
+            await VmGuard.RunAsync(async () =>
             {
-                PullRequest = await store.GetPullRequestAsync(id, ct).ConfigureAwait(false);
-                Threads = await store.GetThreadsAsync(project, repo, id, ct).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
-        {
-            throw; // genuine user/dialog cancel (carries our token) stays silent
-        }
-        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
-        {
-            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
-            // surfaced as an expected error rather than a silent no-data pane (L2).
-            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
+                await action(project, repo).ConfigureAwait(false);
+                if (reload)
+                {
+                    PullRequest = await store.GetPullRequestAsync(id, ct).ConfigureAwait(false);
+                    Threads = await store.GetThreadsAsync(project, repo, id, ct).ConfigureAwait(false);
+                }
+            }, ct, m => Error = m).ConfigureAwait(false);
         }
         finally
         {

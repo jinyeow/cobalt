@@ -51,9 +51,9 @@ public static class CobaltTuiApp
         // threadpool continuation threads (AdoHttp's ConfigureAwait(false)); once the app exists it
         // marshals each record onto the UI thread, and until then (the prime can complete before
         // Init) it adds directly — OperationLog.Add is itself thread-safe, so that is race-free.
-        IApplication? appForLog = null;
+        IUiPost? postForLog = null;
         connection.Http.OperationObserver = OperationObserver(
-            vm.Operations, run => { if (appForLog is { } a) { a.Invoke(run); } else { run(); } });
+            vm.Operations, run => { if (postForLog is { } p) { p.Post(run); } else { run(); } });
 
         // Prime the shared identity cache while the UI builds, so the first real call skips
         // the ~700ms cold DNS + TCP + TLS. Dropped on the floor deliberately rather than routed
@@ -86,6 +86,9 @@ public static class CobaltTuiApp
         // starts on the resolved theme; the initial preset is applied just below.
         ThemeService.Enable();
         using var app = Application.Create().Init(driverName);
+        // The one UI-thread marshalling seam (M2): everything that used to close over app.Invoke
+        // now posts through this. Created right after Init so app.Invoke has a running main loop.
+        var uiPost = new ApplicationUiPost(app);
         // Below truecolor, force TG's chrome down to the 16-colour path so it matches the degraded
         // diff palette (a truecolor terminal is byte-identical to before).
         if (caps.Color < ColorSupport.Full)
@@ -98,16 +101,16 @@ public static class CobaltTuiApp
         Application.MaximumIterationsPerSecond = 60;
         // The app now exists: subsequent :log records marshal onto its UI thread (see the observer
         // wiring above); anything the prime already reported was added directly and thread-safely.
-        appForLog = app;
+        postForLog = uiPost;
         // Declared before the shell so disposal runs shell→monitor: the shell unsubscribes its
         // Changed handler before the monitor (whose watcher thread raises it) is disposed.
         using var monitor = OsThemeMonitor.Create();
         ThemeService.Apply(ThemeResolver.Resolve(config.Theme, monitor.Current, caps.Color));
         using var shell = new CobaltShell(
             app, vm, workItems, pullRequests, editor: null, context: context, themeMonitor: monitor,
-            bindings: bindings);
+            bindings: bindings, post: uiPost);
 
-        ResolveIdentityInBackground(app, vm, connection.GetIdentityAsync);
+        ResolveIdentityInBackground(uiPost, vm, connection.GetIdentityAsync);
 
         app.Run(shell);
         return 0;
@@ -266,12 +269,12 @@ public static class CobaltTuiApp
 
     /// <summary>Fills the status bar with who we are; failures land in the message bar, never block startup.</summary>
     private static void ResolveIdentityInBackground(
-        IApplication app, ShellViewModel vm, Func<CancellationToken, Task<AdoUser>> getIdentity)
+        IUiPost post, ShellViewModel vm, Func<CancellationToken, Task<AdoUser>> getIdentity)
     {
         _ = Task.Run(async () =>
         {
             var outcome = await ResolveIdentityAsync(getIdentity).ConfigureAwait(false);
-            app.Invoke(() =>
+            post.Post(() =>
             {
                 if (outcome.DisplayName is { } name)
                 {

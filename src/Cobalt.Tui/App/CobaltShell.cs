@@ -19,6 +19,9 @@ namespace Cobalt.Tui.App;
 public sealed class CobaltShell : Window
 {
     private readonly IApplication _app;
+    // Marshals background continuations onto the UI thread (ADR 0013). Terminal.Gui itself is kept
+    // for RequestStop/LayoutAndDraw/Clipboard/dialog construction; only the Invoke sites route here.
+    private readonly IUiPost _post;
     private readonly ShellViewModel _vm;
     private readonly WorkItemStoreAdapter? _workItems;
     private readonly PullRequestStoreAdapter? _pullRequests;
@@ -64,9 +67,11 @@ public sealed class CobaltShell : Window
         EditorService? editor = null,
         AdoContext? context = null,
         IOsThemeMonitor? themeMonitor = null,
-        KeyBindingTable? bindings = null)
+        KeyBindingTable? bindings = null,
+        IUiPost? post = null)
     {
         _app = app;
+        _post = post ?? new ApplicationUiPost(app);
         _vm = vm;
         _workItems = workItems;
         _pullRequests = pullRequests;
@@ -450,7 +455,7 @@ public sealed class CobaltShell : Window
     private async Task RunThenRefreshAsync(Task action, Action refresh)
     {
         await action.IgnoreCancellationAsync().ConfigureAwait(false);
-        _app.Invoke(refresh);
+        _post.Post(refresh);
     }
 
     private string? CurrentUrl()
@@ -512,7 +517,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new PrDetailViewModel(_pullRequests, id);
-        new PrDetailDialog(_app, detailVm, _textInput, _vm.Messages.Info, _pullRequests, _context, _bindings).Show();
+        new PrDetailDialog(_app, detailVm, _textInput, _vm.Messages.Info, _pullRequests, _context, _bindings, _post).Show();
         _prList?.RefreshAfterMutation(); // reflect any votes/edits back into the list, dropping stale cache
     }
 
@@ -523,7 +528,7 @@ public sealed class CobaltShell : Window
             return;
         }
         var detailVm = new WorkItemDetailViewModel(_workItems, id, project);
-        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _textInput, _bindings).Show();
+        new WorkItemDetailDialog(_app, detailVm, _editor, _vm.Messages.Info, _textInput, _bindings, _post).Show();
         _workItemList?.OnRefresh(); // reflect any edits back into the list
     }
 
@@ -565,7 +570,7 @@ public sealed class CobaltShell : Window
     /// (<c>theme = system</c>). Raised from the monitor's watcher thread, so marshal onto the UI
     /// thread before touching Terminal.Gui.
     /// </summary>
-    private void OnOsThemeChanged(OsTheme os) => _app.Invoke(() => ApplyOsFollow(os));
+    private void OnOsThemeChanged(OsTheme os) => _post.Post(() => ApplyOsFollow(os));
 
     /// <summary>
     /// Apply the OS-follow decision synchronously: when following the system, re-resolve for
@@ -748,7 +753,7 @@ public sealed class CobaltShell : Window
         var listVm = new WorkItemListViewModel(
             workItems, _vm.IncludeCompletedWorkItems, _vm.ProjectFilter, () => _vm.Scope);
         _workItemListVm = listVm;
-        var view = new WorkItemListView(_app, listVm);
+        var view = new WorkItemListView(_post, listVm);
         view.ItemActivated += OpenWorkItemDetail;
         view.Load();
         return view;
@@ -764,7 +769,7 @@ public sealed class CobaltShell : Window
                 .ConfigureAwait(false);
             return threads.Sum(t => t.Comments.Count(c => !c.IsSystem));
         });
-        var view = new PrListView(_app, listVm, _prEnricher);
+        var view = new PrListView(_post, listVm, _prEnricher);
         view.ItemActivated += OpenPrDetail;
         view.Load();
         return view;

@@ -149,24 +149,10 @@ public sealed class WorkItemListViewModel(
         Error = null;
         Changed?.Invoke();
 
-        IReadOnlyList<WorkItem> result;
         string? error = null;
-        try
-        {
-            var query = new WorkItemQuery(_includeCompleted, _projectFilter);
-            result = await source.QueryMyWorkItemsAsync(query, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
-        {
-            throw; // genuine user/dialog cancel (carries our token) stays silent
-        }
-        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
-        {
-            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
-            // surfaced as an expected error rather than a permanent "loading…" pane (LOW-1).
-            error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
-            result = [];
-        }
+        var query = new WorkItemQuery(_includeCompleted, _projectFilter);
+        var result = await VmGuard.RunAsync(
+            () => source.QueryMyWorkItemsAsync(query, ct), ct, m => error = m).ConfigureAwait(false) ?? [];
 
         // A newer load superseded this one while it was in flight; drop its results
         // so it cannot clobber the current filter state.

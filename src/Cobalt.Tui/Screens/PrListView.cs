@@ -3,7 +3,6 @@ using Cobalt.Core.Models;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
-using Terminal.Gui.App;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -12,7 +11,7 @@ namespace Cobalt.Tui.Screens;
 /// <summary>The three PR tabs with a bound ListView; Tab cycles tabs, Enter opens detail.</summary>
 public sealed class PrListView : View
 {
-    private readonly IApplication _app;
+    private readonly IUiPost _post;
     private readonly PrListViewModel _vm;
     private readonly PrCommentCountEnricher? _comments;
     private readonly Label _header;
@@ -36,9 +35,9 @@ public sealed class PrListView : View
     private int _formattedCountsSeen = -1;
     private int _countsSeen;
 
-    public PrListView(IApplication app, PrListViewModel vm, PrCommentCountEnricher? comments = null, Func<DateTimeOffset>? now = null)
+    public PrListView(IUiPost post, PrListViewModel vm, PrCommentCountEnricher? comments = null, Func<DateTimeOffset>? now = null)
     {
-        _app = app;
+        _post = post;
         _vm = vm;
         _comments = comments;
         _loadCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
@@ -189,7 +188,7 @@ public sealed class PrListView : View
         {
             return;
         }
-        _app.Invoke(() =>
+        _post.Post(() =>
         {
             if (!_disposed)
             {
@@ -234,7 +233,7 @@ public sealed class PrListView : View
         {
             return;
         }
-        _app.Invoke(() =>
+        _post.Post(() =>
         {
             Interlocked.Exchange(ref _countRenderQueued, 0);
             if (!_disposed)

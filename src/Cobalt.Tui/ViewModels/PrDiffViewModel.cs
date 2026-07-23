@@ -87,6 +87,12 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
     /// <summary>The file path <see cref="CurrentDiff"/> belongs to; null when there is no diff.</summary>
     public string? CurrentDiffPath => _current?.Path;
 
+    /// <summary>The displayed diff and its path from a SINGLE read of the internal DiffState
+    /// reference (ADR 0008). CurrentDiff/CurrentDiffPath read the reference separately, so a
+    /// concurrent select can tear the pair; render paths must use this.</summary>
+    public (FileDiff Diff, string Path)? CurrentDiffSnapshot
+    { get { var current = _current; return current is null ? null : (current.Diff, current.Path); } }
+
     public event Action? Changed;
 
     /// <summary>
@@ -200,19 +206,11 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
                 return; // every file is claimed
             }
 
-            try
-            {
-                await ComputeDiffForFileAsync(Files[index], ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
-            {
-                throw; // genuine user/dialog cancel (carries our token) stops the whole prefetch
-            }
-            catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
-            {
-                // One file's blob fetch failed (e.g. a 404 on a rename/edge path). Skip its
-                // stats and keep prefetching the rest — background stats are best-effort.
-            }
+            // One file's blob fetch failed (e.g. a 404 on a rename/edge path). Skip its stats and
+            // keep prefetching the rest — background stats are best-effort. A genuine user/dialog
+            // cancel (carries our token) still propagates and stops the whole prefetch.
+            _ = await VmGuard.RunAsync(() => ComputeDiffForFileAsync(Files[index], ct), ct, static _ => { })
+                .ConfigureAwait(false);
             StatsChanged?.Invoke();
         }
     }
@@ -267,57 +265,50 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         Task<FileDiff?>? diffTask = null;
         try
         {
-            _iteration = await source.GetLatestIterationAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
-            if (_iteration is null)
+            await VmGuard.RunAsync(async () =>
             {
-                Error = "this pull request has no iterations to diff";
-                Files = [];
-                return;
-            }
+                _iteration = await source.GetLatestIterationAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct).ConfigureAwait(false);
+                if (_iteration is null)
+                {
+                    Error = "this pull request has no iterations to diff";
+                    Files = [];
+                    return;
+                }
 
-            Files = await source.GetIterationChangesAsync(
-                pr.ProjectName, pr.RepositoryId, pr.PullRequestId, _iteration.Id, ct).ConfigureAwait(false);
-            // Signal the changed-file list is ready so a consumer can start prefetch now, before
-            // the threads fetch and first diff below complete (ASYNC-3).
-            FilesLoaded?.Invoke();
+                Files = await source.GetIterationChangesAsync(
+                    pr.ProjectName, pr.RepositoryId, pr.PullRequestId, _iteration.Id, ct).ConfigureAwait(false);
+                // Signal the changed-file list is ready so a consumer can start prefetch now, before
+                // the threads fetch and first diff below complete (ASYNC-3).
+                FilesLoaded?.Invoke();
 
-            // Threads need only the PR id and the first file's blobs need only the iteration, so
-            // both round-trips start here and are harvested below: an open costs ~3 round-trips
-            // rather than 5. They start after the files fetch (not at the top of the method)
-            // because the blobs cannot start any earlier than this anyway, and the early return
-            // above would otherwise abandon an in-flight task.
-            var threadsTask = source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct);
+                // Threads need only the PR id and the first file's blobs need only the iteration, so
+                // both round-trips start here and are harvested below: an open costs ~3 round-trips
+                // rather than 5. They start after the files fetch (not at the top of the method)
+                // because the blobs cannot start any earlier than this anyway, and the early return
+                // above would otherwise abandon an in-flight task.
+                var threadsTask = source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct);
 
-            _selectedFileIndex = 0;
-            var file = SelectedFile;
-            diffTask = file is null ? null : ComputeDiffForFileAsync(file, ct);
+                _selectedFileIndex = 0;
+                var file = SelectedFile;
+                diffTask = file is null ? null : ComputeDiffForFileAsync(file, ct);
 
-            // Threads are harvested before the diff is published, and both land before the single
-            // paint in the finally. This order is load-bearing, not stylistic:
-            //  - a threads failure must leave CurrentDiff null, because the view renders Error only
-            //    while CurrentDiff is null and otherwise overwrites the error header with the
-            //    file's stats — a swallowed failure shows a clean diff with no markers on a PR
-            //    that has review comments;
-            //  - a diff failure must still leave Threads populated: LoadAsync runs once per dialog,
-            //    so dropping them here costs the whole session its comment markers.
-            // Awaiting does not serialise the two: both requests are already in flight.
-            await HarvestThreadsAsync(threadsTask, ct).ConfigureAwait(false);
+                // Threads are harvested before the diff is published, and both land before the single
+                // paint in the finally. This order is load-bearing, not stylistic:
+                //  - a threads failure must leave CurrentDiff null, because the view renders Error only
+                //    while CurrentDiff is null and otherwise overwrites the error header with the
+                //    file's stats — a swallowed failure shows a clean diff with no markers on a PR
+                //    that has review comments;
+                //  - a diff failure must still leave Threads populated: LoadAsync runs once per dialog,
+                //    so dropping them here costs the whole session its comment markers.
+                // Awaiting does not serialise the two: both requests are already in flight.
+                await HarvestThreadsAsync(threadsTask, ct).ConfigureAwait(false);
 
-            if (file is not null && diffTask is not null)
-            {
-                var diff = await diffTask.ConfigureAwait(false);
-                _current = diff is null ? null : new DiffState(diff, file.Path);
-            }
-        }
-        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
-        {
-            throw; // genuine user/dialog cancel (carries our token) stays silent
-        }
-        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
-        {
-            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
-            // surfaced as an expected error rather than a silent no-data pane (L2).
-            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
+                if (file is not null && diffTask is not null)
+                {
+                    var diff = await diffTask.ConfigureAwait(false);
+                    _current = diff is null ? null : new DiffState(diff, file.Path);
+                }
+            }, ct, m => Error = m).ConfigureAwait(false);
         }
         finally
         {
@@ -470,24 +461,17 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         BusyChanged?.Invoke();
         try
         {
-            await source.AddLineCommentAsync(
-                pr.ProjectName, pr.RepositoryId, pr.PullRequestId, current.Path, lineNumber.Value, rightSide, text, ct)
-                .ConfigureAwait(false);
-            // Separate awaits, so a failure is attributed to the right thing: the post throwing
-            // skips the harvest entirely and leaves the threads state untouched, while only the
-            // harvest can mark the threads unavailable.
-            await HarvestThreadsAsync(
-                source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct), ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
-        {
-            throw; // genuine user/dialog cancel (carries our token) stays silent
-        }
-        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
-        {
-            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
-            // surfaced as an expected error rather than a silent no-data pane (L2).
-            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
+            await VmGuard.RunAsync(async () =>
+            {
+                await source.AddLineCommentAsync(
+                    pr.ProjectName, pr.RepositoryId, pr.PullRequestId, current.Path, lineNumber.Value, rightSide, text, ct)
+                    .ConfigureAwait(false);
+                // Separate awaits, so a failure is attributed to the right thing: the post throwing
+                // skips the harvest entirely and leaves the threads state untouched, while only the
+                // harvest can mark the threads unavailable.
+                await HarvestThreadsAsync(
+                    source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct), ct).ConfigureAwait(false);
+            }, ct, m => Error = m).ConfigureAwait(false);
         }
         finally
         {
@@ -517,17 +501,9 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         BusyChanged?.Invoke();
         try
         {
-            await source.VoteAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, vote, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
-        {
-            throw; // genuine user/dialog cancel (carries our token) stays silent
-        }
-        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
-        {
-            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
-            // surfaced as an expected error rather than a silent no-data pane (L2).
-            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
+            await VmGuard.RunAsync(
+                () => source.VoteAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, vote, ct), ct, m => Error = m)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -545,21 +521,14 @@ public sealed class PrDiffViewModel(IPrDiffSource source, PullRequest pr)
         BusyChanged?.Invoke();
         try
         {
-            await mutate().ConfigureAwait(false);
-            // Separate awaits: a mutation that fails never reaches the harvest, so it cannot mark
-            // the threads unavailable or retract a degradation the load established.
-            await HarvestThreadsAsync(
-                source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct), ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
-        {
-            throw; // genuine user/dialog cancel (carries our token) stays silent
-        }
-        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
-        {
-            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
-            // surfaced as an expected error rather than a silent no-data pane (L2).
-            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
+            await VmGuard.RunAsync(async () =>
+            {
+                await mutate().ConfigureAwait(false);
+                // Separate awaits: a mutation that fails never reaches the harvest, so it cannot mark
+                // the threads unavailable or retract a degradation the load established.
+                await HarvestThreadsAsync(
+                    source.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct), ct).ConfigureAwait(false);
+            }, ct, m => Error = m).ConfigureAwait(false);
         }
         finally
         {
