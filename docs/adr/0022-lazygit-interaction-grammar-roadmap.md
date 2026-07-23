@@ -26,7 +26,8 @@ this order:
 - **A — Discoverability chrome** (shipped; ADR 0021): context keybar generated from
   the live binding table, vim-showcmd pending-key indicator, real tab strips with
   jump chords, `[`/`]` as the panel-tab keys.
-- **B — List + live-preview workspace** (the flagship): the content area splits
+- **B — List + live-preview workspace** (the flagship; concrete design: ADR 0024):
+  the content area splits
   into list (left) and a preview panel (right) that re-renders the selected item's
   detail on every cursor move. Constraints that are part of the decision: preview
   fetches are **async and cancel-superseded** (navigation never blocks; stale
