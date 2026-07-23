@@ -112,7 +112,8 @@ Record each as: `Result: Pass / Fail — notes:`
 Check exit codes with `echo $?` immediately after each command.
 
 - [ ] **A1 — version.** Run `cobalt --version` (and `cobalt -v`).
-  Expect: prints `0.1.0` (no git-hash suffix), exit `0`.
+  Expect: the version *with* its 7-char source revision — `0.3.2+<sha>` from a tagged-release
+  install, `0.3.2-alpha+<sha>` from any local or branch build — and exit `0`.
   Result: ______
 - [ ] **A2 — help.** Run `cobalt --help` (and `-h`).
   Expect: usage block starting `cobalt — a vim-flavored terminal UI for Azure

@@ -14,7 +14,7 @@ an interactive browser sign-in.
 
 ```sh
 dotnet build Cobalt.slnx                          # build all (src + tests)
-dotnet test  Cobalt.slnx                          # full suite (~750 tests)
+dotnet test  Cobalt.slnx                          # full suite (~1,200 tests)
 dotnet run --project src/Cobalt -- --help         # run the CLI/TUI
 
 # run a single test / class / trait

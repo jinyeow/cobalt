@@ -1,6 +1,39 @@
 # Changelog
 
-## [Unreleased]
+## 0.3.2 — 2026-07-24
+
+No user-facing change. This release carries dependency updates and the internal foundations
+for the list + preview workspace ([ADR 0024](docs/adr/0024-list-preview-workspace.md)); the
+workspace itself is not enabled yet.
+
+### Internal
+- **Detail text composition is extracted into pure formatters.** `PrDetailFormatter` and
+  `WorkItemDetailFormatter` render a detail view-model at a given width and tier
+  (`Summary`/`Full`); the PR and work-item dialogs delegate to them instead of composing their
+  text inline. Behaviour is unchanged and pinned byte-for-byte by snapshot tests — the point is
+  that the coming preview pane renders from the same function rather than growing a second,
+  drifting implementation.
+- **A shell-wide two-pane layout calculator.** `WorkspaceLayout.Compute(width)` decides whether
+  a preview pane is shown and how the width splits, as pure unit-tested thresholds. The diff
+  dialog's `ResponsiveLayout` is untouched — the two surfaces share the shape, not the table.
+- **The [ADR 0008](docs/adr/0008-client-side-diff-and-line-comments.md) load invariants are now
+  types rather than conventions.** `SingleFlightCache<K,V>` owns a single cancellation token
+  source and a monotonic supersede stamp, so a superseded fetch can neither publish its stale
+  result nor leak its fault to the crash log; `Published<T>` makes a torn read of a paired state
+  impossible by construction. Both generalize patterns that were previously re-copied by hand —
+  the source of four earlier wrong-file bugs.
+- **Workspace pane focus is an explicit view-model.** `WorkspaceViewModel` owns the focused pane
+  and the key-routing decision, so routing is unit-tested headlessly instead of inferred from
+  Terminal.Gui focus. `Tab` is bound to pane cycling in the two list scopes but falls back to
+  today's tab behaviour while the preview is hidden — which it always is until the workspace
+  ships, hence no visible change here.
+
+### Dependencies
+- `Microsoft.Extensions.Http.Resilience` and `Microsoft.Extensions.TimeProvider.Testing`
+  10.7.0 → 10.8.0, `Microsoft.NET.Test.Sdk` 18.7.0 → 18.8.1, `Microsoft.SourceLink.GitHub`
+  10.0.300 → 10.0.301; `actions/setup-dotnet` v5 → v6 in CI.
+
+## 0.3.1 — 2026-07-23
 
 ### Fixed
 - **A diff-review render could pair one file's diff with another's path.** The render path read

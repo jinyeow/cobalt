@@ -3,13 +3,14 @@
 A vim-flavored terminal UI for Azure DevOps: work items, pull requests,
 reviews, and votes — without leaving your terminal.
 
-Status: **v0.1.0** — feature-complete for the agreed v1 (work items, pull
-requests, diff review with line comments). The agreed specification lives in
+Status: **v0.3.2** — feature-complete for the agreed v1 (work items, pull requests,
+diff review with line comments) and iterating past it; the
+[CHANGELOG](CHANGELOG.md) records what each release added. The agreed specification lives in
 [docs/SPEC.md](docs/SPEC.md), the milestone plan in [docs/PLAN.md](docs/PLAN.md),
 and design decisions in [docs/adr/](docs/adr/).
 
 Built with a UI-free `Cobalt.Core` and a view-model layer that never references
-Terminal.Gui, so the interesting logic is unit-tested (808 tests). See
+Terminal.Gui, so the interesting logic is unit-tested (1,208 tests). See
 [docs/adr/0004](docs/adr/0004-terminal-gui-v2-with-viewmodels.md) and
 [0007](docs/adr/0007-vim-input-as-testable-data.md).
 
@@ -321,7 +322,7 @@ Release, so Debug misses the ~16 ms frame budget on every redraw and the UI feel
 responsiveness only from a Release build; a Debug build tells you nothing about how it will feel.
 
 **Or install your build as the `cobalt` global tool.** **Watch the cache:** an unreleased build
-packs as `0.3.0-alpha` every time and NuGet caches packages *by version*, so `dotnet tool
+packs as `0.3.2-alpha` every time and NuGet caches packages *by version*, so `dotnet tool
 update`/`install --add-source` can silently reuse a **stale** cached build — which looks
 exactly like "my change didn't take". Give each build a unique version so the install
 can't hit the cache:
@@ -329,8 +330,8 @@ can't hit the cache:
 ```sh
 dotnet tool uninstall -g cobalt-tui
 dotnet pack src/Cobalt/Cobalt.csproj -c Release -o ./artifacts \
-  -p:PackageVersion=0.3.0-local1 -p:PublishRepositoryUrl=false -p:EmbedUntrackedSources=false
-dotnet tool install -g cobalt-tui --add-source ./artifacts --version 0.3.0-local1
+  -p:PackageVersion=0.3.2-local1 -p:PublishRepositoryUrl=false -p:EmbedUntrackedSources=false
+dotnet tool install -g cobalt-tui --add-source ./artifacts --version 0.3.2-local1
 ```
 
 Bump `local1` → `local2` … on each rebuild. To keep the same version instead, delete the
@@ -338,7 +339,7 @@ cached package first: `rm -rf ~/.nuget/packages/cobalt-tui` (Windows:
 `rmdir /s /q "%USERPROFILE%\.nuget\packages\cobalt-tui"`).
 
 **Check what you're actually running:** `cobalt --version` prints the version *and* the commit —
-`0.3.0-alpha+fd36e1b` for a branch build, a clean `0.3.0+<sha>` only for a tagged release. The
+`0.3.2-alpha+fd36e1b` for a branch build, a clean `0.3.2+<sha>` only for a tagged release. The
 `-alpha` marks any build that isn't a release, so a dev build can't be mistaken for one. If the
 sha isn't the commit you expect, you're running a stale install — that mistake is invisible
 without this, because every build between two releases carries the same number.
