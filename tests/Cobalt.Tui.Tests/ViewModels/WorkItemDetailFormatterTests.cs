@@ -22,6 +22,24 @@ public class WorkItemDetailFormatterTests
     }
 
     [Fact]
+    public async Task Summary_Tier_Clamp_Never_Splits_A_Surrogate_Pair()
+    {
+        // The comment line starts "  " (2 units), then 2-unit emoji pairs: at width 6
+        // the naive cut point (width - 1 = 5) lands between a pair's halves.
+        var vm = await DetailFormatterFixture.LoadedWorkItemVmAsync(Ct, store =>
+            store.Comments =
+            [
+                new Cobalt.Core.Models.WorkItemComment(
+                    1, string.Concat(Enumerable.Repeat("😀", 10)),
+                    new DateTimeOffset(2026, 7, 1, 9, 0, 0, TimeSpan.Zero), "x"),
+            ]);
+
+        var lines = WorkItemDetailFormatter.Render(vm, 6, PreviewTier.Summary).Split('\n');
+
+        Assert.Contains("  😀…", lines);
+    }
+
+    [Fact]
     public async Task Summary_Tier_Truncates_The_Description_To_A_Three_Line_Head_With_Ellipsis()
     {
         var vm = await DetailFormatterFixture.LoadedWorkItemVmAsync(Ct);

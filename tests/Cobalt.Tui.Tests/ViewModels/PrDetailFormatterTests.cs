@@ -56,6 +56,20 @@ public class PrDetailFormatterTests
     }
 
     [Fact]
+    public async Task Summary_Tier_Clamp_Never_Splits_A_Surrogate_Pair()
+    {
+        // "!42  " is 5 UTF-16 units, then 2-unit emoji pairs: at width 9 the naive
+        // cut point (width - 1 = 8) lands between a pair's halves.
+        var vm = await DetailFormatterFixture.LoadedPrVmAsync(Ct, store =>
+            store.Pr = store.Pr with { Title = string.Concat(Enumerable.Repeat("😀", 20)) });
+
+        var lines = PrDetailFormatter.Render(vm, 9, PreviewTier.Summary).Split('\n');
+
+        var titleLine = Assert.Single(lines, l => l.StartsWith("!42", StringComparison.Ordinal));
+        Assert.Equal("!42  😀…", titleLine);
+    }
+
+    [Fact]
     public async Task Full_Tier_Without_Reviewers_Or_Description_Renders_None_And_No_Description_Section()
     {
         var vm = await DetailFormatterFixture.LoadedPrVmAsync(Ct, store =>

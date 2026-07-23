@@ -96,7 +96,14 @@ public static class PrDetailFormatter
         {
             if (lines[i].Length > width)
             {
-                lines[i] = string.Concat(lines[i].AsSpan(0, width - 1), "…");
+                var cut = width - 1;
+                // Never end the cut on the high half of a surrogate pair: keeping it
+                // would leave an invalid lone surrogate before the ellipsis.
+                if (cut > 0 && char.IsHighSurrogate(lines[i][cut - 1]))
+                {
+                    cut--;
+                }
+                lines[i] = string.Concat(lines[i].AsSpan(0, cut), "…");
             }
         }
         return string.Join('\n', lines);
