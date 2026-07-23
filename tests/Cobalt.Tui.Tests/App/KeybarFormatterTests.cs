@@ -105,6 +105,46 @@ public class KeybarFormatterTests
         Assert.True(bar.Length <= 5);
     }
 
+    [Theory]
+    [InlineData(KeyScope.WorkItemList)]
+    [InlineData(KeyScope.PullRequestList)]
+    public void Workspace_List_Keybar_Is_Byte_Identical_To_Pre_M5(KeyScope scope)
+    {
+        // Same rule as the help overlay: at M5 Tab in the list scopes still performs today's
+        // tab cycling (the shell's fallback), so the keybar must stay byte-for-byte what it
+        // rendered pre-M5. Reference = the default table with Tab→CyclePane unbound from both
+        // workspace list scopes (config empty-sequence unbind, independent of the render-time
+        // suppression). Width 400 so nothing truncates.
+        var expected = KeybarFormatter.Render(WithoutWorkspaceTabCyclePane(), scope, 400);
+
+        Assert.Equal(expected, KeybarFormatter.Render(KeyBindingTable.Default(), scope, 400));
+    }
+
+    /// <summary>The default table with Tab→CyclePane unbound from both workspace list scopes
+    /// (config empty-sequence unbind) — a pre-M5 reference built without copying Default()'s binds.</summary>
+    private static KeyBindingTable WithoutWorkspaceTabCyclePane()
+    {
+        static IReadOnlyDictionary<string, IReadOnlyList<string>> Unbind() =>
+            new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal) { ["cycle-pane"] = [] };
+        var scopes = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["workitemlist"] = Unbind(),
+            ["pullrequestlist"] = Unbind(),
+        };
+        return KeyBindingTable.FromConfig(new KeysConfig(scopes));
+    }
+
+    [Fact]
+    public void DiffReview_Keybar_Still_Advertises_Pane_Cycling()
+    {
+        // Regression pin (green before and after the workspace suppression): diff review's
+        // own scoped Tab → CyclePane stays advertised — the suppression is workspace-only.
+        // Width 700: CyclePane sits late in bind order, so a narrower bar truncates first.
+        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.DiffReview, 700);
+
+        Assert.Contains("Tab:switch file list / diff pane", bar);
+    }
+
     [Fact]
     public void A_Remapped_Table_Renders_The_New_Key_Without_Formatter_Changes()
     {

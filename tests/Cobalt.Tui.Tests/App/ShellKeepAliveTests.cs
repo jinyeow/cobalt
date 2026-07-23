@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using Cobalt.Core.Ado;
 using Cobalt.Core.Config;
+using Cobalt.Core.Models;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
@@ -111,6 +112,61 @@ public class ShellKeepAliveTests
         // With no PR list to cycle sub-tabs, Tab must fall through to a top-level section toggle,
         // not be swallowed by the PR-tab gate.
         Assert.Equal(AppSection.WorkItems, vm.ActiveSection);
+    }
+
+    [Fact]
+    public void Tab_In_Wi_Section_With_Preview_Hidden_Falls_Back_To_Section_Toggle()
+    {
+        // Drives the real CyclePane→NextTab recursion through CobaltShell.Dispatch from the
+        // Work Items section (the router-level integration harness only mirrors this logic).
+        // WI scope Tab→CyclePane, preview hidden → workspace declines → shell falls back to
+        // today's NextTab, which with no PR sub-tabs toggles the top-level section.
+        var vm = Vm();
+        using var shell = new CobaltShell(App, vm); // no adapters → placeholder; WI section active
+        Assert.Equal(AppSection.WorkItems, vm.ActiveSection);
+        shell.SetFocus();
+
+        shell.NewKeyDownEvent(new Terminal.Gui.Input.Key(Terminal.Gui.Drivers.KeyCode.Tab));
+
+        Assert.Equal(AppSection.PullRequests, vm.ActiveSection);
+    }
+
+    // ---- M5 workspace Tab (ADR 0024): CyclePane consumed when the preview shows, today's
+    // ---- semantics otherwise ----
+
+    [Fact]
+    public void Tab_In_Pr_Section_With_A_Built_List_Still_Cycles_Sub_Tabs()
+    {
+        // Regression pin, green before and after M5: with the preview hidden the workspace
+        // declines Tab (CyclePane → false) and the shell falls back to the PR sub-tab cycle.
+        var vm = Vm();
+        using var shell = new CobaltShell(App, vm, pullRequests: Adapter(new CountingHandler()));
+        vm.HandleCommand(AppCommand.SectionPullRequests);
+        shell.SetFocus();
+        Assert.Equal(PrListFilter.Team, shell.PrListVm!.ActiveTab);
+
+        shell.NewKeyDownEvent(new Terminal.Gui.Input.Key(Terminal.Gui.Drivers.KeyCode.Tab));
+
+        Assert.Equal(PrListFilter.Mine, shell.PrListVm!.ActiveTab); // Team → Mine
+        Assert.Equal(AppSection.PullRequests, vm.ActiveSection);    // no section toggle
+    }
+
+    [Fact]
+    public void Tab_With_A_Visible_Preview_Is_Consumed_As_Pane_Focus()
+    {
+        // The M5 flip: once the preview is visible (#48 will drive this from the layout),
+        // Tab toggles workspace pane focus instead of cycling PR sub-tabs or sections.
+        var vm = Vm();
+        using var shell = new CobaltShell(App, vm, pullRequests: Adapter(new CountingHandler()));
+        vm.HandleCommand(AppCommand.SectionPullRequests);
+        shell.SetFocus();
+        shell.Workspace.SetPreviewVisible(true);
+
+        shell.NewKeyDownEvent(new Terminal.Gui.Input.Key(Terminal.Gui.Drivers.KeyCode.Tab));
+
+        Assert.Equal(WorkspacePane.Preview, shell.Workspace.FocusedPane);
+        Assert.Equal(PrListFilter.Team, shell.PrListVm!.ActiveTab);  // sub-tabs untouched
+        Assert.Equal(AppSection.PullRequests, vm.ActiveSection);     // no section toggle
     }
 
     // ---- INPUT-1: targeted redraw on vim movement (both-driver UAT still required) ----

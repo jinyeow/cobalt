@@ -62,6 +62,10 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.WorkItemList, "s", AppCommand.ChangeState);
         table.Bind(KeyScope.WorkItemList, "a", AppCommand.Assign);
         table.Bind(KeyScope.WorkItemList, "t", AppCommand.EditTags);
+        // Scoped Tab shadows the global NextTab (the DiffReview mechanism below): in the
+        // list+preview workspace Tab cycles pane focus (ADR 0024). While the preview is
+        // hidden the shell falls back to today's Tab semantics.
+        table.Bind(KeyScope.WorkItemList, "Tab", AppCommand.CyclePane);
 
         table.Bind(KeyScope.WorkItemDetail, "c", AppCommand.Comment);
         table.Bind(KeyScope.WorkItemDetail, "e", AppCommand.EditInEditor);
@@ -70,11 +74,14 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.WorkItemDetail, "t", AppCommand.EditTags);
 
         table.Bind(KeyScope.PullRequestList, "v", AppCommand.Vote);
-        // lazygit's panel-tab keys: [ / ] cycle the PR sub-tabs (review queue / team /
-        // mine / active). Tab / S-Tab stay as aliases until the preview workspace
-        // claims Tab for pane focus (ADR 0022).
+        // lazygit's panel-tab keys: [ / ] are the canonical PR sub-tab keys (ADR 0021);
+        // S-Tab remains the global PrevTab alias. The preview workspace has claimed Tab
+        // for pane focus (ADR 0024) — the scoped binding below shadows the global
+        // NextTab, and the shell falls back to today's Tab semantics while the preview
+        // is hidden.
         table.Bind(KeyScope.PullRequestList, "]", AppCommand.NextTab);
         table.Bind(KeyScope.PullRequestList, "[", AppCommand.PrevTab);
+        table.Bind(KeyScope.PullRequestList, "Tab", AppCommand.CyclePane);
 
         table.Bind(KeyScope.PullRequestDetail, "v", AppCommand.Vote);
         table.Bind(KeyScope.PullRequestDetail, "c", AppCommand.Comment);

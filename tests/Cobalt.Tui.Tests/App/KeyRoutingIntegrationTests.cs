@@ -15,6 +15,7 @@ public class KeyRoutingIntegrationTests
     private sealed class Harness
     {
         private readonly KeymapRouter _router = new(KeyBindingTable.Default());
+        private readonly WorkspaceViewModel _workspace = new();
         public ShellViewModel Vm { get; } = new(["work", "oss"], "work");
         public List<AppCommand> Unhandled { get; } = [];
 
@@ -51,17 +52,25 @@ public class KeyRoutingIntegrationTests
                 return;
             }
             LastCount = result.Count;
-            if (Vm.HandleCommand(result.Command))
+            var command = result.Command;
+            // Mirror CobaltShell.Dispatch's workspace intercept (ADR 0024): while the
+            // preview is hidden the workspace declines Tab (CyclePane → false) and the
+            // shell falls back to today's NextTab semantics.
+            if (command == AppCommand.CyclePane && !_workspace.CyclePane())
+            {
+                command = AppCommand.NextTab;
+            }
+            if (Vm.HandleCommand(command))
             {
                 return;
             }
-            Unhandled.Add(result.Command);
+            Unhandled.Add(command);
 
             // Mirror CobaltShell.Dispatch's default: a router-matched command that no
             // context handles must surface a message, never vanish silently.
-            if (!ScreenHandled.Contains(result.Command))
+            if (!ScreenHandled.Contains(command))
             {
-                Vm.Messages.Info($"'{result.Command}' not available here");
+                Vm.Messages.Info($"'{command}' not available here");
             }
         }
     }
