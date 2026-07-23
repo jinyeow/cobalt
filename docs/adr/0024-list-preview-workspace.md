@@ -34,8 +34,11 @@ generalized from the diff dialog's `ResponsiveLayout` — same shape (pure thres
 unit-tested, the view applies the result on resize), **separate threshold tables**;
 the two surfaces are consumers of a pattern, not one merged function. Starting
 geometry (prototype-tunable): ≥ 110 cols → list ~45% (clamped 40–70) + preview;
-80–109 → list fixed-min, preview the remainder (may be summary-tier only); < 80 or
-toggled off → collapsed. At 80×24 the default is collapsed.
+100–109 → list fixed-min, preview the remainder (may be summary-tier only); < 100 or
+toggled off → collapsed, so an 80×24 terminal defaults to today's full-width list.
+(Amended 2026-07-23 at implementation: the earlier draft table kept the preview down
+to 80 cols while tickets #42/#45 collapsed below ~100 — unified at 100, one named
+constant the prototype tunes.)
 
 ### Load depth — two-tier (fork B)
 
