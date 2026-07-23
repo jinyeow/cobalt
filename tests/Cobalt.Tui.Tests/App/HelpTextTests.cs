@@ -58,6 +58,25 @@ public class HelpTextTests
     }
 
     [Fact]
+    public void Workspace_List_Help_Advertises_Todays_Tab_Semantics_Not_CyclePane()
+    {
+        // M5: Tab is bound to CyclePane in the two workspace list scopes, but while the
+        // preview is hidden the shell falls back to today's NextTab semantics — and at M5
+        // the preview is never visible. Advertising CyclePane (with diff-review wording)
+        // would be exactly the advertised-but-dead drift this surface must never show, so
+        // the help stays byte-identical to pre-M5 until #48 makes the preview visible.
+        var wiHelp = HelpText.For(Table, KeyScope.WorkItemList);
+        Assert.DoesNotContain("switch file list / diff pane", wiHelp);
+        Assert.Contains("Tab      next tab", wiHelp);
+        Assert.Equal(1, wiHelp.Split('\n').Count(l => l.TrimStart().StartsWith("Tab ", StringComparison.Ordinal)));
+
+        var prHelp = HelpText.For(Table, KeyScope.PullRequestList);
+        Assert.DoesNotContain("switch file list / diff pane", prHelp);
+        Assert.Contains("]        next tab", prHelp); // [ / ] stay the canonical sub-tab keys
+        Assert.DoesNotContain(prHelp.Split('\n'), l => l.TrimStart().StartsWith("Tab ", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void A_Remapped_Table_Renders_The_New_Key_In_Help_Without_Formatter_Changes()
     {
         // Same guarantee as the keybar: `?` help derives from the live table, so a config

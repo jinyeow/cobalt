@@ -106,6 +106,32 @@ public class KeybarFormatterTests
     }
 
     [Fact]
+    public void Workspace_List_Keybar_Advertises_Todays_Tab_Semantics_Not_CyclePane()
+    {
+        // Same rule as the help overlay: at M5 Tab in the list scopes still performs
+        // today's tab cycling (the shell's fallback), so the bar must not advertise the
+        // CyclePane binding — that would be advertised-but-dead drift until #48.
+        var wiBar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, 400);
+        Assert.DoesNotContain("switch file list / diff pane", wiBar);
+        Assert.Contains("Tab:tab", wiBar);
+
+        var prBar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.PullRequestList, 400);
+        Assert.DoesNotContain("switch file list / diff pane", prBar);
+        Assert.Contains("]:tab", prBar);
+    }
+
+    [Fact]
+    public void DiffReview_Keybar_Still_Advertises_Pane_Cycling()
+    {
+        // Regression pin (green before and after the workspace suppression): diff review's
+        // own scoped Tab → CyclePane stays advertised — the suppression is workspace-only.
+        // Width 700: CyclePane sits late in bind order, so a narrower bar truncates first.
+        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.DiffReview, 700);
+
+        Assert.Contains("Tab:switch file list / diff pane", bar);
+    }
+
+    [Fact]
     public void A_Remapped_Table_Renders_The_New_Key_Without_Formatter_Changes()
     {
         // A user config remap (move-down -> "n") must surface in the keybar with zero

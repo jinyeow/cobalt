@@ -55,6 +55,15 @@ public static class KeybarFormatter
         var first = new Dictionary<AppCommand, string>();
         foreach (var (sequence, command) in table.Visible(scope))
         {
+            // In the workspace list scopes Tab falls back to today's NextTab semantics
+            // while the preview is hidden — and at M5 the preview is never visible — so
+            // advertising CyclePane there (with its diff-review wording) would drift from
+            // behaviour. #48, which makes the preview visible, replaces this suppression
+            // with preview-aware advertisement.
+            if (command == AppCommand.CyclePane && scope is KeyScope.WorkItemList or KeyScope.PullRequestList)
+            {
+                continue;
+            }
             var display = string.Join("", sequence);
             if (!first.TryGetValue(command, out var existing) || display.Length < existing.Length)
             {
