@@ -1,4 +1,6 @@
 using System.Drawing;
+using Cobalt.Core.Config;
+using Cobalt.Tui.Input;
 using Cobalt.Tui.Screens;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
@@ -75,5 +77,24 @@ public class TextDialogScrollTests
 
         dialog.NewKeyDownEvent(Key.Esc);       // nothing pending now → closes
         Assert.Equal(1, closed);
+    }
+
+    [Fact]
+    public void Overlay_Scroll_Uses_The_Injected_Remap_Table()
+    {
+        // move-down remapped j -> n. The overlay (help/messages/:log) must scroll from the injected
+        // table, so 'n' advances the pane — proving the shell threads its table into TextDialog.
+        var keys = new KeysConfig(new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>
+        {
+            ["global"] = new Dictionary<string, IReadOnlyList<string>> { ["move-down"] = new[] { "n" } },
+        });
+        var text = string.Join("\n", Enumerable.Range(0, 200).Select(i => $"line {i}"));
+        var dialog = TextDialog.Build(App, "keys", text, out var view, bindings: KeyBindingTable.FromConfig(keys));
+        dialog.Layout(new Size(60, 12));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('n'));
+
+        Assert.Equal(1, view.CurrentRow);
     }
 }

@@ -2,8 +2,8 @@ using System.Text.Json;
 using Cobalt.Core.Ado;
 using Cobalt.Core.Models;
 using Cobalt.Tui.Screens;
+using Cobalt.Tui.Tests.App;
 using Cobalt.Tui.ViewModels;
-using Terminal.Gui.App;
 using Terminal.Gui.Views;
 
 namespace Cobalt.Tui.Tests.Screens;
@@ -15,7 +15,9 @@ namespace Cobalt.Tui.Tests.Screens;
 /// </summary>
 public class WorkItemListRenderGuardTests
 {
-    private static readonly IApplication App = Application.Create();
+    // Undrained by design: mirrors today's headless "Invoke never drains" so the views' posted
+    // renders never fire on their own — tests call view.Render() explicitly (M2).
+    private static readonly RecordingUiPost App = new();
 
     private static WorkItem Wi(long id) =>
         new(id, new Dictionary<string, JsonElement>
@@ -41,7 +43,7 @@ public class WorkItemListRenderGuardTests
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         var view = new WorkItemListView(App, vm);
-        var window = new Window();
+        using var window = new Window();
         window.Add(view);
         window.Layout(new System.Drawing.Size(60, 20));
 
@@ -63,7 +65,7 @@ public class WorkItemListRenderGuardTests
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         var view = new WorkItemListView(App, vm);
-        var window = new Window();
+        using var window = new Window();
         window.Add(view);
         window.Layout(new System.Drawing.Size(60, 20));
 
@@ -85,7 +87,7 @@ public class WorkItemListRenderGuardTests
         await vm.LoadAsync(TestContext.Current.CancellationToken);
 
         var view = new WorkItemListView(App, vm);
-        var window = new Window();
+        using var window = new Window();
         window.Add(view);
         window.Layout(new System.Drawing.Size(60, 20));
 
@@ -104,5 +106,72 @@ public class WorkItemListRenderGuardTests
         view.Render();
 
         Assert.NotSame(before, view.ListSource);
+    }
+
+    [Fact]
+    public async Task Render_Shows_The_Vm_EmptyStateText_As_The_Placeholder_Row()
+    {
+        var vm = new WorkItemListViewModel(new FakeWiSource([])); // no items — genuinely empty
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+
+        var view = new WorkItemListView(App, vm);
+        using var window = new Window();
+        window.Add(view);
+        window.Layout(new System.Drawing.Size(60, 20));
+
+        Assert.Equal(vm.EmptyStateText, view.RowText(0));
+    }
+
+    private sealed class GatedWiSource : IWorkItemSource
+    {
+        private readonly Queue<TaskCompletionSource<IReadOnlyList<WorkItem>>> _gates = new();
+
+        public TaskCompletionSource<IReadOnlyList<WorkItem>> NextGate()
+        {
+            var tcs = new TaskCompletionSource<IReadOnlyList<WorkItem>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _gates.Enqueue(tcs);
+            return tcs;
+        }
+
+        public Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(WorkItemQuery query, CancellationToken ct) =>
+            _gates.Dequeue().Task;
+    }
+
+    [Fact]
+    public async Task Render_Clears_The_Stale_Placeholder_When_A_Reload_Starts()
+    {
+        // WorkItemListViewModel.LoadAsync raises Changed at the START of a reload without
+        // reassigning Rows (only ApplyFilter at the END does), so a render guard keyed only on
+        // Rows-reference/width would leave a previous placeholder painted through the reload.
+        var source = new GatedWiSource();
+        var vm = new WorkItemListViewModel(source);
+        var firstGate = source.NextGate();
+        var firstLoad = vm.LoadAsync(TestContext.Current.CancellationToken);
+        firstGate.SetResult([]);
+        await firstLoad;
+
+        var view = new WorkItemListView(App, vm);
+        using var window = new Window();
+        window.Add(view);
+        window.Layout(new System.Drawing.Size(60, 20));
+
+        var placeholder = vm.EmptyStateText;
+        Assert.Equal(placeholder, view.RowText(0));
+
+        source.NextGate(); // the reload triggered below is left in flight, never completes
+        try
+        {
+            // Setter reassigns _includeCompleted then fires a background reload synchronously up
+            // to its first await; the Changed it raises tries app.Invoke, which throws without
+            // Application.Init() (same pattern as the other tests in this suite).
+            vm.IncludeCompleted = true;
+        }
+        catch (Terminal.Gui.App.NotInitializedException)
+        {
+        }
+        view.Render();
+
+        Assert.True(vm.IsLoading);
+        Assert.NotEqual(placeholder, view.RowText(0));
     }
 }

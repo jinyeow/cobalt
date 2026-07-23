@@ -22,13 +22,13 @@ try
             PrintHelp();
             return 0;
         case CliCommand.AuthLogin:
-            return await AuthCommands.LoginAsync(LoadConfig());
+            return await AuthCommands.LoginAsync(LoadConfig(parsed.ConfigPath));
         case CliCommand.AuthStatus:
-            return await AuthCommands.StatusAsync(LoadConfig());
+            return await AuthCommands.StatusAsync(LoadConfig(parsed.ConfigPath));
         case CliCommand.Tui:
         default:
         {
-            var config = LoadConfig();
+            var config = LoadConfig(parsed.ConfigPath);
             _ = config.Resolve(parsed.Context); // fail fast on a bad --context
             var tokens = Cobalt.Core.Auth.AzureTokenProvider.CreateDefault(
                 Path.Join(ConfigPaths.ConfigDirectory(), "auth-record.json"));
@@ -59,7 +59,7 @@ static string FirstLine(string message)
     return newline < 0 ? message : message[..newline].TrimEnd('\r');
 }
 
-static CobaltConfig LoadConfig() => ConfigLoader.Load(ConfigPaths.ConfigFile());
+static CobaltConfig LoadConfig(string? path) => ConfigLoader.Load(path ?? ConfigPaths.ConfigFile());
 
 static string InformationalVersion()
 {
@@ -86,6 +86,7 @@ static void PrintHelp()
 
         usage:
           cobalt [--context <name>]     launch the TUI
+          cobalt [--config <path>]      use a specific config.toml (default: the standard location)
           cobalt auth login             sign in (Entra ID)
           cobalt auth status            show who you are in each context
           cobalt --version              print version

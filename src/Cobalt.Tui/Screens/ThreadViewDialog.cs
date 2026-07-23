@@ -20,10 +20,15 @@ public sealed class ThreadViewDialog(
     PrDiffViewModel vm,
     ITextInput textInput,
     Action<string> log,
-    IReadOnlyList<PrThread> threads)
+    IReadOnlyList<PrThread> threads,
+    KeyBindingTable? bindings = null,
+    IUiPost? post = null)
 {
     private readonly CancellationTokenSource _cts = new();
-    private readonly KeymapRouter _router = new(KeyBindingTable.Shared);
+    // UI-thread marshalling seam for all pure Invoke marshalling (M2); Terminal.Gui (app) is still
+    // held for its non-marshalling uses — dialog construction, RequestStop, help child dialog.
+    private readonly IUiPost _post = post ?? new ApplicationUiPost(app);
+    private readonly KeymapRouter _router = new(bindings ?? KeyBindingTable.Shared);
     private readonly IReadOnlyList<int> _threadIds = threads.Select(t => t.Id).ToList();
     private bool _closed;
     private Dialog? _dialog;
@@ -46,10 +51,10 @@ public sealed class ThreadViewDialog(
     /// <summary>Test seam: replaces the real reply path (needs the editor) so a test can observe the 'c' key.</summary>
     internal Action? ReplyAction { get; set; }
 
-    /// <summary>Test seam: replaces the real resolve path (needs app.Invoke) so a test can observe the 'x' key.</summary>
+    /// <summary>Test seam: replaces the real resolve path (needs UI-thread marshalling) so a test can observe the 'x' key.</summary>
     internal Action? ResolveAction { get; set; }
 
-    /// <summary>Test seam: replaces the real reactivate path (needs app.Invoke) so a test can observe the 'u' key.</summary>
+    /// <summary>Test seam: replaces the real reactivate path (needs UI-thread marshalling) so a test can observe the 'u' key.</summary>
     internal Action? ReactivateAction { get; set; }
 
     /// <summary>Test seam: replaces the real help overlay (needs a run loop) so a test can observe '?'.</summary>
@@ -117,7 +122,7 @@ public sealed class ThreadViewDialog(
         return dialog;
     }
 
-    private void OnChanged() => app.Invoke(() =>
+    private void OnChanged() => _post.Post(() =>
     {
         if (!_closed)
         {
@@ -128,7 +133,7 @@ public sealed class ThreadViewDialog(
     /// <summary>
     /// Re-renders the body from the VM's current threads, matched by the ids this overlay
     /// opened on, so a mutation's new status/comments replace the stale opening snapshot.
-    /// Internal so a view-level test can drive it without the app.Invoke run loop.
+    /// Internal so a view-level test can drive it without the UI-thread marshalling run loop.
     /// </summary>
     internal void RefreshBody()
     {
@@ -203,7 +208,7 @@ public sealed class ThreadViewDialog(
                 }
                 else
                 {
-                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.ThreadView));
+                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.ThreadView), _router.Table);
                 }
                 return true;
             case AppCommand.Comment:
@@ -213,7 +218,7 @@ public sealed class ThreadViewDialog(
                 }
                 else
                 {
-                    _ = FireAndForget.Observe(ReplyAsync(), app, log);
+                    _ = FireAndForget.Observe(ReplyAsync(), _post, log);
                 }
                 return true;
             case AppCommand.ResolveThread:
@@ -224,7 +229,7 @@ public sealed class ThreadViewDialog(
                 else
                 {
                     _ = FireAndForget.Observe(
-                        RunAndLog(vm.ResolveThreadAsync(threads[0].Id, Token), "thread resolved"), app, log);
+                        RunAndLog(vm.ResolveThreadAsync(threads[0].Id, Token), "thread resolved"), _post, log);
                 }
                 return true;
             case AppCommand.ReactivateThread:
@@ -235,7 +240,7 @@ public sealed class ThreadViewDialog(
                 else
                 {
                     _ = FireAndForget.Observe(
-                        RunAndLog(vm.ReactivateThreadAsync(threads[0].Id, Token), "thread reactivated"), app, log);
+                        RunAndLog(vm.ReactivateThreadAsync(threads[0].Id, Token), "thread reactivated"), _post, log);
                 }
                 return true;
             default:
@@ -264,7 +269,7 @@ public sealed class ThreadViewDialog(
         }
         catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
-            app.Invoke(() => log($"editor failed: {ex.Message}"));
+            _post.Post(() => log($"editor failed: {ex.Message}"));
             return;
         }
         if (!string.IsNullOrWhiteSpace(text))
@@ -283,7 +288,7 @@ public sealed class ThreadViewDialog(
         {
             return; // dialog closed mid-op; nothing to report
         }
-        app.Invoke(() => log(vm.Error is { } e ? $"failed: {e}" : success));
+        _post.Post(() => log(vm.Error is { } e ? $"failed: {e}" : success));
     }
 
     private static string FormatThreads(IReadOnlyList<PrThread> threads)

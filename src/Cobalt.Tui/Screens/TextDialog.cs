@@ -16,9 +16,9 @@ namespace Cobalt.Tui.Screens;
 /// </summary>
 internal static class TextDialog
 {
-    public static void Show(IApplication app, string title, string text)
+    public static void Show(IApplication app, string title, string text, KeyBindingTable? bindings = null)
     {
-        using var dialog = Build(app, title, text, out _);
+        using var dialog = Build(app, title, text, out _, bindings: bindings);
         app.Run(dialog);
     }
 
@@ -29,9 +29,13 @@ internal static class TextDialog
     /// Builds and wires the overlay without starting the run loop, exposing the inner
     /// <see cref="TextView"/> so a headless view-level test can drive scrolling.
     /// </summary>
-    internal static Dialog Build(IApplication app, string title, string text, out TextView view, Action? onClose = null)
+    internal static Dialog Build(
+        IApplication app, string title, string text, out TextView view, Action? onClose = null,
+        KeyBindingTable? bindings = null)
     {
-        var router = new KeymapRouter(KeyBindingTable.Shared);
+        // The overlay's j/k/gg/G scroll routes through the same (possibly remapped) table the shell
+        // and its dialogs use, so a user's movement remap works inside help/messages/:log too.
+        var router = new KeymapRouter(bindings ?? KeyBindingTable.Shared);
         var dialog = new Dialog
         {
             Title = $"{title} — q to close",

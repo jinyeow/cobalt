@@ -21,11 +21,16 @@ public sealed class PrDetailDialog(
     ITextInput textInput,
     Action<string> log,
     IPrDiffSource? diffSource = null,
-    AdoContext? context = null)
+    AdoContext? context = null,
+    KeyBindingTable? bindings = null,
+    IUiPost? post = null)
 {
     private readonly CancellationTokenSource _cts = new();
+    // UI-thread marshalling seam for all pure Invoke marshalling (M2); Terminal.Gui (app) is still
+    // held for its non-marshalling uses — dialog/child-dialog construction, RequestStop, MessageBox.
+    private readonly IUiPost _post = post ?? new ApplicationUiPost(app);
     private readonly PrActions _actions = new(app, log);
-    private readonly KeymapRouter _router = new(KeyBindingTable.Shared);
+    private readonly KeymapRouter _router = new(bindings ?? KeyBindingTable.Shared);
     private bool _closed;
     private Dialog? _dialog;
 #pragma warning disable CS0618 // read-only scrollable pane; see WorkItemDetailDialog
@@ -117,7 +122,7 @@ public sealed class PrDetailDialog(
         return dialog;
     }
 
-    private void OnChanged() => app.Invoke(() =>
+    private void OnChanged() => _post.Post(() =>
     {
         if (!_closed && _body is not null && _dialog is not null)
         {
@@ -180,11 +185,11 @@ public sealed class PrDetailDialog(
                 }
                 else
                 {
-                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.PullRequestDetail));
+                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.PullRequestDetail), _router.Table);
                 }
                 return true;
             case AppCommand.Vote:
-                _ = FireAndForget.Observe(_actions.VoteAsync(vm, Token), app, log);
+                _ = FireAndForget.Observe(_actions.VoteAsync(vm, Token), _post, log);
                 return true;
             case AppCommand.Comment:
                 if (ReplyAction is not null)
@@ -193,7 +198,7 @@ public sealed class PrDetailDialog(
                 }
                 else
                 {
-                    _ = FireAndForget.Observe(ReplyAsync(), app, log);
+                    _ = FireAndForget.Observe(ReplyAsync(), _post, log);
                 }
                 return true;
             case AppCommand.AddPrComment:
@@ -203,14 +208,14 @@ public sealed class PrDetailDialog(
                 }
                 else
                 {
-                    _ = FireAndForget.Observe(AddCommentAsync(), app, log);
+                    _ = FireAndForget.Observe(AddCommentAsync(), _post, log);
                 }
                 return true;
             case AppCommand.ResolveThread:
-                _ = FireAndForget.Observe(ThreadStatusAsync(resolve: true), app, log);
+                _ = FireAndForget.Observe(ThreadStatusAsync(resolve: true), _post, log);
                 return true;
             case AppCommand.ReactivateThread:
-                _ = FireAndForget.Observe(ThreadStatusAsync(resolve: false), app, log);
+                _ = FireAndForget.Observe(ThreadStatusAsync(resolve: false), _post, log);
                 return true;
             case AppCommand.AbandonPr:
                 (AbandonAction ?? ConfirmAbandon)();
@@ -320,7 +325,7 @@ public sealed class PrDetailDialog(
         }
         catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
-            app.Invoke(() => log($"editor failed: {ex.Message}"));
+            _post.Post(() => log($"editor failed: {ex.Message}"));
             return;
         }
         if (!string.IsNullOrWhiteSpace(text))
@@ -338,7 +343,7 @@ public sealed class PrDetailDialog(
         }
         catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
-            app.Invoke(() => log($"editor failed: {ex.Message}"));
+            _post.Post(() => log($"editor failed: {ex.Message}"));
             return;
         }
         if (!string.IsNullOrWhiteSpace(text))
@@ -369,7 +374,7 @@ public sealed class PrDetailDialog(
         }
         catch (Exception ex) when (ex is EditorLaunchException or System.IO.IOException)
         {
-            app.Invoke(() => log($"editor failed: {ex.Message}"));
+            _post.Post(() => log($"editor failed: {ex.Message}"));
             return null;
         }
         return int.TryParse(text?.Trim(), out var id) ? id : null;
@@ -380,7 +385,7 @@ public sealed class PrDetailDialog(
         var confirm = MessageBox.Query(app, "abandon PR", "Abandon this pull request?", "cancel", "abandon");
         if (confirm == 1)
         {
-            _ = FireAndForget.Observe(RunAndLog(vm.AbandonAsync(Token), "PR abandoned"), app, log);
+            _ = FireAndForget.Observe(RunAndLog(vm.AbandonAsync(Token), "PR abandoned"), _post, log);
         }
     }
 
@@ -393,7 +398,7 @@ public sealed class PrDetailDialog(
             var confirm = MessageBox.Query(app, "complete PR", $"Complete with {strategies[i]}?", "cancel", "complete");
             if (confirm == 1)
             {
-                _ = FireAndForget.Observe(RunAndLog(vm.CompleteAsync(strategies[i], deleteSource: false, Token), "PR completed"), app, log);
+                _ = FireAndForget.Observe(RunAndLog(vm.CompleteAsync(strategies[i], deleteSource: false, Token), "PR completed"), _post, log);
             }
         }
     }
@@ -406,7 +411,7 @@ public sealed class PrDetailDialog(
             return;
         }
         var diffVm = new PrDiffViewModel(diffSource, vm.PullRequest);
-        new DiffReviewDialog(app, diffVm, textInput, log, context).Show();
+        new DiffReviewDialog(app, diffVm, textInput, log, context, _router.Table, _post).Show();
     }
 
     private void OpenBranch()
@@ -442,7 +447,7 @@ public sealed class PrDetailDialog(
         {
             return; // dialog closed mid-op; nothing to report
         }
-        app.Invoke(() => log(vm.Error is { } e ? $"failed: {e}" : success));
+        _post.Post(() => log(vm.Error is { } e ? $"failed: {e}" : success));
     }
 
     private static string VoteGlyph(PrVote vote) => vote switch

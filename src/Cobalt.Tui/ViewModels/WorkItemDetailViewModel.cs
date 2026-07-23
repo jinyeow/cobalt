@@ -49,37 +49,30 @@ public sealed class WorkItemDetailViewModel(IWorkItemStore store, long id, strin
         Changed?.Invoke();
         try
         {
-            Item = await store.GetWorkItemAsync(id, _project, ct).ConfigureAwait(false);
-            // The loaded item is authoritative for its project; use it for the remaining
-            // per-project calls (states especially are per-project process metadata).
-            if (!string.IsNullOrEmpty(Item.TeamProject))
+            await VmGuard.RunAsync(async () =>
             {
-                _project = Item.TeamProject;
-            }
+                Item = await store.GetWorkItemAsync(id, _project, ct).ConfigureAwait(false);
+                // The loaded item is authoritative for its project; use it for the remaining
+                // per-project calls (states especially are per-project process metadata).
+                if (!string.IsNullOrEmpty(Item.TeamProject))
+                {
+                    _project = Item.TeamProject;
+                }
 
-            var analysis = HtmlMarkdown.Analyze(Item.DescriptionHtml);
-            DescriptionMarkdown = analysis.Markdown;
-            DescriptionLossy = analysis.Lossy;
+                var analysis = HtmlMarkdown.Analyze(Item.DescriptionHtml);
+                DescriptionMarkdown = analysis.Markdown;
+                DescriptionLossy = analysis.Lossy;
 
-            // Comments and the available-states list are independent per-project reads: run them
-            // together so the detail pane opens a round-trip sooner instead of back-to-back. WhenAll
-            // surfaces the first fault and observes both, so one failing cannot orphan the other onto
-            // the crash-log hook (ADR 0013).
-            var commentsTask = store.GetCommentsAsync(id, _project, ct);
-            var statesTask = store.GetStatesAsync(Item.WorkItemType, _project, ct);
-            await Task.WhenAll(commentsTask, statesTask).ConfigureAwait(false);
-            Comments = await commentsTask.ConfigureAwait(false);
-            AvailableStates = await statesTask.ConfigureAwait(false);
-        }
-        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
-        {
-            throw; // genuine user/dialog cancel (carries our token) stays silent
-        }
-        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
-        {
-            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
-            // surfaced as an expected error rather than a silent no-data pane (L2).
-            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
+                // Comments and the available-states list are independent per-project reads: run them
+                // together so the detail pane opens a round-trip sooner instead of back-to-back. WhenAll
+                // surfaces the first fault and observes both, so one failing cannot orphan the other onto
+                // the crash-log hook (ADR 0013).
+                var commentsTask = store.GetCommentsAsync(id, _project, ct);
+                var statesTask = store.GetStatesAsync(Item.WorkItemType, _project, ct);
+                await Task.WhenAll(commentsTask, statesTask).ConfigureAwait(false);
+                Comments = await commentsTask.ConfigureAwait(false);
+                AvailableStates = await statesTask.ConfigureAwait(false);
+            }, ct, m => Error = m).ConfigureAwait(false);
         }
         finally
         {
@@ -130,17 +123,7 @@ public sealed class WorkItemDetailViewModel(IWorkItemStore store, long id, strin
         Changed?.Invoke();
         try
         {
-            await action().ConfigureAwait(false);
-        }
-        catch (OperationCanceledException ex) when (!AdoExceptions.IsTimeout(ex, ct))
-        {
-            throw; // genuine user/dialog cancel (carries our token) stays silent
-        }
-        catch (Exception ex) when (ex is OperationCanceledException || AdoExceptions.IsExpected(ex))
-        {
-            // A cancellation reaching here carries a foreign token → an HttpClient timeout,
-            // surfaced as an expected error rather than a silent no-data pane (L2).
-            Error = ex is OperationCanceledException ? AdoExceptions.TimeoutMessage : ex.Message;
+            await VmGuard.RunAsync(action, ct, m => Error = m).ConfigureAwait(false);
         }
         finally
         {

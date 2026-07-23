@@ -1,8 +1,8 @@
 using System.Collections.ObjectModel;
 using Cobalt.Core.Models;
+using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
-using Terminal.Gui.App;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -11,7 +11,7 @@ namespace Cobalt.Tui.Screens;
 /// <summary>The "my work items" list: a header, a bound ListView, and a filter line.</summary>
 public sealed class WorkItemListView : View
 {
-    private readonly IApplication _app;
+    private readonly IUiPost _post;
     private readonly WorkItemListViewModel _vm;
     private readonly Label _header;
     private readonly ListView _list;
@@ -20,12 +20,17 @@ public sealed class WorkItemListView : View
     private readonly CancellationTokenSource _cts = new();
     private int _lastWidth = -1;
     private IReadOnlyList<WorkItem>? _renderedRows;
+    private IReadOnlyList<string> _rendered = [];
+    // Tracks the placeholder text (if any) the last rebuild actually painted. A reload's start
+    // flips EmptyStateText to null (IsLoading) without reassigning Rows — a guard keyed only on
+    // Rows-reference/width would leave a stale placeholder on screen through the whole reload.
+    private string? _renderedEmptyStateText;
     private bool _filtering;
     private bool _disposed;
 
-    public WorkItemListView(IApplication app, WorkItemListViewModel vm)
+    public WorkItemListView(IUiPost post, WorkItemListViewModel vm)
     {
-        _app = app;
+        _post = post;
         _vm = vm;
         Width = Dim.Fill();
         Height = Dim.Fill();
@@ -95,7 +100,7 @@ public sealed class WorkItemListView : View
         {
             return; // a late background completion after a section switch
         }
-        _app.Invoke(() =>
+        _post.Post(() =>
         {
             if (!_disposed)
             {
@@ -186,6 +191,9 @@ public sealed class WorkItemListView : View
     /// <summary>Test-only seam (MISSED-A): identity changes exactly when the row list is rebuilt.</summary>
     internal IListDataSource? ListSource => _list.Source;
 
+    internal string RowText(int index) =>
+        index >= 0 && index < _rendered.Count ? _rendered[index] : "";
+
     internal void Render()
     {
         if (_vm.IsLoading)
@@ -213,8 +221,12 @@ public sealed class WorkItemListView : View
         var width = _list.Viewport.Width;
         // MISSED-A: a render can fire for a loading-state-only change (Changed with the same
         // Rows reference), which has nothing for the row list to reflect. Skip the reformat +
-        // SetSource rebuild unless the rows or the width they're padded to actually changed.
-        var rowsChanged = width != _lastWidth || !ReferenceEquals(_vm.Rows, _renderedRows);
+        // SetSource rebuild unless the rows, the width they're padded to, or the painted
+        // placeholder actually changed (a reload's start flips EmptyStateText without touching
+        // Rows, and that must still clear a stale placeholder).
+        var rowsChanged = width != _lastWidth
+            || !ReferenceEquals(_vm.Rows, _renderedRows)
+            || _vm.EmptyStateText != _renderedEmptyStateText;
         _lastWidth = width;
 
         if (rowsChanged)
@@ -225,8 +237,19 @@ public sealed class WorkItemListView : View
             // row first and restore it (clamped) — otherwise a background reload snaps
             // the highlight back to the top. The list is the source of truth.
             var target = _list.SelectedItem ?? _vm.SelectedIndex;
-            var cols = WorkItemColumns.For(_vm.Rows);
-            var rows = new ObservableCollection<string>(_vm.Rows.Select(item => WorkItemRowFormatter.Format(item, width, cols)));
+            if (_vm.Rows.Count == 0 && _vm.EmptyStateText is { } emptyText)
+            {
+                // Helpful-empty-states (item 3): explain why the list is empty instead of a blank body.
+                _rendered = [emptyText];
+                _renderedEmptyStateText = emptyText;
+            }
+            else
+            {
+                _renderedEmptyStateText = null;
+                var cols = WorkItemColumns.For(_vm.Rows);
+                _rendered = [.. _vm.Rows.Select(item => WorkItemRowFormatter.Format(item, width, cols))];
+            }
+            var rows = new ObservableCollection<string>(_rendered);
             _list.SetSource(rows);
             if (_vm.Rows.Count > 0)
             {

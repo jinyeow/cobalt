@@ -3,7 +3,6 @@ using Cobalt.Core.Models;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
-using Terminal.Gui.App;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -12,7 +11,7 @@ namespace Cobalt.Tui.Screens;
 /// <summary>The three PR tabs with a bound ListView; Tab cycles tabs, Enter opens detail.</summary>
 public sealed class PrListView : View
 {
-    private readonly IApplication _app;
+    private readonly IUiPost _post;
     private readonly PrListViewModel _vm;
     private readonly PrCommentCountEnricher? _comments;
     private readonly Label _header;
@@ -36,9 +35,9 @@ public sealed class PrListView : View
     private int _formattedCountsSeen = -1;
     private int _countsSeen;
 
-    public PrListView(IApplication app, PrListViewModel vm, PrCommentCountEnricher? comments = null, Func<DateTimeOffset>? now = null)
+    public PrListView(IUiPost post, PrListViewModel vm, PrCommentCountEnricher? comments = null, Func<DateTimeOffset>? now = null)
     {
-        _app = app;
+        _post = post;
         _vm = vm;
         _comments = comments;
         _loadCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
@@ -189,7 +188,7 @@ public sealed class PrListView : View
         {
             return;
         }
-        _app.Invoke(() =>
+        _post.Post(() =>
         {
             if (!_disposed)
             {
@@ -234,7 +233,7 @@ public sealed class PrListView : View
         {
             return;
         }
-        _app.Invoke(() =>
+        _post.Post(() =>
         {
             Interlocked.Exchange(ref _countRenderQueued, 0);
             if (!_disposed)
@@ -326,13 +325,21 @@ public sealed class PrListView : View
         }
 
         var now = _now();
-        var cols = PrColumns.For(_vm.Rows);
 
         // SetSource nulls SelectedItem in 2.4.16, so capture the reviewer's current
         // row first and restore it (clamped) — otherwise a background reload snaps
         // the highlight back to the top. The list is the source of truth.
         var target = tabChanged ? 0 : (_list.SelectedItem ?? _vm.SelectedIndex);
-        _rendered = [.. _vm.Rows.Select(pr => PrRowFormatter.Format(pr, width, cols, now, _comments?.TryGet(pr)))];
+        if (_vm.Rows.Count == 0 && _vm.EmptyStateText is { } emptyText)
+        {
+            // Helpful-empty-states (item 3): explain why the list is empty instead of a blank body.
+            _rendered = [emptyText];
+        }
+        else
+        {
+            var cols = PrColumns.For(_vm.Rows);
+            _rendered = [.. _vm.Rows.Select(pr => PrRowFormatter.Format(pr, width, cols, now, _comments?.TryGet(pr)))];
+        }
         var rows = new ObservableCollection<string>(_rendered);
         _list.SetSource(rows);
         if (_vm.Rows.Count > 0)

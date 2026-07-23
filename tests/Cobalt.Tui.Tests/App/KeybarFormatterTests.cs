@@ -1,3 +1,4 @@
+using Cobalt.Core.Config;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
 
@@ -102,5 +103,20 @@ public class KeybarFormatterTests
         var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, 5);
 
         Assert.True(bar.Length <= 5);
+    }
+
+    [Fact]
+    public void A_Remapped_Table_Renders_The_New_Key_Without_Formatter_Changes()
+    {
+        // A user config remap (move-down -> "n") must surface in the keybar with zero
+        // changes to KeybarFormatter — it renders from the live table (ticket #30).
+        var commands = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal) { ["move-down"] = ["n"] };
+        var scopes = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.OrdinalIgnoreCase) { ["global"] = commands };
+        var table = KeyBindingTable.FromConfig(new KeysConfig(scopes));
+
+        var bar = KeybarFormatter.Render(table, KeyScope.WorkItemList, 200);
+
+        Assert.Contains("n/k:move", bar);
+        Assert.DoesNotContain("j/k:move", bar);
     }
 }

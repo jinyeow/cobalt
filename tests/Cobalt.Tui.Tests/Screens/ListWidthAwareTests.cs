@@ -1,7 +1,7 @@
 using Cobalt.Core.Models;
 using Cobalt.Tui.Screens;
+using Cobalt.Tui.Tests.App;
 using Cobalt.Tui.ViewModels;
-using Terminal.Gui.App;
 using Terminal.Gui.Views;
 
 namespace Cobalt.Tui.Tests.Screens;
@@ -12,7 +12,9 @@ namespace Cobalt.Tui.Tests.Screens;
 /// </summary>
 public class ListWidthAwareTests
 {
-    private static readonly IApplication App = Application.Create();
+    // Undrained by design: mirrors today's headless "Invoke never drains" so the views' posted
+    // renders never fire on their own — tests call view.Render() explicitly (M2).
+    private static readonly RecordingUiPost App = new();
 
     private static PullRequest Pr(int id, string title = "a pull request title", string repo = "web") =>
         new(id, title, null, "active", false, "feature", "main", "succeeded", "Jin", "r1", repo,

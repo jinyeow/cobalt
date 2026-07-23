@@ -28,6 +28,26 @@ public static class ThemeService
     public static DiffPalette CurrentPalette => _currentPalette;
 
     /// <summary>
+    /// The detected terminal capabilities (colour depth + Unicode-width support), published once at
+    /// startup via <see cref="SetCapabilities"/> and read ambiently where the tier matters — the
+    /// same global-state rationale as <see cref="CurrentPalette"/> (ADR 0019 extension). Defaults to
+    /// full truecolor + Unicode-safe so the pre-detection look is unchanged before startup detects.
+    /// </summary>
+    public static TerminalCapabilities Capabilities { get; private set; } =
+        new(ColorSupport.Full, UnicodeSafe: true);
+
+    /// <summary>
+    /// Publishes the terminal capabilities detected by <see cref="TerminalCapabilities.Detect"/>.
+    /// Called once at startup (before <see cref="Enable"/>) by <c>CobaltTuiApp.Run</c>; the resolver
+    /// then feeds <see cref="TerminalCapabilities.Color"/> into <c>ThemeResolver.Resolve</c>.
+    /// </summary>
+    public static void SetCapabilities(TerminalCapabilities capabilities)
+    {
+        ArgumentNullException.ThrowIfNull(capabilities);
+        Capabilities = capabilities;
+    }
+
+    /// <summary>
     /// Enables Terminal.Gui's <c>ConfigurationManager</c> scoped to
     /// <see cref="ConfigLocations.LibraryResources"/> only — the themes embedded in
     /// <c>Terminal.Gui.dll</c> merged onto its hard-coded defaults. No user or app config

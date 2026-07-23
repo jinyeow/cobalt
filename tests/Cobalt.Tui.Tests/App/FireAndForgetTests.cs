@@ -57,4 +57,27 @@ public class FireAndForgetTests
 
         Assert.False(reported);
     }
+
+    [Fact]
+    public async Task Public_Overload_Routes_The_Report_Through_IUiPost()
+    {
+        // The production entry point marshals the user-facing report through IUiPost (M2), not
+        // inline: a faulting task records nothing to the message bar until the UI queue drains.
+        string? reported = null;
+        var post = new RecordingUiPost();
+
+        await FireAndForget.Observe(
+            Task.FromException(new InvalidOperationException("kaboom")),
+            post,
+            msg => reported = msg);
+
+        // The fault was observed (task completed, not rethrown) but the report is still queued.
+        Assert.Null(reported);
+        Assert.Single(post.Posted);
+
+        post.RunAll();
+
+        Assert.NotNull(reported);
+        Assert.Contains("kaboom", reported);
+    }
 }
