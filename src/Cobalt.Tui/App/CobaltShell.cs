@@ -830,12 +830,13 @@ public sealed class CobaltShell : Window
         // instead of dirtying the tab strip and keybar on every chrome refresh. RefreshStatus and
         // RefreshMessage apply the same equality guard to their rows.
         SetIfChanged(_tabs, TabStripFormatter.Sections(_vm.ActiveSection));
-        SetIfChanged(_keybar, KeybarFormatter.Render(_bindings, ActiveScope, ChromeWidth));
+        SetIfChanged(_keybar, KeybarFormatter.Render(_bindings, ActiveScope, ChromeWidth, _workspace.PreviewVisible));
         RefreshStatus();
         RefreshMessage();
     }
 
-    private void ShowHelp() => TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope), _bindings);
+    private void ShowHelp() =>
+        TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope, _workspace.PreviewVisible), _bindings);
 
     private void ShowMessages()
     {

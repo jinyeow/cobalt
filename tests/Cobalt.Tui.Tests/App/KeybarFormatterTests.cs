@@ -14,7 +14,7 @@ public class KeybarFormatterTests
     [Fact]
     public void WorkItem_Scope_Shows_Movement_Verbs_And_Help()
     {
-        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, 200);
+        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, 200, previewVisible: false);
 
         Assert.Contains("j/k:move", bar);
         Assert.Contains("o:open", bar);
@@ -28,7 +28,7 @@ public class KeybarFormatterTests
     [Fact]
     public void Pr_Scope_Shows_Vote_But_Not_WorkItem_Verbs()
     {
-        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.PullRequestList, 200);
+        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.PullRequestList, 200, previewVisible: false);
 
         Assert.Contains("v:vote", bar);
         Assert.DoesNotContain("a:assign", bar);
@@ -42,7 +42,7 @@ public class KeybarFormatterTests
     [InlineData(20)]
     public void Fits_The_Width_And_Never_Wraps(int width)
     {
-        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, width);
+        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, width, previewVisible: false);
 
         Assert.True(bar.Length <= width, $"keybar length {bar.Length} exceeds width {width}");
         Assert.DoesNotContain('\n', bar);
@@ -52,7 +52,7 @@ public class KeybarFormatterTests
     public void Truncated_Keybar_Still_Ends_With_Help()
     {
         // Too narrow for everything, wide enough for a few entries + help.
-        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, 30);
+        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, 30, previewVisible: false);
 
         Assert.EndsWith("?:help", bar);
         Assert.True(bar.Length <= 30);
@@ -61,7 +61,7 @@ public class KeybarFormatterTests
     [Fact]
     public void Priority_Entries_Come_Before_The_Rest()
     {
-        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, 400);
+        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, 400, previewVisible: false);
 
         // The curated verbs must render before low-priority table-order extras
         // (e.g. yank/browser), so a narrow bar keeps the valuable keys.
@@ -78,7 +78,7 @@ public class KeybarFormatterTests
         table.Bind(KeyScope.Global, "?", AppCommand.Help);
         table.Bind(KeyScope.WorkItemList, "Q", AppCommand.MarkViewed);
 
-        var bar = KeybarFormatter.Render(table, KeyScope.WorkItemList, 200);
+        var bar = KeybarFormatter.Render(table, KeyScope.WorkItemList, 200, previewVisible: false);
 
         Assert.Contains("Q:mark file viewed", bar);
     }
@@ -91,7 +91,7 @@ public class KeybarFormatterTests
         table.Bind(KeyScope.Global, "?", AppCommand.Help);
 
         // Only MoveDown bound → single-key movement entry, no "/".
-        var bar = KeybarFormatter.Render(table, KeyScope.Global, 200);
+        var bar = KeybarFormatter.Render(table, KeyScope.Global, 200, previewVisible: false);
 
         Assert.Contains("j:move", bar);
         Assert.DoesNotContain("j/", bar);
@@ -100,7 +100,7 @@ public class KeybarFormatterTests
     [Fact]
     public void Tiny_Width_Does_Not_Throw_Or_Overflow()
     {
-        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, 5);
+        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, 5, previewVisible: false);
 
         Assert.True(bar.Length <= 5);
     }
@@ -108,16 +108,30 @@ public class KeybarFormatterTests
     [Theory]
     [InlineData(KeyScope.WorkItemList)]
     [InlineData(KeyScope.PullRequestList)]
-    public void Workspace_List_Keybar_Is_Byte_Identical_To_Pre_M5(KeyScope scope)
+    public void Workspace_List_Keybar_Is_Byte_Identical_To_Pre_M5_When_The_Preview_Is_Hidden(KeyScope scope)
     {
-        // Same rule as the help overlay: at M5 Tab in the list scopes still performs today's
-        // tab cycling (the shell's fallback), so the keybar must stay byte-for-byte what it
-        // rendered pre-M5. Reference = the default table with Tab→CyclePane unbound from both
-        // workspace list scopes (config empty-sequence unbind, independent of the render-time
-        // suppression). Width 400 so nothing truncates.
-        var expected = KeybarFormatter.Render(WithoutWorkspaceTabCyclePane(), scope, 400);
+        // Same rule as the help overlay: with the preview hidden (collapsed by width, or
+        // `preview = off`) Tab in the list scopes still performs today's tab cycling — the
+        // shell's fallback — so the keybar must stay byte-for-byte what it rendered pre-M5.
+        // Reference = the default table with Tab→CyclePane unbound from both workspace list
+        // scopes (config empty-sequence unbind, independent of the render-time suppression).
+        // Width 400 so nothing truncates.
+        var expected = KeybarFormatter.Render(WithoutWorkspaceTabCyclePane(), scope, 400, previewVisible: false);
 
-        Assert.Equal(expected, KeybarFormatter.Render(KeyBindingTable.Default(), scope, 400));
+        Assert.Equal(expected, KeybarFormatter.Render(KeyBindingTable.Default(), scope, 400, previewVisible: false));
+    }
+
+    [Theory]
+    [InlineData(KeyScope.WorkItemList)]
+    [InlineData(KeyScope.PullRequestList)]
+    public void Workspace_List_Keybar_Advertises_Tab_With_Workspace_Wording_When_The_Preview_Shows(KeyScope scope)
+    {
+        // The mirror of the pin above (#48): a visible preview makes Tab a real pane-focus
+        // cycle, so the bar advertises it — in the workspace's wording, not diff review's.
+        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), scope, 400, previewVisible: true);
+
+        Assert.Contains("Tab:switch list / preview", bar);
+        Assert.DoesNotContain("switch file list / diff pane", bar);
     }
 
     /// <summary>The default table with Tab→CyclePane unbound from both workspace list scopes
@@ -140,7 +154,7 @@ public class KeybarFormatterTests
         // Regression pin (green before and after the workspace suppression): diff review's
         // own scoped Tab → CyclePane stays advertised — the suppression is workspace-only.
         // Width 700: CyclePane sits late in bind order, so a narrower bar truncates first.
-        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.DiffReview, 700);
+        var bar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.DiffReview, 700, previewVisible: false);
 
         Assert.Contains("Tab:switch file list / diff pane", bar);
     }
@@ -154,7 +168,7 @@ public class KeybarFormatterTests
         var scopes = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.OrdinalIgnoreCase) { ["global"] = commands };
         var table = KeyBindingTable.FromConfig(new KeysConfig(scopes));
 
-        var bar = KeybarFormatter.Render(table, KeyScope.WorkItemList, 200);
+        var bar = KeybarFormatter.Render(table, KeyScope.WorkItemList, 200, previewVisible: false);
 
         Assert.Contains("n/k:move", bar);
         Assert.DoesNotContain("j/k:move", bar);

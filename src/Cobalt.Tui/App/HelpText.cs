@@ -22,7 +22,8 @@ public static class HelpText
         [AppCommand.Refresh] = "refresh",
         [AppCommand.Help] = "this help",
         [AppCommand.CommandPalette] =
-            $"command palette (:q, :context NAME, :scope, :done, :project NAME, :theme {string.Join('|', ThemeChoices.Names)})",
+            $"command palette (:q, :context NAME, :scope, :done, :project NAME, :theme {string.Join('|', ThemeChoices.Names)}, "
+            + $":preview {string.Join('|', PreviewModes.Names)})",
         [AppCommand.FilterStart] = "filter list",
         [AppCommand.NextTab] = "next tab",
         [AppCommand.PrevTab] = "previous tab",
@@ -79,13 +80,24 @@ public static class HelpText
         AppCommand.HalfPageDown, AppCommand.HalfPageUp, AppCommand.Help, AppCommand.Back,
     ];
 
-    /// <summary>The shared one-line description for a command (the keybar's fallback vocabulary).</summary>
-    public static string Describe(AppCommand command) =>
-        Descriptions.GetValueOrDefault(command, command.ToString().ToLowerInvariant());
+    /// <summary>
+    /// The shared one-line description for a command in <paramref name="scope"/> (the keybar's
+    /// fallback vocabulary). Scope-aware because one command can mean different things per
+    /// surface: <c>Tab</c> cycles list/preview inside the workspace and file-list/diff inside
+    /// diff review.
+    /// </summary>
+    public static string Describe(AppCommand command, KeyScope scope) =>
+        command == AppCommand.CyclePane && IsWorkspaceList(scope)
+            ? "switch list / preview"
+            : Descriptions.GetValueOrDefault(command, command.ToString().ToLowerInvariant());
 
-    /// <summary>Full help for the main shell: every binding visible from the scope.</summary>
-    public static string For(KeyBindingTable table, KeyScope scope) =>
-        Emit(table, scope, _ => true);
+    /// <summary>
+    /// Full help for the main shell: every binding visible from the scope. <paramref name="previewVisible"/>
+    /// is required, not defaulted — advertisement must never be able to drift from behaviour by
+    /// a caller forgetting to say which state it is in.
+    /// </summary>
+    public static string For(KeyBindingTable table, KeyScope scope, bool previewVisible) =>
+        Emit(table, scope, _ => true, previewVisible);
 
     /// <summary>
     /// Help for a modal dialog: only the verbs it dispatches — its scope's own bindings plus
@@ -98,21 +110,25 @@ public static class HelpText
         {
             allowed.Add(command);
         }
-        return Emit(table, scope, allowed.Contains);
+        // A modal dialog has no workspace preview beside it; its own Tab (diff review) is
+        // advertised with the diff wording, which the scope decides.
+        return Emit(table, scope, allowed.Contains, previewVisible: false);
     }
 
-    private static string Emit(KeyBindingTable table, KeyScope scope, Func<AppCommand, bool> include)
+    /// <summary>The two workspace list scopes, where Tab's meaning depends on the preview.</summary>
+    private static bool IsWorkspaceList(KeyScope scope) =>
+        scope is KeyScope.WorkItemList or KeyScope.PullRequestList;
+
+    private static string Emit(KeyBindingTable table, KeyScope scope, Func<AppCommand, bool> include, bool previewVisible)
     {
         var sb = new StringBuilder();
         var seen = new HashSet<AppCommand>();
         foreach (var (sequence, command) in table.Visible(scope))
         {
-            // In the workspace list scopes Tab falls back to today's NextTab semantics
-            // while the preview is hidden — and at M5 the preview is never visible — so
-            // advertising CyclePane there (with its diff-review wording) would drift from
-            // behaviour. #48, which makes the preview visible, replaces this suppression
-            // with preview-aware advertisement.
-            if (command == AppCommand.CyclePane && scope is KeyScope.WorkItemList or KeyScope.PullRequestList)
+            // In the workspace list scopes Tab cycles list/preview focus only while the preview
+            // shows; hidden, it falls back to today's NextTab semantics, so advertising
+            // CyclePane there would drift from behaviour (#48).
+            if (command == AppCommand.CyclePane && IsWorkspaceList(scope) && !previewVisible)
             {
                 continue;
             }
@@ -125,7 +141,7 @@ public static class HelpText
                 continue; // alias (e.g. Enter and o) — show the first binding only
             }
             var keys = string.Join("", sequence);
-            sb.AppendLine($"  {keys,-8} {Descriptions.GetValueOrDefault(command, command.ToString())}");
+            sb.AppendLine($"  {keys,-8} {Describe(command, scope)}");
         }
         return sb.ToString();
     }
