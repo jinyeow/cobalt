@@ -10,7 +10,7 @@ diff review with line comments) and iterating past it; the
 and design decisions in [docs/adr/](docs/adr/).
 
 Built with a UI-free `Cobalt.Core` and a view-model layer that never references
-Terminal.Gui, so the interesting logic is unit-tested (1,208 tests). See
+Terminal.Gui, so the interesting logic is unit-tested (1,269 tests). See
 [docs/adr/0004](docs/adr/0004-terminal-gui-v2-with-viewmodels.md) and
 [0007](docs/adr/0007-vim-input-as-testable-data.md).
 
@@ -18,6 +18,7 @@ Terminal.Gui, so the interesting logic is unit-tested (1,208 tests). See
 
 - [Install](#install)
 - [Configure](#configure)
+- [Preview pane](#preview-pane)
 - [Themes](#themes)
 - [Sign in](#sign-in)
 - [Keys (vim layer)](#keys-vim-layer)
@@ -51,6 +52,8 @@ without touching your real one:
 default_context = "work"
 # theme = "dark"       # optional: "dark" (default) · "light" · "system" (follow the OS).
                        # Switch live with :theme; system-follow is Windows-only for now.
+# preview = "auto"     # optional: "auto" (default — show the preview pane whenever the
+                       # terminal is wide enough) or "off". Switch live with :preview.
 
 [contexts.work]
 organization = "https://dev.azure.com/YOUR_ORG"   # or a bare "YOUR_ORG"
@@ -100,6 +103,20 @@ bare digit) fails at startup with the offending scope/command/sequence named. Th
 binding table, so a remap shows up with no other change — and it reaches the modal
 dialogs too. See [ADR 0023](docs/adr/0023-keybinding-remap-config.md).
 
+## Preview pane
+
+The work-item and pull-request lists sit in a two-pane workspace: the list on the left and a
+read-only **preview** of the selected item on the right. `preview` decides whether that second
+pane appears: `auto` (default) shows it whenever the terminal is at least 100 columns wide and
+collapses to today's full-width list below that; `off` keeps the list full-width at every
+width. Switch live with `:preview auto|off` (bare `:preview` reports the current setting).
+
+Focus moves between the panes with `Tab` (or `C-h`/`C-l`), and `j`/`k`/`C-d`/`C-u`/`gg`/`G`
+scroll whichever pane holds it. The preview is read-only — `Enter` still opens the modal detail
+for anything you want to act on. `config.toml` is the persistence: cobalt never writes it back,
+so edit `preview` there to make a choice permanent. See
+[ADR 0024](docs/adr/0024-list-preview-workspace.md).
+
 ## Themes
 
 `theme` picks the colours: `dark` (default — the original look), `light`, or `system`
@@ -141,15 +158,18 @@ tab row with the active tab highlighted.
 
 `j/k` move · `gg`/`G` top/bottom · `Ctrl-d`/`Ctrl-u` half-page · `/` filter ·
 `Enter`/`o`/`l` open · `h`/`q` back/close · `gt`/`gT` next/prev section · `g1`/`g2` jump to Work Items /
-Pull Requests · `Tab` next tab · `:` command palette — `Tab`/`Shift-Tab` complete and cycle
-command names, and for `:context`/`:project`/`:theme`, their argument names too —
+Pull Requests · `C-h`/`C-l` (and `Tab`) move focus between the list and the preview pane, or —
+while the preview is hidden — `Tab` falls back to the next tab · `:` command palette —
+`Tab`/`Shift-Tab` complete and cycle
+command names, and for `:context`/`:project`/`:theme`/`:preview`, their argument names too —
 (`:q` quit, `:context NAME` switch context, `:scope org|project` list breadth,
 `:done show|hide` completed work items, `:project NAME` narrow to one project,
+`:preview auto|off` the preview pane,
 `:help`, `:messages`, `:log` recent Azure DevOps requests) · `?` help ·
 `r` refresh. On a work item (the highlighted list row or its detail): `s` state ·
 `c` comment · `a` assign · `t` tags; the detail additionally has `e` edit
-description in `$EDITOR`. In the PR section: `[`/`]` (or `Tab`) cycle the team /
-mine / active sub-tabs (team — PRs your teams are reviewing or teammates authored —
+description in `$EDITOR`. In the PR section: `[`/`]` cycle the team /
+mine / active sub-tabs (`Tab` does too, but only while the preview pane is hidden) (team — PRs your teams are reviewing or teammates authored —
 is the default; a personal "awaiting my vote" queue is org-setup-dependent and no
 longer a tab); on a PR (the highlighted list row or its detail): `v` vote; the
 detail additionally has `c` reply · `g c` add a PR-level comment · `g b` open the source

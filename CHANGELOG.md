@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **A preview pane beside the work-item and pull-request lists.** On a terminal at least 100
+  columns wide the content area splits into the list (left) and a read-only, scrollable preview
+  (right); below that width it collapses back to today's full-width list. `Tab` (or `C-h`/`C-l`)
+  moves focus between the panes, and `j`/`k`/`C-d`/`C-u`/`gg`/`G` scroll whichever pane has it.
+  The pane is read-only — every action stays modal. See
+  [ADR 0024](docs/adr/0024-list-preview-workspace.md).
+- **`preview = auto|off` in `config.toml`** (default `auto`), and **`:preview auto|off`** to
+  switch it live. `off` keeps the list full-width at every width. `config.toml` is the
+  persistence — cobalt never writes it back, so make the choice permanent by editing the file,
+  exactly as with `theme`.
+
+### Changed
+- **`Tab` inside the work-item and pull-request lists now cycles list/preview focus** instead of
+  switching section or PR sub-tab. This is a deliberate break of a shipped alias: while the
+  preview is hidden (a narrow terminal, or `preview = off`) `Tab` keeps its old behaviour, but on
+  a wide terminal it belongs to the workspace. `[`/`]` remain the canonical sub-tab keys and
+  `gt`/`gT` the section keys; if the old muscle memory matters more, remap `cycle-pane` away in
+  `[keys.workitemlist]` / `[keys.pullrequestlist]` (see
+  [ADR 0023](docs/adr/0023-keybinding-remap-config.md)).
+
 ## 0.3.2 — 2026-07-24
 
 No user-facing change. This release carries dependency updates and the internal foundations
