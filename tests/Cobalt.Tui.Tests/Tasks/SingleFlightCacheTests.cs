@@ -136,6 +136,40 @@ public class SingleFlightCacheTests
         cache.Dispose(); // double-dispose is a no-op
     }
 
+    [Fact]
+    public async Task Dispose_Supersedes_A_Token_Ignoring_Fetch_So_Its_Late_Result_Never_Publishes()
+    {
+        var cache = new SingleFlightCache<string, int>(TestContext.Current.CancellationToken);
+        var published = new List<(string Key, int Value)>();
+        var a = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // The fake IGNORES its token: only the disposed-guard can stop the late publish.
+        var task = cache.ScheduleAsync("a", (_, _) => a.Task, Publish(published));
+        cache.Dispose();
+        a.SetResult(1);
+        await task;
+
+        Assert.Empty(published);
+    }
+
+    [Fact]
+    public async Task Dispose_Supersedes_A_Token_Ignoring_Fetch_So_Its_Late_Fault_Is_Consumed()
+    {
+        var cache = new SingleFlightCache<string, int>(TestContext.Current.CancellationToken);
+        var published = new List<(string Key, int Value)>();
+        var a = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var task = cache.ScheduleAsync("a", (_, _) => a.Task, Publish(published));
+        cache.Dispose();
+
+        // The fetch faults AFTER dispose: nobody is listening any more, so the fault must be
+        // observed and swallowed (dispose is the final supersede), not thrown to the awaiter.
+        a.SetException(new InvalidOperationException("boom"));
+        await task;
+
+        Assert.Empty(published);
+    }
+
     private sealed record Snapshot(string Key, int Value);
 
     [Fact]

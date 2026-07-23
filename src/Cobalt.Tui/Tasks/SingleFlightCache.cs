@@ -38,21 +38,31 @@ public sealed class SingleFlightCache<TKey, TValue> : IDisposable where TKey : n
     /// superseded fetch is observed and swallowed, so an abandoned fetch nobody awaits can never
     /// reach the <see cref="TaskScheduler.UnobservedTaskException"/> crash-log hook (ADR 0013;
     /// precedent: <c>PrDiffViewModel.ObserveFault</c>).
+    /// <para><paramref name="publish"/> runs under the cache's internal lock — that lock is the
+    /// atomicity guarantee against a concurrent schedule — so it must stay a cheap reference swap
+    /// (e.g. <c>Published&lt;T&gt;.Publish</c>): never raise events, block, or take other locks.</para>
     /// </summary>
     public async Task ScheduleAsync(
         TKey key, Func<TKey, CancellationToken, Task<TValue>> fetch, Action<TKey, TValue> publish)
     {
         long stamp;
         CancellationToken token;
+        CancellationTokenSource? previous;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             stamp = ++_stamp;
-            _cts?.Cancel();
-            _cts?.Dispose();
+            previous = _cts;
             _cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime);
             token = _cts.Token;
         }
+        // Cancel outside the lock: Cancel() runs token registrations synchronously, and running
+        // arbitrary callbacks while holding _gate is a lock-inversion hazard. The detached CTS is
+        // cancelled exactly once, by whoever detached it. Correctness never rested on the cancel
+        // anyway — the stamp was already bumped under the lock, so the old fetch is superseded
+        // before its token even trips.
+        previous?.Cancel();
+        previous?.Dispose();
 
         TValue value;
         try
@@ -67,19 +77,19 @@ public sealed class SingleFlightCache<TKey, TValue> : IDisposable where TKey : n
         {
             lock (_gate)
             {
-                if (stamp == _stamp)
+                if (!_disposed && stamp == _stamp)
                 {
                     throw; // still the newest — the caller owns surfacing this fault
                 }
             }
-            return; // superseded — the fault is observed here (caught) and goes no further
+            return; // superseded (or disposed, the final supersede) — the fault is observed here and goes no further
         }
 
         lock (_gate)
         {
-            if (stamp != _stamp)
+            if (_disposed || stamp != _stamp)
             {
-                return; // superseded while mid-flight — drop the result, even if the fetch ignored its token
+                return; // superseded or disposed mid-flight — drop the result, even if the fetch ignored its token
             }
             publish(key, value);
         }
@@ -89,6 +99,7 @@ public sealed class SingleFlightCache<TKey, TValue> : IDisposable where TKey : n
     /// dispose throws <see cref="ObjectDisposedException"/>.</summary>
     public void Dispose()
     {
+        CancellationTokenSource? current;
         lock (_gate)
         {
             if (_disposed)
@@ -96,9 +107,12 @@ public sealed class SingleFlightCache<TKey, TValue> : IDisposable where TKey : n
                 return;
             }
             _disposed = true;
-            _cts?.Cancel();
-            _cts?.Dispose();
+            current = _cts;
             _cts = null;
         }
+        // Outside the lock for the same lock-inversion reason as in ScheduleAsync; _disposed is
+        // already set, so the in-flight fetch is dropped at completion regardless of this cancel.
+        current?.Cancel();
+        current?.Dispose();
     }
 }
