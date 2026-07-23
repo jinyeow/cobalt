@@ -34,7 +34,11 @@ public sealed class PreviewPane : View
             ReadOnly = true,
             WordWrap = false,
             ScrollBars = true, // position indicator; content is scrolled pager-style (VimScroll)
-            CanFocus = true,
+            // The pane itself takes focus, not the TextView: a focused ReadOnly TextView
+            // swallows every printable rune before the shell's Window-level KeyDown runs (the
+            // trap PrDetailDialog works around by subscribing its own handler). Here the shell
+            // owns all routing (ADR 0024), so the keys must reach it.
+            CanFocus = false,
         };
         Add(_body);
         ApplyBudget(); // paint the empty state up front
