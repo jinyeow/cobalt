@@ -86,10 +86,10 @@ public static class ConfigLoader
                 $"default_context '{defaultContext}' has no matching [contexts.{defaultContext}] section");
         }
 
-        return new CobaltConfig(defaultContext, contexts, ParseTheme(root), ParseKeys(root));
+        return new CobaltConfig(defaultContext, contexts, ParseTheme(root), ParseKeys(root), ParsePreview(root));
     }
 
-    private static readonly string[] ValidRootKeys = ["contexts", "default_context", "keys", "theme"];
+    private static readonly string[] ValidRootKeys = ["contexts", "default_context", "keys", "preview", "theme"];
 
     private static KeysConfig ParseKeys(TomlTable root)
     {
@@ -193,8 +193,32 @@ public static class ConfigLoader
             $"theme must be one of {string.Join(", ", ThemeChoices.Names.Select(n => $"\"{n}\""))}, got '{raw}'");
     }
 
+    private static PreviewMode ParsePreview(TomlTable table)
+    {
+        // Absent => Auto (the product default), so an old/empty config gets the preview pane.
+        if (!table.TryGetValue("preview", out var raw))
+        {
+            return PreviewMode.Auto;
+        }
+        if (raw is string text && PreviewModes.TryParse(text.Trim(), out var mode))
+        {
+            return mode;
+        }
+        throw new ConfigException(
+            $"preview must be one of {string.Join(", ", PreviewModes.Names.Select(n => $"\"{n}\""))}, got '{raw}'");
+    }
+
     private static AdoContext ParseContext(string name, TomlTable table)
     {
+        // `preview` is a root-level setting, and TOML binds a key written after a `[contexts.*]`
+        // header to that table — same trap as `theme` below, same loud failure.
+        if (table.ContainsKey("preview"))
+        {
+            throw new ConfigException(
+                $"[contexts.{name}] has a 'preview' key, but preview is a top-level setting; "
+                + "move it above the [contexts.*] sections");
+        }
+
         // `theme` is a root-level setting. In TOML a key written after a `[contexts.*]` header
         // binds to that table, so a `theme = ...` line appended to the end of a config (the
         // natural place to add it) lands here and would otherwise be silently ignored — leaving
