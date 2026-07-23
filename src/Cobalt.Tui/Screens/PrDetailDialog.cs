@@ -1,7 +1,6 @@
 using Cobalt.Tui.App;
 using Cobalt.Tui.Editor;
 using Cobalt.Core.Config;
-using Cobalt.Core.Models;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.Tasks;
 using Cobalt.Tui.ViewModels;
@@ -249,67 +248,8 @@ public sealed class PrDetailDialog(
 
     private async Task LoadAsync() => await vm.LoadAsync(Token).IgnoreCancellationAsync();
 
-    private string RenderBody()
-    {
-        if (vm.IsLoading)
-        {
-            return "loading…";
-        }
-        var pr = vm.PullRequest;
-        if (pr is null)
-        {
-            return vm.Error is { } e ? $"error: {e}" : "no data";
-        }
-
-        var lines = new List<string>
-        {
-            $"!{pr.PullRequestId}  {pr.Title}" + (pr.IsDraft ? "  [draft]" : ""),
-            $"{pr.RepositoryName}: {pr.SourceBranch} → {pr.TargetBranch}   status: {pr.Status}   merge: {pr.MergeStatus ?? "?"}",
-            $"author: {pr.Author}",
-            "",
-            "Reviewers:",
-        };
-        lines.AddRange(pr.Reviewers.Count == 0
-            ? ["  (none)"]
-            : pr.Reviewers.Select(r => $"  {VoteGlyph(r.Vote)} {r.DisplayName}{(r.IsRequired ? " (required)" : "")}"));
-
-        if (vm.Policies.Count > 0)
-        {
-            lines.Add("");
-            lines.Add("Policies:");
-            lines.AddRange(vm.Policies.Select(p =>
-                $"  {PolicyGlyph(p.Status)} {p.DisplayName}{(p.IsBlocking ? " (blocking)" : "")}"));
-        }
-
-        if (pr.LinkedWorkItemIds.Count > 0)
-        {
-            lines.Add("");
-            lines.Add($"Linked work items: {string.Join(", ", pr.LinkedWorkItemIds.Select(i => $"#{i}"))}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(pr.Description))
-        {
-            lines.Add("");
-            lines.Add("── Description ──");
-            lines.Add(pr.Description!);
-        }
-
-        lines.Add("");
-        lines.Add($"── Threads ({vm.UnresolvedThreadCount} unresolved) ──");
-        foreach (var t in vm.Threads)
-        {
-            var anchor = t.FilePath is null ? "" : $" [{t.FilePath}:{t.RightLine ?? t.LeftLine}]";
-            lines.Add($"  #{t.Id} [{t.Status}]{anchor}");
-            lines.AddRange(t.Comments.Where(c => !c.IsSystem).Select(c => $"      {c.Author}: {c.Content}"));
-        }
-
-        if (vm.Error is { } err)
-        {
-            lines.Add("");
-            lines.Add($"error: {err}");
-        }
-        return string.Join('\n', lines);
-    }
+    // Full tier is width-independent (the TextView word-wraps), so no width is threaded.
+    private string RenderBody() => PrDetailFormatter.Render(vm, width: 0, PreviewTier.Full);
 
     private async Task ReplyAsync()
     {
@@ -449,20 +389,4 @@ public sealed class PrDetailDialog(
         }
         _post.Post(() => log(vm.Error is { } e ? $"failed: {e}" : success));
     }
-
-    private static string VoteGlyph(PrVote vote) => vote switch
-    {
-        PrVote.Approved => "✓",
-        PrVote.ApprovedWithSuggestions => "✓~",
-        PrVote.WaitingForAuthor => "⧗",
-        PrVote.Rejected => "✗",
-        _ => "·",
-    };
-
-    private static string PolicyGlyph(string status) => status.ToLowerInvariant() switch
-    {
-        "approved" => "✓",
-        "rejected" => "✗",
-        _ => "⧗", // queued / running / notApplicable / etc.
-    };
 }

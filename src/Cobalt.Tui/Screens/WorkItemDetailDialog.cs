@@ -235,38 +235,6 @@ public sealed class WorkItemDetailDialog
         }
     }
 
-    private string RenderBody()
-    {
-        if (_vm.IsLoading)
-        {
-            return "loading…";
-        }
-        var item = _vm.Item;
-        if (item is null)
-        {
-            return _vm.Error is { } e ? $"error: {e}" : "no data";
-        }
-
-        var lines = new List<string>
-        {
-            $"{item.WorkItemType} #{item.Id}   [{item.State}]",
-            $"Title:    {item.Title}",
-            $"Assigned: {item.AssignedToDisplayName ?? "(unassigned)"}",
-            $"Iteration:{item.IterationPath}",
-            $"Tags:     {string.Join(", ", item.Tags)}",
-            $"Priority: {item.Priority?.ToString() ?? "-"}   Points: {item.StoryPoints?.ToString() ?? "-"}",
-            "",
-            "── Description ──" + (_vm.DescriptionLossy ? "  ⚠ rich HTML: editing may drop formatting" : ""),
-            _vm.DescriptionMarkdown.Length == 0 ? "(empty)" : _vm.DescriptionMarkdown,
-            "",
-            $"── Comments ({_vm.Comments.Count}) ──",
-        };
-        lines.AddRange(_vm.Comments.Select(c => $"  {c.Author} ({c.CreatedDate:yyyy-MM-dd}): {c.TextMarkdown}"));
-        if (_vm.Error is { } err)
-        {
-            lines.Add("");
-            lines.Add($"error: {err}");
-        }
-        return string.Join('\n', lines);
-    }
+    // Full tier is width-independent (the TextView word-wraps), so no width is threaded.
+    private string RenderBody() => WorkItemDetailFormatter.Render(_vm, width: 0, PreviewTier.Full);
 }
