@@ -30,6 +30,11 @@ public sealed class CobaltShell : Window
     private readonly KeyBindingTable _bindings;
     private readonly KeymapRouter _router;
     private readonly PaletteSuggestionsViewModel _suggestions;
+    // Workspace pane focus (ADR 0024): focus is workspace state owned by the view-model,
+    // never inferred from Terminal.Gui focus; ApplyWorkspaceFocus is the one place that
+    // maps it onto a SetFocus. At M5 nothing sets the preview visible yet (#48 wires the
+    // layout), so CyclePane always falls back to today's Tab semantics.
+    private readonly WorkspaceViewModel _workspace = new();
     // The text the palette field held after the last Tab/S-Tab completion, so a subsequent Tab
     // cycles the existing suggestions instead of re-filtering; a user edit (field != this) restarts.
     private string? _lastCompletion;
@@ -296,6 +301,32 @@ public sealed class CobaltShell : Window
 
     private void Dispatch(AppCommand command, int? count = null)
     {
+        // Workspace Tab (ADR 0024): with a visible preview, Tab cycles pane focus and is
+        // consumed; while the preview is hidden the workspace declines it and Tab keeps
+        // exactly today's semantics (the PR sub-tab intercept / section toggle below).
+        if (command == AppCommand.CyclePane)
+        {
+            if (_workspace.CyclePane())
+            {
+                ApplyWorkspaceFocus();
+                return;
+            }
+            Dispatch(AppCommand.NextTab, count);
+            return;
+        }
+
+        // C-h / C-l move workspace pane focus. When nothing changes (preview hidden, or
+        // already at that edge) fall through so the keys keep their current behaviour.
+        if (command is AppCommand.FocusLeft or AppCommand.FocusRight)
+        {
+            var changed = command == AppCommand.FocusLeft ? _workspace.FocusLeft() : _workspace.FocusRight();
+            if (changed)
+            {
+                ApplyWorkspaceFocus();
+                return;
+            }
+        }
+
         // In the PR section (with a built list), Tab/S-Tab cycle the PR sub-tabs (review
         // queue/team/mine/active) rather than switching top-level sections; section switches go
         // through the g-chords (gt/gT/g1/g2), handled by _vm.HandleCommand below. When the PR list
@@ -742,8 +773,20 @@ public sealed class CobaltShell : Window
         _content.Add(_activeScreen);
         // Re-establish focus: swapping the shown screen leaves focus dangling, which stops
         // Window.KeyDown from routing subsequent keys.
-        _activeScreen.SetFocus();
+        ApplyWorkspaceFocus();
     }
+
+    /// <summary>
+    /// The single <see cref="WorkspaceViewModel.FocusedPane"/> → Terminal.Gui SetFocus
+    /// mapping (ADR 0024: the shell maps workspace focus in exactly one place). At M5
+    /// there is no preview view, so every pane value lands on the active screen; #48
+    /// adds the Preview arm here.
+    /// </summary>
+    private void ApplyWorkspaceFocus() => _activeScreen?.SetFocus();
+
+    /// <summary>Test seam: the workspace pane-focus view-model (ADR 0024). Production only
+    /// collapses/expands it from the layout in #48; tests drive visibility directly.</summary>
+    internal WorkspaceViewModel Workspace => _workspace;
 
     private WorkItemListView BuildWorkItemList(WorkItemStoreAdapter workItems)
     {

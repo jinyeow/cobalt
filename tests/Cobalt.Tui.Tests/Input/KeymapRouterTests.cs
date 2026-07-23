@@ -368,6 +368,34 @@ public class KeymapRouterTests
         Assert.Equal(KeyResultKind.None, Router().Feed("[", KeyScope.WorkItemList).Kind);
     }
 
+    // ---- workspace Tab (ADR 0024): pane cycling in the two list scopes ----
+
+    [Fact]
+    public void Tab_Cycles_Panes_In_The_Workspace_Scopes()
+    {
+        // The scoped Tab shadows the global NextTab in both workspace list scopes
+        // (the same mechanism as DiffReview's Tab above); [ / ] stay the canonical
+        // PR sub-tab keys and S-Tab stays the global PrevTab alias.
+        Assert.Equal(AppCommand.CyclePane, Router().Feed("Tab", KeyScope.WorkItemList).Command);
+        Assert.Equal(AppCommand.CyclePane, Router().Feed("Tab", KeyScope.PullRequestList).Command);
+    }
+
+    [Fact]
+    public void Tab_Still_Means_NextTab_Outside_The_Workspace_Scopes()
+    {
+        Assert.Equal(AppCommand.NextTab, Router().Feed("Tab", KeyScope.Global).Command);
+        Assert.Equal(AppCommand.NextTab, Router().Feed("Tab", KeyScope.ThreadView).Command);
+    }
+
+    [Fact]
+    public void STab_Still_Means_PrevTab_In_Every_Scope()
+    {
+        foreach (var scope in Enum.GetValues<KeyScope>())
+        {
+            Assert.Equal(AppCommand.PrevTab, Router().Feed("S-Tab", scope).Command);
+        }
+    }
+
     // ---- PendingDisplay (vim showcmd; ADR 0021) ----
 
     [Fact]
