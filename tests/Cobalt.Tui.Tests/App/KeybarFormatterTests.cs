@@ -105,19 +105,33 @@ public class KeybarFormatterTests
         Assert.True(bar.Length <= 5);
     }
 
-    [Fact]
-    public void Workspace_List_Keybar_Advertises_Todays_Tab_Semantics_Not_CyclePane()
+    [Theory]
+    [InlineData(KeyScope.WorkItemList)]
+    [InlineData(KeyScope.PullRequestList)]
+    public void Workspace_List_Keybar_Is_Byte_Identical_To_Pre_M5(KeyScope scope)
     {
-        // Same rule as the help overlay: at M5 Tab in the list scopes still performs
-        // today's tab cycling (the shell's fallback), so the bar must not advertise the
-        // CyclePane binding — that would be advertised-but-dead drift until #48.
-        var wiBar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.WorkItemList, 400);
-        Assert.DoesNotContain("switch file list / diff pane", wiBar);
-        Assert.Contains("Tab:tab", wiBar);
+        // Same rule as the help overlay: at M5 Tab in the list scopes still performs today's
+        // tab cycling (the shell's fallback), so the keybar must stay byte-for-byte what it
+        // rendered pre-M5. Reference = the default table with Tab→CyclePane unbound from both
+        // workspace list scopes (config empty-sequence unbind, independent of the render-time
+        // suppression). Width 400 so nothing truncates.
+        var expected = KeybarFormatter.Render(WithoutWorkspaceTabCyclePane(), scope, 400);
 
-        var prBar = KeybarFormatter.Render(KeyBindingTable.Default(), KeyScope.PullRequestList, 400);
-        Assert.DoesNotContain("switch file list / diff pane", prBar);
-        Assert.Contains("]:tab", prBar);
+        Assert.Equal(expected, KeybarFormatter.Render(KeyBindingTable.Default(), scope, 400));
+    }
+
+    /// <summary>The default table with Tab→CyclePane unbound from both workspace list scopes
+    /// (config empty-sequence unbind) — a pre-M5 reference built without copying Default()'s binds.</summary>
+    private static KeyBindingTable WithoutWorkspaceTabCyclePane()
+    {
+        static IReadOnlyDictionary<string, IReadOnlyList<string>> Unbind() =>
+            new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal) { ["cycle-pane"] = [] };
+        var scopes = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["workitemlist"] = Unbind(),
+            ["pullrequestlist"] = Unbind(),
+        };
+        return KeyBindingTable.FromConfig(new KeysConfig(scopes));
     }
 
     [Fact]

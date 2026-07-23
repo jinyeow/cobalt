@@ -57,23 +57,34 @@ public class HelpTextTests
         Assert.Contains("next section", help);
     }
 
-    [Fact]
-    public void Workspace_List_Help_Advertises_Todays_Tab_Semantics_Not_CyclePane()
+    [Theory]
+    [InlineData(KeyScope.WorkItemList)]
+    [InlineData(KeyScope.PullRequestList)]
+    public void Workspace_List_Help_Is_Byte_Identical_To_Pre_M5(KeyScope scope)
     {
-        // M5: Tab is bound to CyclePane in the two workspace list scopes, but while the
-        // preview is hidden the shell falls back to today's NextTab semantics — and at M5
-        // the preview is never visible. Advertising CyclePane (with diff-review wording)
-        // would be exactly the advertised-but-dead drift this surface must never show, so
-        // the help stays byte-identical to pre-M5 until #48 makes the preview visible.
-        var wiHelp = HelpText.For(Table, KeyScope.WorkItemList);
-        Assert.DoesNotContain("switch file list / diff pane", wiHelp);
-        Assert.Contains("Tab      next tab", wiHelp);
-        Assert.Equal(1, wiHelp.Split('\n').Count(l => l.TrimStart().StartsWith("Tab ", StringComparison.Ordinal)));
+        // M5 binds Tab→CyclePane in the two workspace list scopes, but while the preview
+        // is hidden the shell falls back to today's NextTab semantics — and at M5 the
+        // preview is never visible — so the `?` overlay must stay byte-for-byte what it
+        // rendered pre-M5. Reference = the default table with that one binding unbound via
+        // the config empty-sequence path (independent of the render-time suppression), i.e.
+        // the table as if M5 had never added it; the live default must render identically.
+        var expected = HelpText.For(WithoutWorkspaceTabCyclePane(), scope);
 
-        var prHelp = HelpText.For(Table, KeyScope.PullRequestList);
-        Assert.DoesNotContain("switch file list / diff pane", prHelp);
-        Assert.Contains("]        next tab", prHelp); // [ / ] stay the canonical sub-tab keys
-        Assert.DoesNotContain(prHelp.Split('\n'), l => l.TrimStart().StartsWith("Tab ", StringComparison.Ordinal));
+        Assert.Equal(expected, HelpText.For(Table, scope));
+    }
+
+    /// <summary>The default table with Tab→CyclePane unbound from both workspace list scopes
+    /// (config empty-sequence unbind) — a pre-M5 reference built without copying Default()'s binds.</summary>
+    private static KeyBindingTable WithoutWorkspaceTabCyclePane()
+    {
+        static IReadOnlyDictionary<string, IReadOnlyList<string>> Unbind() =>
+            new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal) { ["cycle-pane"] = [] };
+        var scopes = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["workitemlist"] = Unbind(),
+            ["pullrequestlist"] = Unbind(),
+        };
+        return KeyBindingTable.FromConfig(new KeysConfig(scopes));
     }
 
     [Fact]

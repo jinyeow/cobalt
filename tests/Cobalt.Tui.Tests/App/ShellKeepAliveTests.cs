@@ -114,6 +114,23 @@ public class ShellKeepAliveTests
         Assert.Equal(AppSection.WorkItems, vm.ActiveSection);
     }
 
+    [Fact]
+    public void Tab_In_Wi_Section_With_Preview_Hidden_Falls_Back_To_Section_Toggle()
+    {
+        // Drives the real CyclePane→NextTab recursion through CobaltShell.Dispatch from the
+        // Work Items section (the router-level integration harness only mirrors this logic).
+        // WI scope Tab→CyclePane, preview hidden → workspace declines → shell falls back to
+        // today's NextTab, which with no PR sub-tabs toggles the top-level section.
+        var vm = Vm();
+        using var shell = new CobaltShell(App, vm); // no adapters → placeholder; WI section active
+        Assert.Equal(AppSection.WorkItems, vm.ActiveSection);
+        shell.SetFocus();
+
+        shell.NewKeyDownEvent(new Terminal.Gui.Input.Key(Terminal.Gui.Drivers.KeyCode.Tab));
+
+        Assert.Equal(AppSection.PullRequests, vm.ActiveSection);
+    }
+
     // ---- M5 workspace Tab (ADR 0024): CyclePane consumed when the preview shows, today's
     // ---- semantics otherwise ----
 
