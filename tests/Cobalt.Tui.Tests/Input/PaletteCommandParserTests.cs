@@ -123,4 +123,32 @@ public class PaletteCommandParserTests
         Assert.Equal(PaletteActionKind.SetTheme, action.Kind);
         Assert.Equal("", action.Argument);
     }
+
+    [Fact]
+    public void Preview_With_Value_Sets_Preview()
+    {
+        var action = PaletteCommandParser.Parse("preview off");
+
+        Assert.Equal(PaletteActionKind.SetPreview, action.Kind);
+        Assert.Equal("off", action.Argument);
+    }
+
+    [Fact]
+    public void Bare_Preview_Sets_Preview_With_Empty_Argument()
+    {
+        var action = PaletteCommandParser.Parse("preview");
+
+        Assert.Equal(PaletteActionKind.SetPreview, action.Kind);
+        Assert.Equal("", action.Argument);
+    }
+
+    [Fact]
+    public void Preview_Value_Is_Passed_Through_Unvalidated()
+    {
+        // Validation (and its message) belongs to the view-model, exactly as :theme does.
+        var action = PaletteCommandParser.Parse("preview bogus");
+
+        Assert.Equal(PaletteActionKind.SetPreview, action.Kind);
+        Assert.Equal("bogus", action.Argument);
+    }
 }

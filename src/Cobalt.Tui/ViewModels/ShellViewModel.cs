@@ -17,7 +17,8 @@ public sealed class ShellViewModel(
     IReadOnlyList<string> contextNames,
     string initialContext,
     PrScope initialScope = PrScope.Org,
-    ThemeChoice initialTheme = ThemeChoice.Dark)
+    ThemeChoice initialTheme = ThemeChoice.Dark,
+    PreviewMode initialPreview = PreviewMode.Auto)
 {
     public MessageLog Messages { get; } = new();
 
@@ -41,6 +42,9 @@ public sealed class ShellViewModel(
     /// <summary>The active colour theme, shown in messages and flipped by <c>:theme</c>.</summary>
     public ThemeChoice CurrentTheme { get; private set; } = initialTheme;
 
+    /// <summary>The active preview-pane setting, shown in messages and flipped by <c>:preview</c>.</summary>
+    public PreviewMode CurrentPreview { get; private set; } = initialPreview;
+
     public event Action? SectionChanged;
     public event Action? QuitRequested;
     public event Action? HelpRequested;
@@ -62,6 +66,9 @@ public sealed class ShellViewModel(
 
     /// <summary>Raised with the new theme; the shell re-resolves the preset and repaints.</summary>
     public event Action<ThemeChoice>? ThemeChangeRequested;
+
+    /// <summary>Raised with the new preview mode; the shell re-applies the workspace layout.</summary>
+    public event Action<PreviewMode>? PreviewChangeRequested;
 
     public string StatusLine =>
         $" context:{ContextName}  scope:{ScopeName(Scope)}" + (UserName is null ? "" : $"  {UserName}");
@@ -143,6 +150,9 @@ public sealed class ShellViewModel(
             case PaletteActionKind.SetTheme:
                 SetTheme(action.Argument);
                 break;
+            case PaletteActionKind.SetPreview:
+                SetPreview(action.Argument);
+                break;
             case PaletteActionKind.Unknown:
                 Messages.Error(action.Argument);
                 break;
@@ -209,6 +219,35 @@ public sealed class ShellViewModel(
             : $"theme: {ThemeName(CurrentTheme)}");
         ThemeChangeRequested?.Invoke(CurrentTheme);
     }
+
+    private void SetPreview(string argument)
+    {
+        // Bare `:preview` just reports the current value.
+        if (argument.Length == 0)
+        {
+            Messages.Info($"preview: {PreviewName(CurrentPreview)} (switch with :preview {PreviewNamesHint})");
+            return;
+        }
+        // The accepted names come from the PreviewMode enum itself (as does Tab-completion), so a
+        // new member needs no edit here.
+        if (!PreviewModes.TryParse(argument, out var next))
+        {
+            Messages.Error($"unknown preview '{argument}' (use: {PreviewNamesHint})");
+            return;
+        }
+        if (next == CurrentPreview)
+        {
+            Messages.Info($"preview already {PreviewName(CurrentPreview)}");
+            return;
+        }
+        CurrentPreview = next;
+        Messages.Info($"preview: {PreviewName(CurrentPreview)}");
+        PreviewChangeRequested?.Invoke(CurrentPreview);
+    }
+
+    private static string PreviewNamesHint => string.Join('|', PreviewModes.Names);
+
+    private static string PreviewName(PreviewMode preview) => preview.ToString().ToLowerInvariant();
 
     private static string ThemeNamesHint => string.Join('|', ThemeChoices.Names);
 
