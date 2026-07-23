@@ -125,6 +125,10 @@ public class ShellWorkspaceLayoutTests
         shell.SetFocus();
         shell.NewKeyDownEvent(new Key(KeyCode.Tab));
         Assert.Equal(WorkspacePane.Preview, shell.Workspace.FocusedPane);
+        // Workspace focus really is mapped onto Terminal.Gui focus (ADR 0024's single mapping),
+        // not merely tracked in the view-model — otherwise the list cursor would stay live.
+        Assert.True(shell.PreviewScreen.HasFocus);
+        Assert.False(shell.PrListScreen!.HasFocus);
 
         shell.NewKeyDownEvent(new Key('j'));
         Assert.Equal(1, shell.PreviewScreen.Body.CurrentRow);
