@@ -13,11 +13,12 @@
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
-    <VersionPrefix>0.3.0</VersionPrefix>
+    <VersionPrefix>0.3.2</VersionPrefix>
     <!-- Every build is a prerelease unless it sets Version explicitly. release.yml does exactly that on
-         a tag push (/p:Version=${GITHUB_REF_NAME#v}), so a tagged release still packs a clean 0.3.0 while
-         local and branch builds stay 0.3.0-alpha — a dev build can't be mistaken for, or installed over,
-         a released one. -->
+         a tag push (/p:Version=${GITHUB_REF_NAME#v}), so a tagged release still packs a clean 0.3.2 while
+         local and branch builds stay 0.3.2-alpha — a dev build can't be mistaken for, or installed over,
+         a released one. Bump this with the CHANGELOG section it belongs to: left trailing the newest tag
+         (as it was through 0.3.1), dev builds report a LOWER version than the release they follow. -->
     <VersionSuffix>alpha</VersionSuffix>
     <Authors>jinyeow</Authors>
     <RepositoryUrl>https://github.com/jinyeow/cobalt</RepositoryUrl>
