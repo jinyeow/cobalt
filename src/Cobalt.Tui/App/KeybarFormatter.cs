@@ -48,19 +48,24 @@ public static class KeybarFormatter
         AppCommand.Help,
     ];
 
-    public static string Render(KeyBindingTable table, KeyScope scope, int width)
+    /// <summary>
+    /// The bar for <paramref name="scope"/>, fitted to <paramref name="width"/>.
+    /// <paramref name="previewVisible"/> is required, not defaulted — advertisement must never
+    /// be able to drift from behaviour by a caller forgetting to say which state it is in.
+    /// </summary>
+    public static string Render(KeyBindingTable table, KeyScope scope, int width, bool previewVisible)
     {
         // Among a command's aliases keep the densest key (Enter/o/l all open — the
         // bar shows "o"); the bar trades the help overlay's completeness for width.
         var first = new Dictionary<AppCommand, string>();
         foreach (var (sequence, command) in table.Visible(scope))
         {
-            // In the workspace list scopes Tab falls back to today's NextTab semantics
-            // while the preview is hidden — and at M5 the preview is never visible — so
-            // advertising CyclePane there (with its diff-review wording) would drift from
-            // behaviour. #48, which makes the preview visible, replaces this suppression
-            // with preview-aware advertisement.
-            if (command == AppCommand.CyclePane && scope is KeyScope.WorkItemList or KeyScope.PullRequestList)
+            // In the workspace list scopes Tab cycles list/preview focus only while the preview
+            // shows; hidden, it falls back to today's NextTab semantics, so advertising
+            // CyclePane there would drift from behaviour (#48).
+            if (command == AppCommand.CyclePane
+                && scope is KeyScope.WorkItemList or KeyScope.PullRequestList
+                && !previewVisible)
             {
                 continue;
             }
@@ -92,7 +97,7 @@ public static class KeybarFormatter
         {
             if (!Suppressed.Contains(command) && emitted.Add(command))
             {
-                entries.Add($"{key}:{HelpText.Describe(command)}");
+                entries.Add($"{key}:{HelpText.Describe(command, scope)}");
             }
         }
 

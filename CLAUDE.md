@@ -79,6 +79,13 @@ in a view.
   cancels, Ctrl-E hands off to `$EDITOR`**. Long-form (work-item descriptions, tags for now)
   still opens `$EDITOR` via the suspend/resume handoff (ADR 0009). The in-TUI path is
   headless-testable; the handoff is UAT-only.
+- **The list+preview workspace** (ADR 0024): the shell's content area splits into the list
+  screen's host (left) and a read-only `Screens/PreviewPane` (right). Geometry comes only from
+  the pure `WorkspaceLayout.Compute(width)`; the user's `preview = auto|off` override
+  (`config.toml`, default `auto`, live via `:preview`) is layered on in `CobaltShell`, never
+  threaded into the calculator. `WorkspaceViewModel` owns pane focus and key routing — `Tab`
+  cycles panes while the preview shows and falls back to its old meaning while hidden. The
+  pane's line cap is deliberately independent of its height, so scrolling has somewhere to go.
 - **Theming** is hybrid (ADR 0019): Terminal.Gui themes the chrome + syntax roles, while the
   diff tints are a cobalt-owned `DiffPalette` that `DiffListDataSource` reads from the ambient
   `ThemeService.CurrentPalette` on each render — don't hard-code diff colours. `theme =

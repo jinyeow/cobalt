@@ -164,6 +164,32 @@ public class PaletteSuggestionsViewModelTests
     }
 
     [Fact]
+    public void Preview_Argument_Completes_Against_The_PreviewMode_Names()
+    {
+        var vm = Vm();
+
+        vm.SetInput("preview o");
+
+        Assert.Equal("off", vm.Current);
+        Assert.Equal("preview off", vm.Accept());
+    }
+
+    [Fact]
+    public void Bare_Preview_With_Trailing_Space_Lists_Every_PreviewMode_Name()
+    {
+        var vm = Vm();
+
+        vm.SetInput("preview ");
+
+        foreach (var name in PreviewModes.Names)
+        {
+            Assert.Equal(name, vm.Current);
+            vm.CycleNext();
+        }
+        Assert.Equal(PreviewModes.Names[0], vm.Current); // wrapped
+    }
+
+    [Fact]
     public void Accept_Preserves_A_Leading_Colon_On_A_Successful_Completion()
     {
         var vm = Vm();

@@ -251,6 +251,84 @@ public class ConfigLoaderTests
         Assert.Contains("system", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    // ---- preview = auto|off (ADR 0024, #48) ----
+
+    [Fact]
+    public void Preview_Defaults_To_Auto_When_Absent()
+    {
+        var config = ConfigLoader.Parse(ValidToml);
+
+        Assert.Equal(PreviewMode.Auto, config.Preview);
+    }
+
+    [Theory]
+    [InlineData("auto", PreviewMode.Auto)]
+    [InlineData("off", PreviewMode.Off)]
+    [InlineData("Off", PreviewMode.Off)]
+    [InlineData("  off  ", PreviewMode.Off)]
+    public void Preview_Is_Parsed_Case_Insensitively_And_Trimmed(string rawPreview, PreviewMode expected)
+    {
+        var config = ConfigLoader.Parse(
+            $"""
+            preview = "{rawPreview}"
+
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            """);
+
+        Assert.Equal(expected, config.Preview);
+    }
+
+    [Fact]
+    public void Preview_Invalid_Value_Is_An_Error()
+    {
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            """
+            preview = "sometimes"
+
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            """));
+        Assert.Contains("preview", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("auto", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("off", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Preview_Key_Under_A_Context_Section_Is_An_Error()
+    {
+        // Same trap as `theme`: a `preview` line appended after a [contexts.*] header binds to
+        // that context in TOML, so it must fail loudly rather than leave the pane on the default.
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            """
+            default_context = "work"
+
+            [contexts.work]
+            organization = "contoso"
+            project = "P"
+            preview = "off"
+            """));
+        Assert.Contains("preview", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("top-level", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void A_Misspelled_Preview_Root_Key_Is_Still_An_Error()
+    {
+        // Adding `preview` to the valid root keys must not weaken the typo guard.
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse(
+            $"""
+            preveiw = "off"
+
+            {ValidToml}
+            """));
+
+        Assert.Contains("'preveiw'", ex.Message);
+        Assert.Contains("preview", ex.Message);
+    }
+
     // ---- [keys.<scope>] remap config (ticket #30) ----
 
     [Fact]

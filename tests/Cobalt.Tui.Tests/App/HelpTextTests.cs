@@ -50,7 +50,7 @@ public class HelpTextTests
     public void Shell_Help_Still_Lists_The_Full_Global_Table()
     {
         // The main-shell `?` is unchanged — it still shows refresh/filter/section keys.
-        var help = HelpText.For(Table, KeyScope.WorkItemList);
+        var help = HelpText.For(Table, KeyScope.WorkItemList, previewVisible: false);
 
         Assert.Contains("refresh", help);
         Assert.Contains("filter list", help);
@@ -60,17 +60,30 @@ public class HelpTextTests
     [Theory]
     [InlineData(KeyScope.WorkItemList)]
     [InlineData(KeyScope.PullRequestList)]
-    public void Workspace_List_Help_Is_Byte_Identical_To_Pre_M5(KeyScope scope)
+    public void Workspace_List_Help_Is_Byte_Identical_To_Pre_M5_When_The_Preview_Is_Hidden(KeyScope scope)
     {
-        // M5 binds Tab→CyclePane in the two workspace list scopes, but while the preview
-        // is hidden the shell falls back to today's NextTab semantics — and at M5 the
-        // preview is never visible — so the `?` overlay must stay byte-for-byte what it
-        // rendered pre-M5. Reference = the default table with that one binding unbound via
-        // the config empty-sequence path (independent of the render-time suppression), i.e.
-        // the table as if M5 had never added it; the live default must render identically.
-        var expected = HelpText.For(WithoutWorkspaceTabCyclePane(), scope);
+        // M5 binds Tab→CyclePane in the two workspace list scopes, but with the preview hidden
+        // (collapsed by width, or `preview = off`) the shell falls back to today's NextTab
+        // semantics — so the `?` overlay must stay byte-for-byte what it rendered pre-M5.
+        // Reference = the default table with that one binding unbound via the config
+        // empty-sequence path (independent of the render-time suppression), i.e. the table as if
+        // M5 had never added it; the live default must render identically.
+        var expected = HelpText.For(WithoutWorkspaceTabCyclePane(), scope, previewVisible: false);
 
-        Assert.Equal(expected, HelpText.For(Table, scope));
+        Assert.Equal(expected, HelpText.For(Table, scope, previewVisible: false));
+    }
+
+    [Theory]
+    [InlineData(KeyScope.WorkItemList)]
+    [InlineData(KeyScope.PullRequestList)]
+    public void Workspace_List_Help_Advertises_Tab_With_Workspace_Wording_When_The_Preview_Shows(KeyScope scope)
+    {
+        // The mirror of the pin above (#48): once the preview is visible Tab really does cycle
+        // pane focus, so help must say so — and in the workspace's own words, not diff review's.
+        var help = HelpText.For(Table, scope, previewVisible: true);
+
+        Assert.Contains("Tab      switch list / preview", help);
+        Assert.DoesNotContain("switch file list / diff pane", help);
     }
 
     /// <summary>The default table with Tab→CyclePane unbound from both workspace list scopes
@@ -96,7 +109,7 @@ public class HelpTextTests
         var scopes = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>(StringComparer.OrdinalIgnoreCase) { ["global"] = commands };
         var table = KeyBindingTable.FromConfig(new KeysConfig(scopes));
 
-        var help = HelpText.For(table, KeyScope.WorkItemList);
+        var help = HelpText.For(table, KeyScope.WorkItemList, previewVisible: false);
 
         Assert.Contains("n        move down", help);
         Assert.DoesNotContain("j        move down", help);

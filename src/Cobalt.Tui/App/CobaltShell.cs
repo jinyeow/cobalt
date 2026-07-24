@@ -52,6 +52,13 @@ public sealed class CobaltShell : Window
 
     private readonly Label _tabs;
     private readonly View _content;
+    // The content area's two children (ADR 0024): the list screen's host on the left, the
+    // read-only preview on the right. ApplyWorkspaceLayout sizes both from WorkspaceLayout.
+    private readonly View _listHost;
+    private readonly PreviewPane _previewPane;
+    // The user's preview setting (`preview = auto|off`, flipped live by `:preview`). The width
+    // decision stays in WorkspaceLayout; this override is applied on top of it, here.
+    private PreviewMode _previewMode;
     private readonly Label _status;
     private readonly Label _message;
     private readonly Label _keybar;
@@ -102,6 +109,15 @@ public sealed class CobaltShell : Window
         // The keybar owns the last row like lazygit's bottom line — always visible.
         _tabs = new Label { X = 0, Y = 0, Width = Dim.Fill(), Height = 1 };
         _content = new View { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(3), CanFocus = true };
+        _listHost = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), CanFocus = true };
+        _previewPane = new PreviewPane
+        {
+            X = Pos.Right(_listHost),
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+        };
+        _content.Add(_listHost, _previewPane);
         _status = new Label { X = 0, Y = Pos.AnchorEnd(3), Width = Dim.Fill(), Height = 1 };
         _message = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = Dim.Fill(), Height = 1 };
         _keybar = new Label { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1 };
@@ -119,13 +135,19 @@ public sealed class CobaltShell : Window
                 RefreshChrome();
             }
         };
+        // The split is driven by the CONTENT area's width, and the shell's own ViewportChanged
+        // runs before its children are laid out (the content pane's width is still stale there),
+        // so listen to the content pane itself. ApplyWorkspaceLayout refreshes the chrome too —
+        // the keybar's Tab entry depends on whether the preview shows.
+        _content.ViewportChanged += (_, _) => ApplyWorkspaceLayout();
 
+        _previewMode = vm.CurrentPreview;
         WireViewModel();
         WireKeys();
         WirePalette();
         WireTheme();
         ShowSection();
-        RefreshChrome();
+        ApplyWorkspaceLayout();
     }
 
     public KeyScope ActiveScope => _vm.ActiveSection == AppSection.WorkItems
@@ -350,7 +372,15 @@ public sealed class CobaltShell : Window
         if (VimScroll.Applies(command))
         {
             View? moved = null;
-            if (WorkItemsActive)
+            // The workspace decides where movement lands (ADR 0024): the preview scrolls while
+            // it holds focus, the list cursor moves otherwise. Without this the focused preview
+            // would be a trap that j/k cannot move.
+            if (_workspace.Route(command) == WorkspaceKeyRoute.PreviewScroll)
+            {
+                _previewPane.Scroll(command, count);
+                moved = _previewPane;
+            }
+            else if (WorkItemsActive)
             {
                 _workItemList?.Navigate(command, count);
                 moved = _workItemList;
@@ -572,11 +602,20 @@ public sealed class CobaltShell : Window
     private void WireTheme()
     {
         _vm.ThemeChangeRequested += OnThemeChangeRequested;
+        _vm.PreviewChangeRequested += OnPreviewChangeRequested;
         if (_themeMonitor is not null)
         {
             _themeMonitor.Changed += OnOsThemeChanged;
             _themeMonitor.Start();
         }
+    }
+
+    /// <summary>:preview auto|off — re-apply the split with the new override. The setting lives in
+    /// <c>config.toml</c>, which cobalt never writes back; this switches the running session only.</summary>
+    private void OnPreviewChangeRequested(PreviewMode mode)
+    {
+        _previewMode = mode;
+        ApplyWorkspaceLayout();
     }
 
     /// <summary>:theme dark|light|system — apply the resolved preset (following the OS for System) and repaint.</summary>
@@ -746,7 +785,7 @@ public sealed class CobaltShell : Window
         // lazily once and disposed with the shell.
         if (_activeScreen is not null)
         {
-            _content.Remove(_activeScreen);
+            _listHost.Remove(_activeScreen);
             _activeScreen = null;
         }
 
@@ -770,23 +809,53 @@ public sealed class CobaltShell : Window
             };
         }
 
-        _content.Add(_activeScreen);
+        _listHost.Add(_activeScreen);
         // Re-establish focus: swapping the shown screen leaves focus dangling, which stops
         // Window.KeyDown from routing subsequent keys.
         ApplyWorkspaceFocus();
     }
 
     /// <summary>
-    /// The single <see cref="WorkspaceViewModel.FocusedPane"/> → Terminal.Gui SetFocus
-    /// mapping (ADR 0024: the shell maps workspace focus in exactly one place). At M5
-    /// there is no preview view, so every pane value lands on the active screen; #48
-    /// adds the Preview arm here.
+    /// Applies the workspace split (ADR 0024): the geometry comes only from the pure
+    /// <see cref="WorkspaceLayout.Compute"/>, and the user's <c>preview = off</c> override is
+    /// layered on here — never threaded into the width calculator. Runs on construction, on
+    /// resize, and on <c>:preview</c>.
     /// </summary>
-    private void ApplyWorkspaceFocus() => _activeScreen?.SetFocus();
+    private void ApplyWorkspaceLayout()
+    {
+        var panes = WorkspaceLayout.Compute(_content.Viewport.Width);
+        var showPreview = panes.ShowPreview && _previewMode != PreviewMode.Off;
 
-    /// <summary>Test seam: the workspace pane-focus view-model (ADR 0024). Production only
-    /// collapses/expands it from the layout in #48; tests drive visibility directly.</summary>
+        _workspace.SetPreviewVisible(showPreview);
+        _listHost.Width = showPreview ? panes.ListWidth : Dim.Fill();
+        _previewPane.Visible = showPreview;
+        // A `:preview` toggle changes the split without a resize, so re-lay the content area
+        // here rather than waiting for the next event that happens to trigger layout.
+        _content.Layout();
+        ApplyWorkspaceFocus();
+        // The keybar advertises Tab only while the preview shows, so the chrome follows the split.
+        RefreshChrome();
+    }
+
+    /// <summary>
+    /// The single <see cref="WorkspaceViewModel.FocusedPane"/> → Terminal.Gui SetFocus
+    /// mapping (ADR 0024: the shell maps workspace focus in exactly one place).
+    /// </summary>
+    private void ApplyWorkspaceFocus()
+    {
+        if (_workspace.FocusedPane == WorkspacePane.Preview)
+        {
+            _previewPane.SetFocus();
+            return;
+        }
+        _activeScreen?.SetFocus();
+    }
+
+    /// <summary>Test seam: the workspace pane-focus view-model (ADR 0024).</summary>
     internal WorkspaceViewModel Workspace => _workspace;
+
+    /// <summary>Test seam: the read-only preview pane beside the list.</summary>
+    internal PreviewPane PreviewScreen => _previewPane;
 
     private WorkItemListView BuildWorkItemList(WorkItemStoreAdapter workItems)
     {
@@ -830,12 +899,13 @@ public sealed class CobaltShell : Window
         // instead of dirtying the tab strip and keybar on every chrome refresh. RefreshStatus and
         // RefreshMessage apply the same equality guard to their rows.
         SetIfChanged(_tabs, TabStripFormatter.Sections(_vm.ActiveSection));
-        SetIfChanged(_keybar, KeybarFormatter.Render(_bindings, ActiveScope, ChromeWidth));
+        SetIfChanged(_keybar, KeybarFormatter.Render(_bindings, ActiveScope, ChromeWidth, _workspace.PreviewVisible));
         RefreshStatus();
         RefreshMessage();
     }
 
-    private void ShowHelp() => TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope), _bindings);
+    private void ShowHelp() =>
+        TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope, _workspace.PreviewVisible), _bindings);
 
     private void ShowMessages()
     {
@@ -870,6 +940,7 @@ public sealed class CobaltShell : Window
         if (disposing)
         {
             _vm.ThemeChangeRequested -= OnThemeChangeRequested;
+            _vm.PreviewChangeRequested -= OnPreviewChangeRequested;
             if (_themeMonitor is not null)
             {
                 _themeMonitor.Changed -= OnOsThemeChanged;
@@ -879,9 +950,11 @@ public sealed class CobaltShell : Window
             // Remove the visible one first (base disposes the tree), then dispose both once.
             if (_activeScreen is not null)
             {
-                _content.Remove(_activeScreen);
+                _listHost.Remove(_activeScreen);
                 _activeScreen = null;
             }
+            _content.Remove(_previewPane);
+            _previewPane.Dispose();
             _workItemList?.Dispose();
             _prList?.Dispose();
             _placeholder?.Dispose();

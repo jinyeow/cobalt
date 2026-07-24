@@ -9,7 +9,7 @@ namespace Cobalt.Tui.ViewModels;
 /// Completes command names from <see cref="PaletteCommandParser.Catalog"/>, and the argument
 /// for commands whose <see cref="PaletteArgKind"/> has a provider: <c>:context</c> and
 /// <c>:project</c> against the real names the ctor functions return, <c>:theme</c> against
-/// <see cref="ThemeChoices.Names"/>.
+/// <see cref="ThemeChoices.Names"/>, <c>:preview</c> against <see cref="PreviewModes.Names"/>.
 /// </summary>
 public sealed class PaletteSuggestionsViewModel(
     Func<IReadOnlyList<string>> contexts, Func<IReadOnlyList<string>> projects)
@@ -111,6 +111,7 @@ public sealed class PaletteSuggestionsViewModel(
         PaletteArgKind.Context => contexts,
         PaletteArgKind.Project => projects,
         PaletteArgKind.Theme => static () => ThemeChoices.Names,
+        PaletteArgKind.Preview => static () => PreviewModes.Names,
         _ => null,
     };
 

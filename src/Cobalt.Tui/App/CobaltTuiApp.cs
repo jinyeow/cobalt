@@ -41,7 +41,11 @@ public static class CobaltTuiApp
         // to Program.cs for a clean message rather than a mid-startup crash (ADR 0023).
         var bindings = KeyBindingTable.FromConfig(config.Keys);
         var vm = new ShellViewModel(
-            [.. config.Contexts.Keys.Order(StringComparer.Ordinal)], context.Name, context.PrScope, config.Theme);
+            [.. config.Contexts.Keys.Order(StringComparer.Ordinal)],
+            context.Name,
+            context.PrScope,
+            config.Theme,
+            config.Preview);
 
         using var connection = AdoConnection.Create(context, tokens);
 

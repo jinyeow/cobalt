@@ -421,4 +421,89 @@ public class ShellViewModelTests
         Assert.Equal(1, raised);
         Assert.Contains("already", vm.Messages.Current!.Text);
     }
+
+    // ---- :preview auto|off (ADR 0024, #48) ----
+
+    [Fact]
+    public void Default_Preview_Is_Auto()
+    {
+        var vm = Vm();
+
+        Assert.Equal(PreviewMode.Auto, vm.CurrentPreview);
+    }
+
+    [Fact]
+    public void Ctor_Accepts_Initial_Preview()
+    {
+        var vm = new ShellViewModel(["work"], "work", PrScope.Org, ThemeChoice.Dark, PreviewMode.Off);
+
+        Assert.Equal(PreviewMode.Off, vm.CurrentPreview);
+    }
+
+    [Fact]
+    public void Bare_Palette_Preview_Reports_Current_Without_Changing_Or_Raising()
+    {
+        var vm = Vm();
+        var raised = false;
+        vm.PreviewChangeRequested += _ => raised = true;
+
+        vm.HandlePaletteInput("preview");
+
+        Assert.False(raised);
+        Assert.Equal(PreviewMode.Auto, vm.CurrentPreview);
+        Assert.NotNull(vm.Messages.Current);
+        Assert.Contains("auto", vm.Messages.Current!.Text);
+    }
+
+    [Fact]
+    public void Palette_Preview_Off_Switches_And_Raises_Event()
+    {
+        var vm = Vm();
+        PreviewMode? requested = null;
+        vm.PreviewChangeRequested += mode => requested = mode;
+
+        vm.HandlePaletteInput("preview off");
+
+        Assert.Equal(PreviewMode.Off, vm.CurrentPreview);
+        Assert.Equal(PreviewMode.Off, requested);
+    }
+
+    [Fact]
+    public void Palette_Preview_Is_Case_Insensitive()
+    {
+        var vm = Vm();
+
+        vm.HandlePaletteInput("preview OFF");
+
+        Assert.Equal(PreviewMode.Off, vm.CurrentPreview);
+    }
+
+    [Theory]
+    [InlineData("sometimes")]
+    [InlineData("0")]         // Enum.TryParse's numeric form
+    [InlineData("auto,off")]  // Enum.TryParse's flags-style combination
+    public void Palette_Preview_Invalid_Value_Logs_Error_Without_Throwing(string argument)
+    {
+        var vm = Vm();
+
+        vm.HandlePaletteInput($"preview {argument}");
+
+        Assert.Equal(MessageLevel.Error, vm.Messages.Current?.Level);
+        Assert.Contains("unknown preview", vm.Messages.Current?.Text);
+        Assert.Equal(PreviewMode.Auto, vm.CurrentPreview);
+    }
+
+    [Fact]
+    public void Palette_Preview_Reissued_Is_A_NoOp()
+    {
+        var vm = Vm();
+        var raised = 0;
+        vm.PreviewChangeRequested += _ => raised++;
+
+        vm.HandlePaletteInput("preview off");
+        vm.HandlePaletteInput("preview off");
+
+        Assert.Equal(1, raised);
+        Assert.Contains("already", vm.Messages.Current!.Text);
+    }
 }

@@ -6,12 +6,14 @@ public sealed class CobaltConfig
         string? defaultContext,
         IReadOnlyDictionary<string, AdoContext> contexts,
         ThemeChoice theme = ThemeChoice.Dark,
-        KeysConfig? keys = null)
+        KeysConfig? keys = null,
+        PreviewMode preview = PreviewMode.Auto)
     {
         DefaultContext = defaultContext;
         Contexts = contexts;
         Theme = theme;
         Keys = keys ?? KeysConfig.Empty;
+        Preview = preview;
     }
 
     public string? DefaultContext { get; }
@@ -22,6 +24,9 @@ public sealed class CobaltConfig
 
     /// <summary>The <c>[keys.&lt;scope&gt;]</c> remap overrides; empty when config has no <c>[keys]</c> section.</summary>
     public KeysConfig Keys { get; }
+
+    /// <summary>The preview-pane setting from <c>preview = …</c>; defaults to <see cref="PreviewMode.Auto"/>.</summary>
+    public PreviewMode Preview { get; }
 
     /// <summary>Picks the active context: CLI override, then default_context, then a sole context.</summary>
     public AdoContext Resolve(string? nameOverride)

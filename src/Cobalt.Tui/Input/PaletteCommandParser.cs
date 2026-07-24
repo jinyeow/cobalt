@@ -13,6 +13,7 @@ public enum PaletteActionKind
     ToggleDone,
     SetProjectFilter,
     SetTheme,
+    SetPreview,
     Unknown,
 }
 
@@ -30,6 +31,9 @@ public enum PaletteArgKind
 
     /// <summary>Argument completes against the theme names (derived from <c>ThemeChoice</c>).</summary>
     Theme,
+
+    /// <summary>Argument completes against the preview-mode names (derived from <c>PreviewMode</c>).</summary>
+    Preview,
 }
 
 /// <summary>One palette command's name, aliases, argument kind, and resulting action — the single
@@ -39,7 +43,7 @@ public readonly record struct PaletteCommandCatalogEntry(
 
 public readonly record struct PaletteAction(PaletteActionKind Kind, string Argument = "");
 
-/// <summary>Parses `:` command-palette input (`q`, `ctx NAME`, `scope`, `done`, `project`, `theme`, `help`, `messages`, `log`).</summary>
+/// <summary>Parses `:` command-palette input (`q`, `ctx NAME`, `scope`, `done`, `project`, `theme`, `preview`, `help`, `messages`, `log`).</summary>
 public static class PaletteCommandParser
 {
     /// <summary>The full command vocabulary — one source for parsing and Tab-completion.</summary>
@@ -54,6 +58,7 @@ public static class PaletteCommandParser
         new("done", [], PaletteArgKind.None, PaletteActionKind.ToggleDone),
         new("project", [], PaletteArgKind.Project, PaletteActionKind.SetProjectFilter),
         new("theme", [], PaletteArgKind.Theme, PaletteActionKind.SetTheme),
+        new("preview", [], PaletteArgKind.Preview, PaletteActionKind.SetPreview),
     ];
 
     public static PaletteAction Parse(string input)
@@ -79,7 +84,8 @@ public static class PaletteCommandParser
                 PaletteActionKind.SwitchContext when argument is null => new PaletteAction(PaletteActionKind.PickContext),
                 PaletteActionKind.SwitchContext => new PaletteAction(PaletteActionKind.SwitchContext, argument),
                 PaletteActionKind.SetScope or PaletteActionKind.ToggleDone
-                    or PaletteActionKind.SetProjectFilter or PaletteActionKind.SetTheme =>
+                    or PaletteActionKind.SetProjectFilter or PaletteActionKind.SetTheme
+                    or PaletteActionKind.SetPreview =>
                     new PaletteAction(entry.ActionKind, argument ?? ""),
                 _ => new PaletteAction(entry.ActionKind),
             };

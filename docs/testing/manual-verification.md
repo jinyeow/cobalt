@@ -244,10 +244,17 @@ status line (` ctx:work  <Your Name>` once identity resolves), message bar
   ` 1:Work Items  [2:Pull Requests]` and the PR list loads. Press `1` → back
   to work items.
   Result: ______
-- [ ] **D3 — Tab semantics.** In the work-items section press `Tab` → switches
-  to the PR section. In the **PR section** `Tab`/`Shift-Tab` do NOT return to
-  work items — they cycle the PR sub-tabs (review queue → mine → active);
-  only `1` returns. Verify both behaviors.
+- [ ] **D3 — Tab semantics.** `Tab` depends on whether the preview pane is
+  showing (ADR 0024), so verify **both** states.
+  *Preview visible* (terminal ≥ 100 cols, `preview = auto`): in either section
+  `Tab` cycles focus between the list and the preview pane — it does **not**
+  change section or PR sub-tab. `[`/`]` cycle the PR sub-tabs; `gt`/`gT` and
+  `1`/`2` change section.
+  *Preview hidden* (narrow the terminal below 100 cols, or `:preview off`):
+  `Tab` falls back to today's behaviour — in the work-items section it switches
+  to the PR section; in the **PR section** `Tab`/`Shift-Tab` do NOT return to
+  work items, they cycle the PR sub-tabs (review queue → mine → active), and
+  only `1` returns.
   Result: ______
 - [ ] **D4 — list movement.** In the work-item list: `j`/`k` move the
   selection down/up; arrow keys also move; `gg` jumps to top, `G` to bottom;
@@ -441,9 +448,11 @@ status line (` ctx:work  <Your Name>` once identity resolves), message bar
 
 ### G. Pull requests
 
-- [ ] **G1 — three tabs.** Press `2`. Header cycles with `Tab` through
+- [ ] **G1 — three tabs.** Press `2`. Header cycles with `[`/`]` through
   ` pull requests · review queue (N)   [Tab] switch` → ` … · mine (N) …` →
-  ` … · active (N) …` and back; `Shift-Tab` cycles in reverse. While loading:
+  ` … · active (N) …` and back; `[` cycles in reverse. `Tab`/`Shift-Tab` do the
+  same **only while the preview pane is hidden** — with the preview showing they
+  cycle pane focus instead (D3). While loading:
   ` pull requests · <tab> · loading…`; on failure:
   ` pull requests · <tab> · error: <message>`.
   Result: ______

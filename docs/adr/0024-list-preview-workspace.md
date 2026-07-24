@@ -134,3 +134,22 @@ PRs ship first, work items second, sharing the machinery (ADR 0022).
   — accepted as the price of "no second formatter".
 - Headless tests carry the invariants; the prototype and the both-driver UAT gate
   carry the feel. Neither substitutes for the other.
+
+## Amendment — 2026-07-24 (pane implementation)
+
+"A manual toggle is persisted in `config.toml`" above means the file is the persistence, not
+that cobalt writes it: `preview = auto|off` is **read at startup and switched live by
+`:preview`**, and is **never written back**. The user edits `config.toml` to make a choice
+permanent — exactly how `theme` behaves, and cobalt has no config writer at all. A `:preview`
+switch therefore lasts for the session.
+
+The `off` override is applied in the shell, on top of `WorkspaceLayout.Compute`, which stays a
+pure function of width. Visibility = `Compute(width).ShowPreview && preview != off`.
+
+**The vertical budget is a content cap, not a viewport cap.** The Summary tier is width-clamped
+by the formatters but vertically unbounded, so `PreviewBudget.Fit` caps the pane's text and
+marks the elision (`… N more`). That cap is deliberately **independent of the pane's height**:
+budgeting to the visible rows would leave nothing off-screen, reducing scrolling — the pane's
+one verb — to a no-op. `PreviewBudget.MaxLines` therefore sits well above any real detail,
+making it a safety valve against pathological content rather than routine truncation, and
+content taller than the pane is kept precisely so the pane has something to scroll through.
