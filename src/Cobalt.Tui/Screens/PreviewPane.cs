@@ -29,6 +29,12 @@ public sealed class PreviewPane : View
             Width = Dim.Fill(),
             Height = Dim.Fill(),
             ReadOnly = true,
+            // A ReadOnly TextView paints its text with VisualRole.ReadOnly, which under the dark
+            // Base scheme is gray-on-gray — invisible (#66). The modal detail dialogs show this
+            // same prose legibly because they inherit the Dialog scheme, whose ReadOnly role is
+            // readable in both themes; adopt it here so the pane matches them. (Base — the
+            // DiffReview precedent — would not help: its ReadOnly role is the gray-on-gray one.)
+            SchemeName = "Dialog",
             WordWrap = false,
             ScrollBars = true, // position indicator; content is scrolled pager-style (VimScroll)
             // The pane itself takes focus, not the TextView: a focused ReadOnly TextView
