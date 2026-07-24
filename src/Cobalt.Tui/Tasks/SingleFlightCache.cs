@@ -22,10 +22,36 @@ public sealed class SingleFlightCache<TKey, TValue> : IDisposable where TKey : n
     /// so the owner's shutdown cancels whatever fetch is in flight.</summary>
     public SingleFlightCache(CancellationToken lifetime) => _lifetime = lifetime;
 
-    /// <summary>The monotonic supersede stamp, incremented once per schedule.</summary>
+    /// <summary>The monotonic supersede stamp, incremented once per schedule and once per <see cref="Cancel"/>.</summary>
     public long Stamp
     {
         get { lock (_gate) { return _stamp; } }
+    }
+
+    /// <summary>
+    /// Supersedes any in-flight fetch without scheduling a replacement: bumps the stamp so a
+    /// token-ignoring fetch's completion is dropped by the same guard a reschedule would use, and
+    /// cancels + detaches the current token source so a cooperative fetch stops early. Unlike
+    /// <see cref="Dispose"/> the cache stays usable — a later <see cref="ScheduleAsync"/> proceeds.
+    /// Idempotent; a no-op after <see cref="Dispose"/>.
+    /// </summary>
+    public void Cancel()
+    {
+        CancellationTokenSource? previous;
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            _stamp++;
+            previous = _cts;
+            _cts = null;
+        }
+        // Outside the lock for the same lock-inversion reason as ScheduleAsync/Dispose; the stamp
+        // was already bumped under the lock, so the in-flight fetch is superseded regardless.
+        previous?.Cancel();
+        previous?.Dispose();
     }
 
     /// <summary>

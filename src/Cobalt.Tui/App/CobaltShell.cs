@@ -884,6 +884,9 @@ public sealed class CobaltShell : Window
     {
         if (!_workspace.PreviewVisible)
         {
+            // Hidden (collapsed or preview = off): abandon anything armed — a hidden pane must not
+            // spend a round-trip. Clear cancels the pending debounce, not merely the paint.
+            _preview.Clear();
             return;
         }
         if (CurrentPreviewRow() is not { } row)
@@ -940,6 +943,10 @@ public sealed class CobaltShell : Window
         return "";
     }
 
+    /// <summary>A list's row set / selection changed — refresh the preview on the UI thread. Raised
+    /// on a background continuation, so marshalled; re-showing the displayed item is a no-op.</summary>
+    private void OnListChanged() => _post.Post(UpdatePreview);
+
     /// <summary>A publish landed — repaint on the UI thread (tier 2 completes on a threadpool
     /// continuation, so this is the ADR 0004 marshalling seam).</summary>
     private void OnPreviewChanged() => _post.Post(RenderPreview);
@@ -964,8 +971,9 @@ public sealed class CobaltShell : Window
         _workItemListVm = listVm;
         // Rows arriving (first load, refresh, filter re-query) change what the cursor sits on
         // without a keystroke, so the preview follows the row set too. Raised on a threadpool
-        // continuation → marshal, and re-showing the same item is a no-op.
-        listVm.Changed += () => _post.Post(UpdatePreview);
+        // continuation → marshal, and re-showing the same item is a no-op. Named so Dispose can
+        // detach it before the preview is torn down.
+        listVm.Changed += OnListChanged;
         var view = new WorkItemListView(_post, listVm);
         view.ItemActivated += OpenWorkItemDetail;
         view.Load();
@@ -976,7 +984,7 @@ public sealed class CobaltShell : Window
     {
         var listVm = new PrListViewModel(pullRequests, () => _vm.Scope) { ProjectFilter = _vm.ProjectFilter ?? "" };
         _prListVm = listVm;
-        listVm.Changed += () => _post.Post(UpdatePreview); // see BuildWorkItemList
+        listVm.Changed += OnListChanged; // see BuildWorkItemList
         _prEnricher ??= new PrCommentCountEnricher(async (pr, ct) =>
         {
             var threads = await pullRequests.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct)
@@ -1043,6 +1051,16 @@ public sealed class CobaltShell : Window
         {
             _vm.ThemeChangeRequested -= OnThemeChangeRequested;
             _vm.PreviewChangeRequested -= OnPreviewChangeRequested;
+            // Detach the list→preview subscriptions before the preview is torn down, so a list VM
+            // that raises Changed during teardown cannot post onto a disposed preview.
+            if (_prListVm is not null)
+            {
+                _prListVm.Changed -= OnListChanged;
+            }
+            if (_workItemListVm is not null)
+            {
+                _workItemListVm.Changed -= OnListChanged;
+            }
             // Cancel the preview's in-flight fetch before the views it would repaint go away.
             _preview.Changed -= OnPreviewChanged;
             _previewLifetime.Cancel();

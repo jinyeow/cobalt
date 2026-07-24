@@ -321,6 +321,39 @@ public class PreviewViewModelTests
     }
 
     [Fact]
+    public async Task Clearing_Cancels_A_Pending_Debounce_So_No_Fetch_Fires()
+    {
+        // Collapse/deselect must not merely drop a completion — it must stop the fetch from being
+        // spent at all (ADR 0024: a hidden pane spends no round-trips).
+        var source = new InstantSource();
+        var time = new FakeTimeProvider();
+        using var vm = new PreviewViewModel(source.FetchAsync, TestContext.Current.CancellationToken, time, Debounce);
+
+        var pending = vm.ShowAsync(Pr(1), Summary(Pr(1)));
+        vm.Clear();
+        time.Advance(Debounce); // the settle that would have fired the fetch
+        await pending;
+
+        Assert.Empty(source.Fetched);
+        Assert.Null(vm.Current);
+    }
+
+    [Fact]
+    public async Task After_Dispose_Show_Is_A_Safe_No_Op()
+    {
+        // A UI-thread post queued before teardown can still run after Dispose; it must not fault
+        // the pipeline (that fault would reach the crash-log hook via FireAndForget).
+        var vm = new PreviewViewModel(
+            new InstantSource().FetchAsync, TestContext.Current.CancellationToken, new FakeTimeProvider(), Debounce);
+        vm.Dispose();
+
+        await vm.ShowAsync(Pr(1), Summary(Pr(1))); // must not throw
+        vm.Clear();
+
+        Assert.Null(vm.Current);
+    }
+
+    [Fact]
     public async Task Workspace_Shutdown_Cancels_The_Pending_Fetch_Without_Publishing()
     {
         var source = new HeldSource();

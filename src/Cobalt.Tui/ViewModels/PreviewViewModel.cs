@@ -41,6 +41,9 @@ public sealed class PreviewViewModel : IDisposable
     private readonly Published<PreviewState> _state = new();
     private readonly TimeProvider _time;
     private readonly TimeSpan _debounce;
+    // Set on the UI thread by Dispose; ShowAsync/Clear are UI-thread-only, so a plain field
+    // suffices. Guards the use-after-dispose a UI post queued before teardown would otherwise hit.
+    private bool _disposed;
 
     /// <param name="fetchDetail">Composes the previewed item's full detail text; one fresh detail
     /// view-model per item (ADR 0024 — no shared mutable view-model between pane and dialog).</param>
@@ -75,7 +78,7 @@ public sealed class PreviewViewModel : IDisposable
     /// </summary>
     public Task ShowAsync(ItemKey key, string summary)
     {
-        if (_state.Current is { } current && current.Key == key)
+        if (_disposed || (_state.Current is { } current && current.Key == key))
         {
             return Task.CompletedTask;
         }
@@ -83,14 +86,18 @@ public sealed class PreviewViewModel : IDisposable
         return LoadDetailAsync(key);
     }
 
-    /// <summary>Clears the pane (nothing selected). A tier-2 fetch still in flight can no longer
-    /// publish: its key is no longer the displayed one.</summary>
+    /// <summary>
+    /// Clears the pane (nothing selected, or the preview collapsed) and cancels any pending tier-2
+    /// fetch — a hidden pane must spend no round-trip (ADR 0024). The cancel stops the debounce
+    /// before a fetch is even issued; a fetch already running is cancelled and its result dropped.
+    /// </summary>
     public void Clear()
     {
-        if (_state.Current is null)
+        if (_disposed || _state.Current is null)
         {
             return;
         }
+        _cache.Cancel();
         Publish(null);
     }
 
@@ -131,5 +138,9 @@ public sealed class PreviewViewModel : IDisposable
         Changed?.Invoke();
     }
 
-    public void Dispose() => _cache.Dispose();
+    public void Dispose()
+    {
+        _disposed = true;
+        _cache.Dispose();
+    }
 }

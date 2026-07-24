@@ -186,6 +186,23 @@ public class ShellPreviewWiringTests
     }
 
     [Fact]
+    public async Task Collapsing_The_Preview_Cancels_A_Debounce_Already_Armed()
+    {
+        // A visible preview arms a tier-2 debounce; collapsing below the threshold must cancel it,
+        // not let it fire on the org's behalf while the pane is hidden (ADR 0024).
+        using var harness = await LoadedShellAsync(width: 120);
+        await harness.DrainUntilPaneSaysAsync("!1  first"); // tier 1 up, debounce armed, not yet settled
+        Assert.Equal(0, harness.Handler.DetailCalls);
+
+        harness.Shell.Layout(new Size(80, 24)); // collapse below the threshold
+        harness.Time.Advance(PreviewViewModel.DefaultDebounce);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        harness.Post.RunAll();
+
+        Assert.Equal(0, harness.Handler.DetailCalls);
+    }
+
+    [Fact]
     public async Task A_Collapsed_Preview_Neither_Paints_Nor_Fetches()
     {
         // Below the collapse threshold the workspace is exactly today's full-width list, so the
