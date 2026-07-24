@@ -2,16 +2,24 @@ namespace Cobalt.Tui.ViewModels;
 
 /// <summary>
 /// The preview pane's vertical budget (#48). The detail formatters clamp Summary output
-/// horizontally but are vertically unbounded, so the pane caps the rendered text to the
-/// lines it can actually show and says how many were dropped. Pure and UI-free (ADR 0004);
-/// deliberately outside the formatters, whose Full-tier output is snapshot-pinned.
+/// horizontally but are vertically unbounded, so the pane caps the rendered text and says how
+/// many lines were dropped. Pure and UI-free (ADR 0004); deliberately outside the formatters,
+/// whose Full-tier output is snapshot-pinned.
 /// </summary>
 public static class PreviewBudget
 {
     /// <summary>
+    /// The pane's hard content cap. Deliberately independent of the pane's height: budgeting to
+    /// the visible rows would leave nothing off-screen, which would make scrolling — the pane's
+    /// only verb (ADR 0024) — a no-op. Set well above any real Summary-tier detail, so it is a
+    /// safety valve against pathological content rather than a routine truncation.
+    /// </summary>
+    public const int MaxLines = 500;
+
+    /// <summary>
     /// Caps <paramref name="text"/> to <paramref name="maxLines"/> rendered lines, replacing the
-    /// overflow with a trailing "… N more" marker. A non-positive budget means "no budget known"
-    /// (an unlaid-out view) and returns the text unchanged.
+    /// overflow with a trailing "… N more" marker. A non-positive budget means "no budget" and
+    /// returns the text unchanged.
     /// </summary>
     public static string Fit(string text, int maxLines)
     {

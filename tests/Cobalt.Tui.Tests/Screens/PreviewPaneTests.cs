@@ -42,33 +42,32 @@ public class PreviewPaneTests
     }
 
     [Fact]
-    public async Task Formatter_Output_Longer_Than_The_Budget_Ends_In_The_Omission_Marker()
+    public async Task Formatter_Output_Is_Shown_Whole()
     {
-        // The Summary tier is width-clamped but vertically unbounded, so a tall PR (reviewers +
-        // policies + description) must be capped to the rows the pane actually has.
+        // The Summary tier is width-clamped but vertically unbounded; the cap is a safety valve
+        // set well above any real detail, so ordinary formatter output is never truncated.
         var vm = await DetailFormatterFixture.LoadedPrVmAsync(TestContext.Current.CancellationToken);
         var summary = PrDetailFormatter.Render(vm, 60, PreviewTier.Summary);
-        var dropped = summary.Split('\n').Length - 4;
-        using var pane = new PreviewPane { LineBudgetOverride = 5 };
-
-        pane.SetContent(summary);
-
-        var shown = pane.Body.Text.ReplaceLineEndings("\n").Split('\n');
-        Assert.Equal(5, shown.Length);
-        Assert.Equal($"… {dropped} more", shown[^1]);
-        Assert.Equal(summary.Split('\n').Take(4), shown[..4]);
-    }
-
-    [Fact]
-    public async Task Formatter_Output_Within_The_Budget_Is_Shown_Whole()
-    {
-        var vm = await DetailFormatterFixture.LoadedPrVmAsync(TestContext.Current.CancellationToken);
-        var summary = PrDetailFormatter.Render(vm, 60, PreviewTier.Summary);
-        using var pane = new PreviewPane { LineBudgetOverride = summary.Split('\n').Length };
+        using var pane = new PreviewPane();
 
         pane.SetContent(summary);
 
         Assert.Equal(summary, pane.Body.Text.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
+    public void Content_Beyond_The_Hard_Cap_Ends_In_The_Omission_Marker()
+    {
+        // The cap bounds what the pane holds regardless of its height, so pathological detail
+        // is elided visibly rather than silently.
+        var overflowing = PreviewBudget.MaxLines + 100;
+        using var pane = new PreviewPane();
+
+        pane.SetContent(string.Join("\n", Enumerable.Range(0, overflowing).Select(i => $"line {i}")));
+
+        var shown = pane.Body.Text.ReplaceLineEndings("\n").Split('\n');
+        Assert.Equal(PreviewBudget.MaxLines, shown.Length);
+        Assert.Equal($"… 101 more", shown[^1]);
     }
 
     [Fact]
@@ -82,33 +81,26 @@ public class PreviewPaneTests
     }
 
     [Fact]
-    public void Resizing_Re_Fits_The_Content_To_The_New_Height()
+    public void A_Pane_Shorter_Than_Its_Content_Keeps_Every_Line_So_It_Can_Scroll()
     {
-        // The budget is the pane's height, so a resize must re-fit from the ORIGINAL text:
-        // re-truncating already-truncated text would lose lines a taller pane has room for.
+        // The cap is deliberately NOT the pane's height: truncating to the visible rows would
+        // leave nothing off-screen, making the pane's one verb — scroll — a no-op.
         var pane = new PreviewPane { Width = Dim.Fill(), Height = Dim.Fill() };
         using var window = new Window { BorderStyle = Terminal.Gui.Drawing.LineStyle.None };
         window.Add(pane);
-        window.Layout(new Size(40, 20));
-        pane.SetContent(string.Join("\n", Enumerable.Range(0, 12).Select(i => $"line {i}")));
-        Assert.Equal(12, pane.Body.Text.ReplaceLineEndings("\n").Split('\n').Length); // fits whole
+        window.Layout(new Size(40, 5));
 
-        window.Layout(new Size(40, 5)); // shrink below the content height
+        pane.SetContent(string.Join("\n", Enumerable.Range(0, 40).Select(i => $"line {i}")));
 
-        var shrunk = pane.Body.Text.ReplaceLineEndings("\n").Split('\n');
-        Assert.Equal(5, shrunk.Length);
-        Assert.Equal("… 8 more", shrunk[^1]); // 12 lines, 4 shown
-
-        window.Layout(new Size(40, 20)); // grow back
-
-        Assert.Equal(12, pane.Body.Text.ReplaceLineEndings("\n").Split('\n').Length);
+        Assert.Equal(40, pane.Body.Text.ReplaceLineEndings("\n").Split('\n').Length);
+        Assert.True(pane.Viewport.Height < 40, "the pane must be shorter than its content to prove anything");
     }
 
-    /// <summary>A laid-out pane holding more lines than it can show, with the budget lifted so
-    /// there is something to scroll through.</summary>
+    /// <summary>A laid-out pane holding more lines than it can show, so a scroll has somewhere to
+    /// go. Nothing is overridden — this is exactly the production path.</summary>
     private static PreviewPane LaidOutPane(int lines = 200, int width = 40, int height = 12)
     {
-        var pane = new PreviewPane { Width = Dim.Fill(), Height = Dim.Fill(), LineBudgetOverride = lines };
+        var pane = new PreviewPane { Width = Dim.Fill(), Height = Dim.Fill() };
         var window = new Window();
         window.Add(pane);
         window.Layout(new Size(width, height));

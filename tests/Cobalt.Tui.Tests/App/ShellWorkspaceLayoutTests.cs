@@ -107,13 +107,10 @@ public class ShellWorkspaceLayoutTests
         Assert.Equal(80, shell.PrListScreen!.Frame.Width);
     }
 
-    /// <summary>Fills the preview with more lines than it can show, budget lifted, so a scroll
-    /// has somewhere to go (#48 itself never sets content — #49 wires the source).</summary>
-    private static void FillPreview(CobaltShell shell)
-    {
-        shell.PreviewScreen.LineBudgetOverride = 500;
+    /// <summary>Fills the preview with more lines than it can show, so a scroll has somewhere to
+    /// go (#48 itself never sets content — #49 wires the source).</summary>
+    private static void FillPreview(CobaltShell shell) =>
         shell.PreviewScreen.SetContent(string.Join("\n", Enumerable.Range(0, 100).Select(i => $"line {i}")));
-    }
 
     [Fact]
     public void With_The_Preview_Focused_Movement_Scrolls_The_Preview()

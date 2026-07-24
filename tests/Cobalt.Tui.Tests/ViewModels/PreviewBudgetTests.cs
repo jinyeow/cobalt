@@ -4,8 +4,8 @@ namespace Cobalt.Tui.Tests.ViewModels;
 
 /// <summary>
 /// The preview pane's vertical budget (#48): the H2 formatters clamp Summary output
-/// horizontally but are vertically unbounded, so the pane caps rendered lines to its
-/// height with an omission marker instead of relying on TextView clipping.
+/// horizontally but are vertically unbounded, so the pane caps rendered lines with an
+/// omission marker instead of relying on TextView clipping.
 /// </summary>
 public class PreviewBudgetTests
 {
@@ -27,10 +27,10 @@ public class PreviewBudgetTests
     }
 
     [Fact]
-    public void A_Zero_Budget_Means_No_Budget_Is_Known_And_Leaves_The_Text_Alone()
+    public void A_Zero_Budget_Means_No_Budget_And_Leaves_The_Text_Alone()
     {
-        // An unlaid-out pane reports Viewport.Height = 0; truncating to nothing there would
-        // hide content that the very next layout pass has room for.
+        // Truncating to nothing is never the useful reading of "no budget" — a caller with no
+        // cap to apply wants the text, not an omission marker standing in for all of it.
         Assert.Equal("a\nb\nc", PreviewBudget.Fit("a\nb\nc", 0));
     }
 

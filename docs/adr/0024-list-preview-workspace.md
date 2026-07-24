@@ -145,3 +145,11 @@ switch therefore lasts for the session.
 
 The `off` override is applied in the shell, on top of `WorkspaceLayout.Compute`, which stays a
 pure function of width. Visibility = `Compute(width).ShowPreview && preview != off`.
+
+**The vertical budget is a content cap, not a viewport cap.** The Summary tier is width-clamped
+by the formatters but vertically unbounded, so `PreviewBudget.Fit` caps the pane's text and
+marks the elision (`… N more`). That cap is deliberately **independent of the pane's height**:
+budgeting to the visible rows would leave nothing off-screen, reducing scrolling — the pane's
+one verb — to a no-op. `PreviewBudget.MaxLines` therefore sits well above any real detail,
+making it a safety valve against pathological content rather than routine truncation, and
+content taller than the pane is kept precisely so the pane has something to scroll through.
