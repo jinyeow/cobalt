@@ -9,6 +9,13 @@
   moves focus between the panes, and `j`/`k`/`C-d`/`C-u`/`gg`/`G` scroll whichever pane has it.
   The pane is read-only — every action stays modal. See
   [ADR 0024](docs/adr/0024-list-preview-workspace.md).
+- **The preview follows the cursor, in two tiers.** Moving the selection repaints the pane
+  immediately from the row the list already holds — no fetch, no latency, never a blank pane —
+  and only once the cursor has been still for ~200 ms does cobalt fetch that item's full detail
+  and fill in the rest. Holding `j` down therefore costs nothing: the fetch is scheduled where
+  you stop, at most one is ever in flight, and a fetch you have already moved away from is
+  cancelled and dropped whole rather than painted over the item you are now looking at. A
+  collapsed preview (narrow terminal, or `preview = off`) fetches nothing at all.
 - **`preview = auto|off` in `config.toml`** (default `auto`), and **`:preview auto|off`** to
   switch it live. `off` keeps the list full-width at every width. `config.toml` is the
   persistence — cobalt never writes it back, so make the choice permanent by editing the file,

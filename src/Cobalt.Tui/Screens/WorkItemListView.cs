@@ -158,6 +158,17 @@ public sealed class WorkItemListView : View
         }
     }
 
+    /// <summary>The highlighted row's own item — the data the preview's tier 1 paints from,
+    /// with no fetch (ADR 0024); null while the list is empty.</summary>
+    public WorkItem? SelectedItem
+    {
+        get
+        {
+            _vm.SelectedIndex = _list.SelectedItem ?? 0;
+            return _vm.Selected;
+        }
+    }
+
     /// <summary>The highlighted item's project (org scope may span projects); null when unknown/empty.</summary>
     public string? SelectedProject
     {
