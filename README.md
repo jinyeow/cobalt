@@ -10,7 +10,7 @@ diff review with line comments) and iterating past it; the
 and design decisions in [docs/adr/](docs/adr/).
 
 Built with a UI-free `Cobalt.Core` and a view-model layer that never references
-Terminal.Gui, so the interesting logic is unit-tested (1,283 tests). See
+Terminal.Gui, so the interesting logic is unit-tested (1,286 tests). See
 [docs/adr/0004](docs/adr/0004-terminal-gui-v2-with-viewmodels.md) and
 [0007](docs/adr/0007-vim-input-as-testable-data.md).
 
