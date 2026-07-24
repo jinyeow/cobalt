@@ -21,6 +21,15 @@ public interface IPullRequestStore
 /// </summary>
 public sealed class PrDetailViewModel(IPullRequestStore store, int id)
 {
+    /// <summary>
+    /// Seeds the view-model with a PR the caller already holds — the preview pane's tier 1
+    /// (ADR 0024): the list row renders through the same formatter with zero fetches, and
+    /// <see cref="LoadAsync"/> later replaces it with the full detail. Threads and policies stay
+    /// empty until then; only the fetch knows them.
+    /// </summary>
+    public PrDetailViewModel(IPullRequestStore store, PullRequest row)
+        : this(store, row.PullRequestId) => PullRequest = row;
+
     public int Id => id;
     public bool IsLoading { get; private set; }
     public bool IsBusy { get; private set; }

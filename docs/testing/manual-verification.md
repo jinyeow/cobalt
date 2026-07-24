@@ -325,6 +325,25 @@ status line (` ctx:work  <Your Name>` once identity resolves), message bar
   Expect: `Esc` clears the pending `g` (no `gg` fires) and `j` moves normally.
   Also `g` followed by an unbound key (e.g. `z`) just resets — no crash.
   Result: ______
+- [ ] **D16 — the preview follows the cursor (two tiers, ADR 0024).** On a
+  terminal ≥ 100 cols with `preview = auto`, in either section: the preview
+  shows the highlighted row **instantly** on every `j`/`k` — no blank pane and
+  no `loading…` flash while moving. Stop on a row: within ~200 ms the pane
+  fills out with the fetched detail (a PR gains its policies and thread list;
+  a work item gains its description and comments). Now hold `j` down through
+  20+ rows: the pane must keep up with the cursor, and when you stop it must
+  settle on the row you stopped on — never on one you passed through. The
+  headless suite proves the invariant; what you are judging here is feel and
+  staleness.
+  Result: ______
+- [ ] **D17 — preview scrolling with real content.** Select an item with a long
+  description, `Tab` to the preview, and scroll with `j`/`k`/`C-d`/`C-u`/`gg`/
+  `G`. Expect the text to scroll and the scrollbar to track it. Watch the
+  **rightmost column**: the vertical scrollbar must not sit on top of text, and
+  no horizontal scrollbar should appear along the bottom (preview text is
+  clamped to the pane width minus the scrollbar column). Either one is a
+  finding — a headless test cannot see the drawn scrollbars.
+  Result: ______
 
 ### E. Work items
 

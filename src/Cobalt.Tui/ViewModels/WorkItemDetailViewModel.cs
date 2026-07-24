@@ -29,6 +29,21 @@ public sealed class WorkItemDetailViewModel(IWorkItemStore store, long id, strin
     // cross-project item's state/comment/patch calls hit its project, not the context's (H1).
     private string? _project = string.IsNullOrEmpty(project) ? null : project;
 
+    /// <summary>
+    /// Seeds the view-model with a work item the caller already holds — the preview pane's tier 1
+    /// (ADR 0024): the list row renders through the same formatter with zero fetches, and
+    /// <see cref="LoadAsync"/> later replaces it with the full detail. The list route omits the
+    /// description and the comment thread, so those stay empty until then.
+    /// </summary>
+    public WorkItemDetailViewModel(IWorkItemStore store, WorkItem row)
+        : this(store, row.Id, row.TeamProject)
+    {
+        Item = row;
+        var analysis = HtmlMarkdown.Analyze(row.DescriptionHtml);
+        DescriptionMarkdown = analysis.Markdown;
+        DescriptionLossy = analysis.Lossy;
+    }
+
     public long Id => id;
     public bool IsLoading { get; private set; }
     public bool IsBusy { get; private set; }

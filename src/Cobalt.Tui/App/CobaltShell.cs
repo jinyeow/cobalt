@@ -59,6 +59,13 @@ public sealed class CobaltShell : Window
     // The user's preview setting (`preview = auto|off`, flipped live by `:preview`). The width
     // decision stays in WorkspaceLayout; this override is applied on top of it, here.
     private PreviewMode _previewMode;
+    // The preview's two-tier load (ADR 0024 / #49) and the workspace-lifetime token every one of
+    // its fetches is linked to, so teardown cancels whatever is in flight.
+    private readonly PreviewViewModel _preview;
+    private readonly CancellationTokenSource _previewLifetime = new();
+    // The pane's text width, captured on the UI thread at layout time: a tier-2 fetch completes on
+    // a threadpool continuation and must not read a Terminal.Gui viewport from there.
+    private int _previewTextWidth = 1;
     private readonly Label _status;
     private readonly Label _message;
     private readonly Label _keybar;
@@ -80,7 +87,8 @@ public sealed class CobaltShell : Window
         AdoContext? context = null,
         IOsThemeMonitor? themeMonitor = null,
         KeyBindingTable? bindings = null,
-        IUiPost? post = null)
+        IUiPost? post = null,
+        TimeProvider? time = null)
     {
         _app = app;
         _post = post ?? new ApplicationUiPost(app);
@@ -142,6 +150,10 @@ public sealed class CobaltShell : Window
         _content.ViewportChanged += (_, _) => ApplyWorkspaceLayout();
 
         _previewMode = vm.CurrentPreview;
+        // The preview pipeline (ADR 0024 / #49): tier 1 paints from the row the list already holds,
+        // tier 2 fetches a fresh detail view-model per item once the cursor settles.
+        _preview = new PreviewViewModel(FetchPreviewDetailAsync, _previewLifetime.Token, time);
+        _preview.Changed += OnPreviewChanged;
         WireViewModel();
         WireKeys();
         WirePalette();
@@ -384,11 +396,13 @@ public sealed class CobaltShell : Window
             {
                 _workItemList?.Navigate(command, count);
                 moved = _workItemList;
+                UpdatePreview(); // the cursor moved: tier 1 repaints now, tier 2 waits for the settle
             }
             else if (PullRequestsActive)
             {
                 _prList?.Navigate(command, count);
                 moved = _prList;
+                UpdatePreview();
             }
             // INPUT-1: dirty only the moved list and issue a non-forced layout+draw, instead of
             // forcing a full-app repaint on every keystroke. A programmatic InvokeCommand move may
@@ -813,6 +827,8 @@ public sealed class CobaltShell : Window
         // Re-establish focus: swapping the shown screen leaves focus dangling, which stops
         // Window.KeyDown from routing subsequent keys.
         ApplyWorkspaceFocus();
+        // The other section's selection is a different item — repaint the preview for this one.
+        UpdatePreview();
     }
 
     /// <summary>
@@ -829,12 +845,18 @@ public sealed class CobaltShell : Window
         _workspace.SetPreviewVisible(showPreview);
         _listHost.Width = showPreview ? panes.ListWidth : Dim.Fill();
         _previewPane.Visible = showPreview;
+        // One column goes to the vertical scrollbar the pane renders once its content overflows
+        // (PreviewPane sets ScrollBars = true); headless never draws, so only the both-driver UAT
+        // (ADR 0016) can see it.
+        _previewTextWidth = Math.Max(1, panes.PreviewWidth - 1);
         // A `:preview` toggle changes the split without a resize, so re-lay the content area
         // here rather than waiting for the next event that happens to trigger layout.
         _content.Layout();
         ApplyWorkspaceFocus();
         // The keybar advertises Tab only while the preview shows, so the chrome follows the split.
         RefreshChrome();
+        // A preview that just appeared has nothing in it until the selection is pushed through.
+        UpdatePreview();
     }
 
     /// <summary>
@@ -851,6 +873,88 @@ public sealed class CobaltShell : Window
         _activeScreen?.SetFocus();
     }
 
+    /// <summary>
+    /// Pushes the highlighted row into the preview (ADR 0024): tier 1 paints from the row's own
+    /// data before this returns, and the debounced tier-2 fetch is scheduled behind it. Called on
+    /// every cursor move, section switch, layout pass and list load — re-showing the item already
+    /// on screen is a no-op inside the view-model, so calling it freely is cheap. Nothing is
+    /// scheduled while the preview is collapsed: a hidden pane must not spend round-trips.
+    /// </summary>
+    private void UpdatePreview()
+    {
+        if (!_workspace.PreviewVisible)
+        {
+            // Hidden (collapsed or preview = off): abandon anything armed — a hidden pane must not
+            // spend a round-trip. Clear cancels the pending debounce, not merely the paint.
+            _preview.Clear();
+            return;
+        }
+        if (CurrentPreviewRow() is not { } row)
+        {
+            _preview.Clear();
+            return;
+        }
+        // The pipeline's returned task is the shell's to observe (ADR 0013): an unexpected fault in
+        // a background preview load reaches the crash log and the message bar, not a discarded task.
+        _ = FireAndForget.Observe(_preview.ShowAsync(row.Key, row.Summary), _post, _vm.Messages.Error);
+    }
+
+    /// <summary>
+    /// The highlighted row of the visible list as (key, tier-1 text): the detail view-model seeded
+    /// with the row the list already holds, rendered through the shared formatter's Summary tier —
+    /// zero fetches, no second formatter (ADR 0024). Null when nothing is selected.
+    /// </summary>
+    private (ItemKey Key, string Summary)? CurrentPreviewRow()
+    {
+        if (WorkItemsActive && _workItems is not null && _workItemList?.SelectedItem is { } item)
+        {
+            return (new ItemKey(AppSection.WorkItems, item.Id, _workItemList.SelectedProject),
+                WorkItemDetailFormatter.Render(
+                    new WorkItemDetailViewModel(_workItems, item), _previewTextWidth, PreviewTier.Summary));
+        }
+        if (PullRequestsActive && _pullRequests is not null && _prList?.SelectedPr is { } pr)
+        {
+            return (new ItemKey(AppSection.PullRequests, pr.PullRequestId, pr.ProjectName),
+                PrDetailFormatter.Render(
+                    new PrDetailViewModel(_pullRequests, pr), _previewTextWidth, PreviewTier.Summary));
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Tier 2: a detail view-model built fresh for the previewed item — never shared with the modal
+    /// (ADR 0024) — loaded and rendered at the pane's Summary depth. Runs on a background thread;
+    /// the width it renders to was captured at layout time.
+    /// </summary>
+    private async Task<string> FetchPreviewDetailAsync(ItemKey key, CancellationToken ct)
+    {
+        if (key.Section == AppSection.WorkItems && _workItems is not null)
+        {
+            var detail = new WorkItemDetailViewModel(_workItems, key.Id, key.Project);
+            await detail.LoadAsync(ct).ConfigureAwait(false);
+            return WorkItemDetailFormatter.Render(detail, _previewTextWidth, PreviewTier.Summary);
+        }
+        if (key.Section == AppSection.PullRequests && _pullRequests is not null)
+        {
+            var detail = new PrDetailViewModel(_pullRequests, (int)key.Id);
+            await detail.LoadAsync(ct).ConfigureAwait(false);
+            return PrDetailFormatter.Render(detail, _previewTextWidth, PreviewTier.Summary);
+        }
+        return "";
+    }
+
+    /// <summary>A list's row set / selection changed — refresh the preview on the UI thread. Raised
+    /// on a background continuation, so marshalled; re-showing the displayed item is a no-op.</summary>
+    private void OnListChanged() => _post.Post(UpdatePreview);
+
+    /// <summary>A publish landed — repaint on the UI thread (tier 2 completes on a threadpool
+    /// continuation, so this is the ADR 0004 marshalling seam).</summary>
+    private void OnPreviewChanged() => _post.Post(RenderPreview);
+
+    /// <summary>The one place preview state becomes pane text: a single snapshot read, so the
+    /// key and its text can never be read from two different publishes.</summary>
+    private void RenderPreview() => _previewPane.SetContent(_preview.Current?.Text ?? "");
+
     /// <summary>Test seam: the workspace pane-focus view-model (ADR 0024).</summary>
     internal WorkspaceViewModel Workspace => _workspace;
 
@@ -865,6 +969,11 @@ public sealed class CobaltShell : Window
         var listVm = new WorkItemListViewModel(
             workItems, _vm.IncludeCompletedWorkItems, _vm.ProjectFilter, () => _vm.Scope);
         _workItemListVm = listVm;
+        // Rows arriving (first load, refresh, filter re-query) change what the cursor sits on
+        // without a keystroke, so the preview follows the row set too. Raised on a threadpool
+        // continuation → marshal, and re-showing the same item is a no-op. Named so Dispose can
+        // detach it before the preview is torn down.
+        listVm.Changed += OnListChanged;
         var view = new WorkItemListView(_post, listVm);
         view.ItemActivated += OpenWorkItemDetail;
         view.Load();
@@ -875,6 +984,7 @@ public sealed class CobaltShell : Window
     {
         var listVm = new PrListViewModel(pullRequests, () => _vm.Scope) { ProjectFilter = _vm.ProjectFilter ?? "" };
         _prListVm = listVm;
+        listVm.Changed += OnListChanged; // see BuildWorkItemList
         _prEnricher ??= new PrCommentCountEnricher(async (pr, ct) =>
         {
             var threads = await pullRequests.GetThreadsAsync(pr.ProjectName, pr.RepositoryId, pr.PullRequestId, ct)
@@ -941,6 +1051,21 @@ public sealed class CobaltShell : Window
         {
             _vm.ThemeChangeRequested -= OnThemeChangeRequested;
             _vm.PreviewChangeRequested -= OnPreviewChangeRequested;
+            // Detach the list→preview subscriptions before the preview is torn down, so a list VM
+            // that raises Changed during teardown cannot post onto a disposed preview.
+            if (_prListVm is not null)
+            {
+                _prListVm.Changed -= OnListChanged;
+            }
+            if (_workItemListVm is not null)
+            {
+                _workItemListVm.Changed -= OnListChanged;
+            }
+            // Cancel the preview's in-flight fetch before the views it would repaint go away.
+            _preview.Changed -= OnPreviewChanged;
+            _previewLifetime.Cancel();
+            _preview.Dispose();
+            _previewLifetime.Dispose();
             if (_themeMonitor is not null)
             {
                 _themeMonitor.Changed -= OnOsThemeChanged;

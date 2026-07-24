@@ -153,3 +153,31 @@ budgeting to the visible rows would leave nothing off-screen, reducing scrolling
 one verb — to a no-op. `PreviewBudget.MaxLines` therefore sits well above any real detail,
 making it a safety valve against pathological content rather than routine truncation, and
 content taller than the pane is kept precisely so the pane has something to scroll through.
+
+## Amendment — 2026-07-24 (the two-tier load)
+
+`PreviewViewModel` (`src/Cobalt.Tui/ViewModels/PreviewViewModel.cs`) implements the load, and it
+delegates the invariant to the typed foundations rather than re-hand-rolling it:
+`SingleFlightCache<ItemKey, string>` supplies cancel-superseded, the newest-stamp guard and fault
+observation; `Published<PreviewState>` supplies the atomic publish. Three consequences worth
+recording, because none of them is obvious from the clauses above:
+
+- **The debounce runs *inside* the single-flight fetch.** Scheduling happens on the cursor move,
+  but the first thing the scheduled work does is `Task.Delay(debounce, TimeProvider)`. A new key
+  therefore cancels the previous *wait*: while the cursor moves, no fetch is enqueued at all —
+  clause 4 by construction, rather than by a second timer that has to be kept in step.
+- **Both tiers render at `PreviewTier.Summary`.** The load tiers differ in *data* (the list row
+  versus the fetched detail), never in render depth — the pane is a Summary-tier surface at all
+  times and `Full` stays the modal's. `PreviewState` therefore carries a `Detailed` flag, not a
+  `PreviewTier`, so "Full into the pane" cannot be expressed.
+- **Tier 1 goes through the shared formatter, not a row renderer.** The list row seeds a detail
+  view-model (`new PrDetailViewModel(store, row)`), which the same formatter renders — so the "no
+  second formatter" rule holds for tier 1 too. The fields the list route does not carry
+  (work-item description and comments; PR threads and policies) simply read empty for the ~200 ms
+  until tier 2 lands; the #43 prototype's UAT confirmed no tier-transition treatment is needed.
+
+The displayed item is keyed as `ItemKey(AppSection, Id, Project)` — the project belongs to the
+identity because org scope spans projects. The shell pushes the selection through on every cursor
+move, section switch, layout pass and list load; re-showing the item already on screen is a no-op,
+so those call sites need no coordination between them. A collapsed preview schedules nothing: a
+hidden pane must not spend the org's round-trips.

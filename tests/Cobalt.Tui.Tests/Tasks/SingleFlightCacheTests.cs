@@ -196,6 +196,40 @@ public class SingleFlightCacheTests
         Assert.True(tokens["b"].IsCancellationRequested);
     }
 
+    [Fact]
+    public async Task Cancel_Supersedes_A_Token_Ignoring_Fetch_And_Leaves_The_Cache_Usable()
+    {
+        using var cache = new SingleFlightCache<string, int>(TestContext.Current.CancellationToken);
+        var published = new List<(string Key, int Value)>();
+        var a = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // The fake IGNORES its token, so only the stamp bump Cancel makes can drop its late result.
+        var taskA = cache.ScheduleAsync("a", (_, _) => a.Task, Publish(published));
+        cache.Cancel();
+        a.SetResult(1);
+        await taskA;
+        Assert.Empty(published);
+
+        // Unlike Dispose, Cancel leaves the cache usable — a later schedule still publishes.
+        await cache.ScheduleAsync("b", (_, _) => Task.FromResult(2), Publish(published));
+        Assert.Equal([("b", 2)], published);
+    }
+
+    [Fact]
+    public async Task Cancel_Cancels_The_InFlight_Token()
+    {
+        using var cache = new SingleFlightCache<string, int>(TestContext.Current.CancellationToken);
+        var published = new List<(string Key, int Value)>();
+        var tokens = new Dictionary<string, CancellationToken>();
+
+        var task = cache.ScheduleAsync("a", (key, ct) => Hold(key, ct, tokens), Publish(published));
+        cache.Cancel();
+        await task;
+
+        Assert.True(tokens["a"].IsCancellationRequested);
+        Assert.Empty(published);
+    }
+
     /// <summary>A fetch held open forever that honours its token — completes only by cancellation.</summary>
     private static Task<int> Hold(string key, CancellationToken ct, Dictionary<string, CancellationToken> tokens)
     {

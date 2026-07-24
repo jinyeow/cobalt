@@ -10,7 +10,7 @@ diff review with line comments) and iterating past it; the
 and design decisions in [docs/adr/](docs/adr/).
 
 Built with a UI-free `Cobalt.Core` and a view-model layer that never references
-Terminal.Gui, so the interesting logic is unit-tested (1,269 tests). See
+Terminal.Gui, so the interesting logic is unit-tested (1,291 tests). See
 [docs/adr/0004](docs/adr/0004-terminal-gui-v2-with-viewmodels.md) and
 [0007](docs/adr/0007-vim-input-as-testable-data.md).
 
@@ -110,6 +110,13 @@ read-only **preview** of the selected item on the right. `preview` decides wheth
 pane appears: `auto` (default) shows it whenever the terminal is at least 100 columns wide and
 collapses to today's full-width list below that; `off` keeps the list full-width at every
 width. Switch live with `:preview auto|off` (bare `:preview` reports the current setting).
+
+The preview follows the cursor in two tiers. A move repaints it straight away from the row the
+list already holds, so it is never blank and never waits on the network; once the cursor has been
+still for about 200 ms, cobalt fetches that item's full detail and fills in the rest (threads and
+policies for a PR, description and comments for a work item). Holding `j` down costs nothing —
+the fetch happens where you stop, one at a time, and anything you have moved away from is
+dropped rather than painted late.
 
 Focus moves between the panes with `Tab` (or `C-h`/`C-l`), and `j`/`k`/`C-d`/`C-u`/`gg`/`G`
 scroll whichever pane holds it. The preview is read-only — `Enter` still opens the modal detail
