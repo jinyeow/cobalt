@@ -48,6 +48,18 @@ public class KeyBindingTableTests
             .First(b => b.Sequence is ["j"]).Command);
     }
 
+    // #67: on the windows driver Ctrl+H arrives as Backspace, so "C-h" never fires. Backspace
+    // is bound to FocusLeft in the two list scopes (where the preview lives) as the reachable
+    // path to focus the list; "C-l" already works on both drivers for FocusRight.
+    [Theory]
+    [InlineData(KeyScope.WorkItemList)]
+    [InlineData(KeyScope.PullRequestList)]
+    public void Backspace_Focuses_Left_In_The_List_Scopes(KeyScope scope)
+    {
+        Assert.Equal(AppCommand.FocusLeft, KeyBindingTable.Default().Visible(scope)
+            .First(b => b.Sequence is ["Backspace"]).Command);
+    }
+
     // ---- INPUT-2: per-scope binding arrays are cached, not rebuilt on every router lookup ----
 
     [Fact]

@@ -118,7 +118,8 @@ policies for a PR, description and comments for a work item). Holding `j` down c
 the fetch happens where you stop, one at a time, and anything you have moved away from is
 dropped rather than painted late.
 
-Focus moves between the panes with `Tab` (or `C-h`/`C-l`), and `j`/`k`/`C-d`/`C-u`/`gg`/`G`
+Focus moves between the panes with `Tab` (or `C-h`/`C-l`; `Backspace` also focuses the list, for
+the Windows console driver where `Ctrl+H` arrives as `Backspace`), and `j`/`k`/`C-d`/`C-u`/`gg`/`G`
 scroll whichever pane holds it. The preview is read-only — `Enter` still opens the modal detail
 for anything you want to act on. `config.toml` is the persistence: cobalt never writes it back,
 so edit `preview` there to make a choice permanent. See

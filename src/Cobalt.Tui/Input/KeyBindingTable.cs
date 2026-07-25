@@ -66,6 +66,11 @@ public sealed class KeyBindingTable
         // list+preview workspace Tab cycles pane focus (ADR 0024). While the preview is
         // hidden the shell falls back to today's Tab semantics.
         table.Bind(KeyScope.WorkItemList, "Tab", AppCommand.CyclePane);
+        // Backspace is the windows-driver-reachable FocusLeft (#67): that driver delivers
+        // Ctrl+H as Backspace, so the global "C-h" binding never fires there. Scoped to the
+        // list+preview workspace (Backspace is otherwise free in a list; a live filter's
+        // TextField has focus and consumes it first); "C-l"→FocusRight already works on both.
+        table.Bind(KeyScope.WorkItemList, "Backspace", AppCommand.FocusLeft);
 
         table.Bind(KeyScope.WorkItemDetail, "c", AppCommand.Comment);
         table.Bind(KeyScope.WorkItemDetail, "e", AppCommand.EditInEditor);
@@ -82,6 +87,7 @@ public sealed class KeyBindingTable
         table.Bind(KeyScope.PullRequestList, "]", AppCommand.NextTab);
         table.Bind(KeyScope.PullRequestList, "[", AppCommand.PrevTab);
         table.Bind(KeyScope.PullRequestList, "Tab", AppCommand.CyclePane);
+        table.Bind(KeyScope.PullRequestList, "Backspace", AppCommand.FocusLeft); // #67, see WorkItemList
 
         table.Bind(KeyScope.PullRequestDetail, "v", AppCommand.Vote);
         table.Bind(KeyScope.PullRequestDetail, "c", AppCommand.Comment);
@@ -274,14 +280,14 @@ public sealed class KeyBindingTable
                 throw new ConfigException(
                     $"[keys.{scopeLabel}] {commandName} = \"{rawSequence}\" contains \"{token}\", which no " +
                     "keypress produces — tokens are single keys (\"j\"), control chords (\"C-d\"), or the " +
-                    "named keys Enter, Tab, S-Tab, Up, Down, separated by spaces (\"5j\" is the two keys \"5 j\")");
+                    "named keys Enter, Tab, S-Tab, Up, Down, Backspace, separated by spaces (\"5j\" is the two keys \"5 j\")");
             }
         }
     }
 
     // The named tokens KeyTokenizer emits besides single runes and C-a..C-z chords ("Esc" is
     // rejected above before this list matters).
-    private static readonly string[] NamedTokens = ["Enter", "Tab", "S-Tab", "Up", "Down"];
+    private static readonly string[] NamedTokens = ["Enter", "Tab", "S-Tab", "Up", "Down", "Backspace"];
 
     /// <summary>
     /// True when <c>KeyTokenizer</c> can actually emit <paramref name="token"/> for some

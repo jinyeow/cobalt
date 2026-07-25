@@ -5,8 +5,9 @@
 ### Added
 - **A preview pane beside the work-item and pull-request lists.** On a terminal at least 100
   columns wide the content area splits into the list (left) and a read-only, scrollable preview
-  (right); below that width it collapses back to today's full-width list. `Tab` (or `C-h`/`C-l`)
-  moves focus between the panes, and `j`/`k`/`C-d`/`C-u`/`gg`/`G` scroll whichever pane has it.
+  (right); below that width it collapses back to today's full-width list. `Tab` (or `C-h`/`C-l`,
+  or `Backspace` to focus the list) moves focus between the panes, and `j`/`k`/`C-d`/`C-u`/`gg`/`G`
+  scroll whichever pane has it.
   The pane is read-only — every action stays modal. See
   [ADR 0024](docs/adr/0024-list-preview-workspace.md).
 - **The preview follows the cursor, in two tiers.** Moving the selection repaints the pane
@@ -34,6 +35,10 @@
 - **The preview pane's text is now legible in the default `dark` theme.** Its read-only body
   drew with a gray-on-gray scheme role and rendered as a blank rectangle; it now adopts the
   `Dialog` scheme the detail dialogs use, so the same summary is readable in both themes.
+- **`Backspace` now focuses the list pane on the Windows console driver.** That driver delivers
+  `Ctrl+H` as `Backspace`, so the `C-h`→focus-left binding never fired there (`C-l`→focus-right
+  and `Tab` were unaffected). `Backspace` is now bound to focus-left in the list scopes as the
+  reachable path; the `dotnet` driver, which delivers `Ctrl+H` intact, keeps `C-h` too.
 
 ## 0.3.2 — 2026-07-24
 
