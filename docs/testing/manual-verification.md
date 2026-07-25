@@ -341,8 +341,20 @@ status line (` ctx:work  <Your Name>` once identity resolves), message bar
   `G`. Expect the text to scroll and the scrollbar to track it. Watch the
   **rightmost column**: the vertical scrollbar must not sit on top of text, and
   no horizontal scrollbar should appear along the bottom (preview text is
-  clamped to the pane width minus the scrollbar column). Either one is a
-  finding — a headless test cannot see the drawn scrollbars.
+  clamped to the pane width minus the border and scrollbar columns). Either one
+  is a finding — a headless test cannot see the drawn scrollbars.
+  Result: ______
+- [ ] **D18 — preview pane border & focus affordance (#68).** On a terminal
+  ≥ 100 cols with `preview = auto`, the preview pane is drawn inside a **box
+  border** that separates it from the list. With the list focused the border is
+  a **single** line; `Tab` (or `C-l`) to focus the preview and it becomes a
+  **double** line; `Tab`/`C-h`/`Backspace` back to the list reverts it to single.
+  With overflowing content the vertical scrollbar sits **just inside** the right
+  border line — no collision. Toggle `:theme light`/`:theme dark`: the border
+  stays legible in both. Collapse below 100 cols (or `:preview off`) while the
+  preview is focused — the pane vanishes, focus lands on the list, no ghost
+  border remains; re-expanding restores it. A headless test cannot see the drawn
+  border, so this is UAT-only.
   Result: ______
 
 ### E. Work items
@@ -713,13 +725,13 @@ only regressions *beyond* these descriptions are findings.
 | A. CLI basics | 7 | | | |
 | B. Config | 9 | | | |
 | C. Auth | 7 | | | |
-| D. Shell & vim | 15 | | | |
+| D. Shell & vim | 18 | | | |
 | E. Work items | 14 | | | |
 | F. Editor round-trip | 6 | | | |
 | G. Pull requests | 15 | | | |
 | H. Diff review | 14 | | | |
 | I. Robustness | 7 | | | |
-| **Total** | **94** | | | |
+| **Total** | **97** | | | |
 
 **Blocking issues found** (id, one line each):
 

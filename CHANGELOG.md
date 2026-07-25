@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## 0.4.0 — 2026-07-25
 
 ### Added
 - **A preview pane beside the work-item and pull-request lists.** On a terminal at least 100
