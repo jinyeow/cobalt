@@ -140,6 +140,32 @@ public class WorkItemActionsTests
     }
 
     [Fact]
+    public async Task ChangeState_Runs_Chooser_Inside_UiPost()
+    {
+        var store = new FakeStore();
+        var queue = new Queue<Action>();
+        var inPost = false;
+        bool? chooseRanInPost = null;
+        var actions = new WorkItemActions(App, EditorReturning(null), _ => { },
+            choose: (_, _) => { chooseRanInPost = inPost; return 1; }, // index 1 → "Active"
+            post: queue.Enqueue);
+
+        var task = actions.RunChangeStateAsync(store, 1, null, TestContext.Current.CancellationToken);
+        while (queue.Count > 0)
+        {
+            var a = queue.Dequeue();
+            inPost = true;
+            a();
+            inPost = false;
+        }
+        await task;
+
+        Assert.True(chooseRanInPost);
+        Assert.NotNull(store.LastPatch);
+        Assert.Contains("Active", store.LastPatch!.ToJson());
+    }
+
+    [Fact]
     public async Task RunAssign_Reads_Via_TextInput_And_Sends_AssignedTo_Patch()
     {
         var store = new FakeStore();

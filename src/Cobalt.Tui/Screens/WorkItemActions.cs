@@ -1,3 +1,4 @@
+using Cobalt.Tui.App;
 using Cobalt.Tui.Editor;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
@@ -79,7 +80,7 @@ public sealed class WorkItemActions
             _post(() => _log("no states available"));
             return;
         }
-        if (_choose("change state", states) is { } index && index >= 0 && index < states.Length)
+        if (await UiWork.RunAsync(_post, () => _choose("change state", states)).ConfigureAwait(false) is { } index && index >= 0 && index < states.Length)
         {
             await RunAndLog(vm, vm.ChangeStateAsync(states[index], ct), $"state → {states[index]}").ConfigureAwait(false);
         }
