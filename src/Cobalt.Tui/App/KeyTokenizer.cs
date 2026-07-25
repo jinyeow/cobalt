@@ -31,6 +31,11 @@ public static class KeyTokenizer
                 return "Enter";
             case KeyCode.Tab:
                 return key.IsShift ? "S-Tab" : "Tab";
+            case KeyCode.Backspace:
+                // The windows driver delivers Ctrl+H as Backspace (the ASCII 0x08 collision),
+                // so this is the only token a windows user can bind to FocusLeft (#67). Named
+                // rather than left to fall through to null, as it was before.
+                return "Backspace";
             case KeyCode.CursorUp:
                 return "Up";
             case KeyCode.CursorDown:

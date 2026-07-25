@@ -28,6 +28,15 @@ public class KeyTokenizerTests
         Assert.Equal("S-Tab", KeyTokenizer.ToToken(Key.Tab.WithShift));
     }
 
+    // The windows driver delivers Ctrl+H as KeyCode.Backspace (the 0x08 collision), so a
+    // "Backspace" token is the only way a windows user can reach FocusLeft (#67). It must
+    // tokenize to a named key rather than the null it used to fall through to.
+    [Fact]
+    public void Backspace_Maps_To_A_Named_Token()
+    {
+        Assert.Equal("Backspace", KeyTokenizer.ToToken(new Key(KeyCode.Backspace)));
+    }
+
     [Fact]
     public void Control_Chords_Lowercase()
     {
