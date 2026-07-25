@@ -181,3 +181,15 @@ identity because org scope spans projects. The shell pushes the selection throug
 move, section switch, layout pass and list load; re-showing the item already on screen is a no-op,
 so those call sites need no coordination between them. A collapsed preview schedules nothing: a
 hidden pane must not spend the org's round-trips.
+
+## Amendment — 2026-07-25 (the pane border, #68)
+
+`PreviewWidth` is the pane's FRAME width; the border is a Terminal.Gui adornment drawn inside
+that frame, so `WorkspaceLayout` stays pure and unchanged. The shell's text clamp now reserves
+the adornment columns (`View.GetAdornmentsThickness().Horizontal`) plus the scrollbar column
+(was scrollbar-only). Pane focus is made visible by a border line-style swap
+(`Single` unfocused, `Double` focused), driven from `FocusedPane` through the shell's single
+`ApplyWorkspaceFocus` mapping and the pane's own `HasFocusChanged` — no new `WorkspaceViewModel`
+property. The border is explicitly scheme'd (`SchemeName = "Dialog"` on the pane itself) so it is
+legible in both themes: unlike `_body`, the border resolves through the *pane's* scheme, not the
+body's, so it does not inherit the body's #66 fix for free.

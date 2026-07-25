@@ -42,4 +42,33 @@ public class PreviewPaneThemeTests
 
         Assert.NotEqual(readOnly.Background, readOnly.Foreground);
     }
+
+    [Fact]
+    public void Border_Is_Legible_In_The_Dark_Theme()
+    {
+        // #68 (Codex HIGH): #66 scheme'd the body only. The border is a Terminal.Gui
+        // adornment resolving through the PANE's own GetScheme(), not the body's — an
+        // unscheme'd pane would leave the border to inherit whatever ambient scheme
+        // surrounds it, the same gray-on-gray trap #66 fixed for the body. Prove it
+        // directly rather than inferring it from the body's fix.
+        ThemeService.Enable();
+        ThemeService.Apply(ThemeResolver.Resolve(ThemeChoice.Dark, OsTheme.Unknown));
+        using var pane = new PreviewPane();
+
+        var border = pane.Border.GetOrCreateView().GetAttributeForRole(VisualRole.Normal);
+
+        Assert.NotEqual(border.Background, border.Foreground);
+    }
+
+    [Fact]
+    public void Border_Is_Legible_In_The_Light_Theme()
+    {
+        ThemeService.Enable();
+        ThemeService.Apply(ThemeResolver.Resolve(ThemeChoice.Light, OsTheme.Unknown));
+        using var pane = new PreviewPane();
+
+        var border = pane.Border.GetOrCreateView().GetAttributeForRole(VisualRole.Normal);
+
+        Assert.NotEqual(border.Background, border.Foreground);
+    }
 }

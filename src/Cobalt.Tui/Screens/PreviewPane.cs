@@ -1,5 +1,6 @@
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
+using Terminal.Gui.Drawing;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -19,6 +20,15 @@ public sealed class PreviewPane : View
     public PreviewPane()
     {
         CanFocus = true;
+        // The border is the list<->preview separator (#68); its line style doubles as the
+        // pane's focus affordance (see the HasFocusChanged subscription below).
+        BorderStyle = LineStyle.Single;
+        // The border is a Terminal.Gui adornment drawn OUTSIDE _body's Dialog scheme (it
+        // resolves through the pane's own GetScheme(), not the body's), so left unscheme'd
+        // it would inherit whatever ambient scheme surrounds the pane — the same
+        // gray-on-gray invisibility #66 fixed for the body. Scheme the pane explicitly so
+        // the border stays legible in both themes.
+        SchemeName = "Dialog";
         // WordWrap stays OFF (unlike the detail dialogs): the Summary tier is already
         // width-clamped by the formatter, so one logical line is exactly one row — which is
         // what keeps the line cap an honest count of rows.
@@ -45,6 +55,11 @@ public sealed class PreviewPane : View
         };
         Add(_body);
         SetContent(""); // paint the empty state up front
+
+        // The pane's own focus state is the one signal driving the swap — no new
+        // WorkspaceViewModel property; ApplyWorkspaceFocus (ADR 0024's single mapping)
+        // already routes Terminal.Gui focus here, so this stays in sync for free.
+        HasFocusChanged += (_, _) => BorderStyle = HasFocus ? LineStyle.Double : LineStyle.Single;
     }
 
     /// <summary>Test seam: the read-only scroll pane, exposed so a view-level test can assert on it.</summary>

@@ -3,6 +3,7 @@ using Cobalt.Tui.Input;
 using Cobalt.Tui.Screens;
 using Cobalt.Tui.Tests.ViewModels;
 using Cobalt.Tui.ViewModels;
+using Terminal.Gui.Drawing;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -15,6 +16,74 @@ namespace Cobalt.Tui.Tests.Screens;
 /// </summary>
 public class PreviewPaneTests
 {
+    [Fact]
+    public void Has_A_Single_Line_Border_By_Default()
+    {
+        // #68: the border supplies the list<->preview separator; its line style is the
+        // pane's focus affordance (Single unfocused, Double focused — see the focus tests).
+        using var pane = new PreviewPane();
+
+        Assert.Equal(LineStyle.Single, pane.BorderStyle);
+        Assert.Equal(new Thickness(1), pane.Border.Thickness);
+    }
+
+    [Fact]
+    public void The_Border_Is_An_Adornment_So_The_Body_Shrinks_Inside_The_Frame()
+    {
+        // #68 §1: the border is drawn INSIDE the pane's frame, so _body's Dim.Fill() shrinks
+        // by the adornment automatically — WorkspaceLayout never needs to know about it.
+        var pane = new PreviewPane { Width = Dim.Fill(), Height = Dim.Fill() };
+        using var window = new Window { BorderStyle = LineStyle.None };
+        window.Add(pane);
+
+        window.Layout(new Size(40, 12));
+
+        Assert.Equal(38, pane.Viewport.Width); // 40 frame − 2 (border L+R)
+        Assert.Equal(38, pane.Body.Viewport.Width); // _body fills the pane's shrunk viewport
+    }
+
+    [Fact]
+    public void Gaining_Focus_Switches_The_Border_To_Double_And_Losing_It_Reverts_To_Single()
+    {
+        // #68: the pane's own focus state is the only signal — no new WorkspaceViewModel
+        // property. A focusable sibling gives focus somewhere else to move to.
+        var pane = new PreviewPane { Width = Dim.Fill(), Height = Dim.Fill() };
+        var sibling = new View { CanFocus = true, Width = 1, Height = 1 };
+        using var window = new Window { BorderStyle = LineStyle.None };
+        window.Add(pane, sibling);
+        window.Layout(new Size(40, 12));
+
+        pane.SetFocus();
+        Assert.Equal(LineStyle.Double, pane.BorderStyle);
+
+        sibling.SetFocus();
+        Assert.Equal(LineStyle.Single, pane.BorderStyle);
+    }
+
+    [Fact]
+    public void The_Focus_Border_Swap_Leaves_The_Bodys_Scroll_Position_Unchanged()
+    {
+        // The swap only changes BorderStyle — it must not disturb where the pane's content
+        // is scrolled to.
+        var pane = new PreviewPane { Width = Dim.Fill(), Height = Dim.Fill() };
+        var sibling = new View { CanFocus = true, Width = 1, Height = 1 };
+        using var window = new Window { BorderStyle = LineStyle.None };
+        window.Add(pane, sibling);
+        window.Layout(new Size(40, 12));
+        pane.SetContent(string.Join("\n", Enumerable.Range(0, 200).Select(i => $"line {i}")));
+        pane.Scroll(AppCommand.MoveDown, 5);
+        var rowBefore = pane.Body.CurrentRow;
+        var viewportBefore = pane.Body.Viewport;
+
+        pane.SetFocus();
+        Assert.Equal(rowBefore, pane.Body.CurrentRow);
+        Assert.Equal(viewportBefore, pane.Body.Viewport);
+
+        sibling.SetFocus();
+        Assert.Equal(rowBefore, pane.Body.CurrentRow);
+        Assert.Equal(viewportBefore, pane.Body.Viewport);
+    }
+
     [Fact]
     public async Task Renders_The_Pr_Detail_Formatters_Summary_Output()
     {

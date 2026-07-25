@@ -845,10 +845,13 @@ public sealed class CobaltShell : Window
         _workspace.SetPreviewVisible(showPreview);
         _listHost.Width = showPreview ? panes.ListWidth : Dim.Fill();
         _previewPane.Visible = showPreview;
-        // One column goes to the vertical scrollbar the pane renders once its content overflows
-        // (PreviewPane sets ScrollBars = true); headless never draws, so only the both-driver UAT
-        // (ADR 0016) can see it.
-        _previewTextWidth = Math.Max(1, panes.PreviewWidth - 1);
+        // panes.PreviewWidth is the pane's FRAME width; its border (#68) is a Terminal.Gui
+        // adornment drawn inside that frame, so the clamp must reserve the adornment columns
+        // (both sides — GetAdornmentsThickness().Horizontal) as well as one column for the
+        // vertical scrollbar the pane renders once its content overflows (PreviewPane sets
+        // ScrollBars = true); headless never draws, so only the both-driver UAT (ADR 0016) can
+        // see the scrollbar itself.
+        _previewTextWidth = Math.Max(1, panes.PreviewWidth - _previewPane.GetAdornmentsThickness().Horizontal - 1);
         // A `:preview` toggle changes the split without a resize, so re-lay the content area
         // here rather than waiting for the next event that happens to trigger layout.
         _content.Layout();
@@ -960,6 +963,9 @@ public sealed class CobaltShell : Window
 
     /// <summary>Test seam: the read-only preview pane beside the list.</summary>
     internal PreviewPane PreviewScreen => _previewPane;
+
+    /// <summary>Test seam: the pane's text width, as handed to the detail formatters.</summary>
+    internal int PreviewTextWidth => _previewTextWidth;
 
     private WorkItemListView BuildWorkItemList(WorkItemStoreAdapter workItems)
     {

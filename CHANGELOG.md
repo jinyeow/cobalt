@@ -21,6 +21,9 @@
   switch it live. `off` keeps the list full-width at every width. `config.toml` is the
   persistence — cobalt never writes it back, so make the choice permanent by editing the file,
   exactly as with `theme`.
+- **A border around the preview pane** (#68), doubling as its focus indicator: a single line
+  when it isn't focused, a double line when it is. The border also supplies the list/preview
+  separator that was previously missing.
 
 ### Changed
 - **`Tab` inside the work-item and pull-request lists now cycles list/preview focus** instead of

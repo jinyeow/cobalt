@@ -120,9 +120,10 @@ dropped rather than painted late.
 
 Focus moves between the panes with `Tab` (or `C-h`/`C-l`; `Backspace` also focuses the list, for
 the Windows console driver where `Ctrl+H` arrives as `Backspace`), and `j`/`k`/`C-d`/`C-u`/`gg`/`G`
-scroll whichever pane holds it. The preview is read-only — `Enter` still opens the modal detail
-for anything you want to act on. `config.toml` is the persistence: cobalt never writes it back,
-so edit `preview` there to make a choice permanent. See
+scroll whichever pane holds it. The preview pane's border doubles as its focus indicator — a
+single line when it isn't focused, a double line when it is. The preview is read-only —
+`Enter` still opens the modal detail for anything you want to act on. `config.toml` is the
+persistence: cobalt never writes it back, so edit `preview` there to make a choice permanent. See
 [ADR 0024](docs/adr/0024-list-preview-workspace.md).
 
 ## Themes
