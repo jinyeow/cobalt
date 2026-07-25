@@ -69,4 +69,29 @@ public class PrActionsTests
 
         Assert.Null(store.VotedValue);
     }
+
+    [Fact]
+    public async Task RunVote_Runs_Chooser_Inside_UiPost()
+    {
+        var store = new FakeStore();
+        var queue = new Queue<Action>();
+        var inPost = false;
+        bool? chooseRanInPost = null;
+        var actions = new PrActions(App, _ => { },
+            choose: (_, _) => { chooseRanInPost = inPost; return 0; },
+            post: queue.Enqueue);
+
+        var task = actions.RunVoteAsync(store, 10, TestContext.Current.CancellationToken);
+        while (queue.Count > 0)
+        {
+            var a = queue.Dequeue();
+            inPost = true;
+            a();
+            inPost = false;
+        }
+        await task;
+
+        Assert.True(chooseRanInPost);
+        Assert.Equal(PrVote.Approved, store.VotedValue);
+    }
 }

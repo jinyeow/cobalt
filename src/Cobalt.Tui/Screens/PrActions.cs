@@ -1,4 +1,5 @@
 using Cobalt.Core.Models;
+using Cobalt.Tui.App;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
 using Terminal.Gui.Views;
@@ -53,7 +54,7 @@ public sealed class PrActions
     /// <summary>The vote flow (shared with the dialog): pick a vote, then apply it.</summary>
     public async Task VoteAsync(PrDetailViewModel vm, CancellationToken ct)
     {
-        if (_choose("vote", Labels) is { } index && index >= 0 && index < Votes.Length)
+        if (await UiWork.RunAsync(_post, () => _choose("vote", Labels)).ConfigureAwait(false) is { } index && index >= 0 && index < Votes.Length)
         {
             await RunAndLog(vm, vm.VoteAsync(Votes[index], ct), $"voted: {Labels[index]}").ConfigureAwait(false);
         }

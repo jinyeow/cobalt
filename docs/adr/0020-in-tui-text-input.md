@@ -54,3 +54,18 @@ editor to type *a number*) that cost is absurd.
   pasting multi-line text into the field arrives as synthesized key events, so an embedded newline
   submits early. Use **Ctrl-E** to bring pasted/multi-line content into `$EDITOR`. Terminals on
   the ANSI/VT path (bracketed paste) are unaffected.
+
+## Amendment (2026-07-25): any background-flow modal must marshal onto the UI thread
+
+Voting on a PR from the list — and changing a work-item state from the list — fragmented the
+display: the chooser fired from a threadpool continuation (after `await LoadAsync(ct)
+.ConfigureAwait(false)`), so Terminal.Gui pumped a second, unsynchronized run loop concurrently
+with the shell's, tearing draws and losing the dismissal repaint (#71). Terminal.Gui's
+`Run`/`Begin`/`End` have no thread-affinity guard, so nothing catches this at the call site.
+
+The rule this ADR already established for text entry generalizes: **any modal requested from a
+background-flow continuation — in-TUI text entry or a `MessageBox` chooser — must be marshaled
+onto the main loop via the post/Invoke seam.** `TuiTextInput` already did this (`app.Invoke` +
+`TaskCompletionSource`); `UiWork.RunAsync` extracts that pattern into a shared helper so
+`PrActions.VoteAsync` and `WorkItemActions.ChangeStateAsync` can wrap their `_choose(...)` calls
+the same way, with no change to the UI-thread (dialog) call paths.

@@ -39,6 +39,8 @@
   `Ctrl+H` as `Backspace`, so the `C-h`→focus-left binding never fired there (`C-l`→focus-right
   and `Tab` were unaffected). `Backspace` is now bound to focus-left in the list scopes as the
   reachable path; the `dotnet` driver, which delivers `Ctrl+H` intact, keeps `C-h` too.
+- **Voting on a PR from the list — and changing a work-item state from the list — no longer
+  fragments the display; the chooser dialog now runs on the UI thread.** (#71)
 
 ## 0.3.2 — 2026-07-24
 
