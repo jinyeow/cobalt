@@ -28,4 +28,18 @@ public class PreviewPaneThemeTests
 
         Assert.NotEqual(readOnly.Background, readOnly.Foreground);
     }
+
+    [Fact]
+    public void Body_Is_Legible_In_The_Light_Theme()
+    {
+        ThemeService.Enable();
+        ThemeService.Apply(ThemeResolver.Resolve(ThemeChoice.Light, OsTheme.Unknown));
+        using var pane = new PreviewPane();
+
+        // The Dialog scheme is theme-agnostic, so the same fix must hold in light: its ReadOnly
+        // role stays legible (fg≠bg) rather than collapsing the way the dark Base role did.
+        var readOnly = pane.Body.GetAttributeForRole(VisualRole.ReadOnly);
+
+        Assert.NotEqual(readOnly.Background, readOnly.Foreground);
+    }
 }
