@@ -30,6 +30,11 @@
   `[keys.workitemlist]` / `[keys.pullrequestlist]` (see
   [ADR 0023](docs/adr/0023-keybinding-remap-config.md)).
 
+### Fixed
+- **The preview pane's text is now legible in the default `dark` theme.** Its read-only body
+  drew with a gray-on-gray scheme role and rendered as a blank rectangle; it now adopts the
+  `Dialog` scheme the detail dialogs use, so the same summary is readable in both themes.
+
 ## 0.3.2 — 2026-07-24
 
 No user-facing change. This release carries dependency updates and the internal foundations
