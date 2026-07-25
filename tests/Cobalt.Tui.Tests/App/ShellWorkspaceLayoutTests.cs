@@ -7,6 +7,7 @@ using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
 using Cobalt.Tui.ViewModels;
 using Terminal.Gui.App;
+using Terminal.Gui.Drawing;
 using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 
@@ -70,6 +71,63 @@ public class ShellWorkspaceLayoutTests
         Assert.Equal(54, shell.PrListScreen!.Frame.Width);
         Assert.Equal(54, shell.PreviewScreen.Frame.X);
         Assert.Equal(66, shell.PreviewScreen.Frame.Width);
+    }
+
+    [Fact]
+    public void The_Formatter_Width_Matches_The_Bodys_Actual_Text_Width_Excluding_The_Scrollbar()
+    {
+        // #68: the border is a Terminal.Gui adornment, so the shell's text-width clamp must
+        // reserve it too — measured against the pane's REAL laid-out viewport (not the −3
+        // arithmetic) so a future adornment change can't silently double- or under-subtract.
+        using var shell = LaidOutShell(120);
+
+        Assert.Equal(shell.PreviewScreen.Body.Viewport.Width - 1, shell.PreviewTextWidth);
+    }
+
+    [Fact]
+    public void A_Wide_Terminal_Clamps_The_Formatter_Width_To_Leave_Room_For_Border_And_Scrollbar()
+    {
+        // 120 cols: preview Frame.Width == 66 (unchanged by the border, which is an
+        // adornment inside the frame — see WorkspaceLayout). 66 − 2 (border L+R) − 1
+        // (scrollbar) == 63: the width every rendered preview line must fit within.
+        using var shell = LaidOutShell(120);
+
+        Assert.Equal(63, shell.PreviewTextWidth);
+    }
+
+    [Fact]
+    public void At_99_Columns_The_Preview_Stays_Collapsed()
+    {
+        // One column below WorkspaceLayout's 100-col collapse threshold.
+        using var shell = LaidOutShell(99);
+
+        Assert.False(shell.Workspace.PreviewVisible);
+        Assert.False(shell.PreviewScreen.Visible);
+        Assert.Equal(99, shell.PrListScreen!.Frame.Width);
+    }
+
+    [Fact]
+    public void At_100_Columns_The_Preview_Shows_In_The_Narrow_Band()
+    {
+        // The collapse threshold itself: narrow-band list width is the fixed 40,
+        // preview gets the remaining 60 — the border adornment doesn't move either number.
+        using var shell = LaidOutShell(100);
+
+        Assert.True(shell.Workspace.PreviewVisible);
+        Assert.True(shell.PreviewScreen.Visible);
+        Assert.Equal(40, shell.PrListScreen!.Frame.Width);
+        Assert.Equal(60, shell.PreviewScreen.Frame.Width);
+    }
+
+    [Fact]
+    public void At_109_Columns_The_Preview_Still_Uses_The_Narrow_Band_Width()
+    {
+        // One column below WorkspaceLayout's 110-col wide-band threshold.
+        using var shell = LaidOutShell(109);
+
+        Assert.True(shell.Workspace.PreviewVisible);
+        Assert.Equal(40, shell.PrListScreen!.Frame.Width);
+        Assert.Equal(69, shell.PreviewScreen.Frame.Width);
     }
 
     [Fact]
@@ -159,6 +217,31 @@ public class ShellWorkspaceLayoutTests
 
         Assert.Equal(WorkspacePane.List, shell.Workspace.FocusedPane);
         Assert.True(shell.PrListScreen!.HasFocus);
+    }
+
+    [Fact]
+    public void Collapsing_While_Focused_Moves_Focus_Off_The_Pane_And_Reexpansion_Restores_Double()
+    {
+        // #68: collapsing while the preview is focused must not leave a Double-bordered,
+        // invisible pane behind — focus moves to the list (existing ADR 0024 invariant), which
+        // reverts the border to Single via HasFocusChanged; re-expanding and refocusing must
+        // show Double again, proving the border state tracks real focus through a full cycle.
+        using var shell = LaidOutShell(120);
+        shell.SetFocus();
+        shell.NewKeyDownEvent(new Key(KeyCode.Tab));
+        Assert.Equal(WorkspacePane.Preview, shell.Workspace.FocusedPane);
+        Assert.Equal(LineStyle.Double, shell.PreviewScreen.BorderStyle);
+
+        shell.Layout(new Size(80, 24)); // collapse below the threshold
+
+        Assert.Equal(WorkspacePane.List, shell.Workspace.FocusedPane);
+        Assert.Equal(LineStyle.Single, shell.PreviewScreen.BorderStyle);
+
+        shell.Layout(new Size(120, 24)); // re-expand
+        shell.NewKeyDownEvent(new Key(KeyCode.Tab));
+
+        Assert.Equal(WorkspacePane.Preview, shell.Workspace.FocusedPane);
+        Assert.Equal(LineStyle.Double, shell.PreviewScreen.BorderStyle);
     }
 
     [Fact]
