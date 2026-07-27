@@ -85,8 +85,10 @@ internal static class MenuDialog
         var lastWidth = -1;
         void Render()
         {
-            var width = Math.Max(1, rows.Viewport.Width);
-            lastWidth = width;
+            // The raw width is the guard's memory (the clamp is a rendering detail): storing the
+            // clamped value would never settle at a true width of 0, since 0 != 1 on every pass.
+            lastWidth = rows.Viewport.Width;
+            var width = Math.Max(1, lastWidth);
             // The list is the source of truth for the highlight bar, but SetSource nulls it, so
             // the view-model's clamped index is the restore target and the list mirrors back.
             ListRenderTail.Apply(rows, vm.VisibleOptions.Count, "no matches", () => vm.FormatRows(width), vm.SelectedIndex);
@@ -172,9 +174,12 @@ internal static class MenuDialog
                 keys.HandleKey(sender, key);
             }
         };
-        // Row widths depend on the viewport, which is only known once the dialog is laid out and
-        // again after a terminal resize; re-render on a real width change only.
-        dialog.ViewportChanged += (_, _) =>
+        // Row widths depend on the LIST's viewport, which is only known once it has been laid out
+        // and again after a terminal resize; subscribe to the same view the width is read from
+        // (the list-screen pattern) — listening on the dialog fires before its children are laid
+        // out, so the rows would render one pass behind and open blank. Re-render on a real width
+        // change only.
+        rows.ViewportChanged += (_, _) =>
         {
             if (rows.Viewport.Width != lastWidth)
             {

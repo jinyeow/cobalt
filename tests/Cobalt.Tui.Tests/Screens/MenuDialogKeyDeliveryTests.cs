@@ -53,6 +53,22 @@ public class MenuDialogKeyDeliveryTests
         return harness;
     }
 
+    /// <summary>The text actually bound to a row — what the user reads, not just how many rows exist.</summary>
+    private static string RowText(ListView list, int index) =>
+        list.Source?.ToList()[index]?.ToString() ?? "";
+
+    [Fact]
+    public void The_Rows_Carry_Their_Hint_And_Label_After_The_First_Layout()
+    {
+        // The row texts are width-dependent, so they are (re)formatted from a layout event. If
+        // that event's width is read one pass behind, the menu opens blank and only fills in on a
+        // second layout — a user pressing '?' would see an empty popup.
+        var menu = NewMenu();
+
+        Assert.Equal("  j        move down", RowText(menu.List, 0));
+        Assert.Equal("  yy       yank id/url", RowText(menu.List, 4));
+    }
+
     [Fact]
     public void The_Menu_Binds_Every_Row_And_Starts_On_The_First()
     {
