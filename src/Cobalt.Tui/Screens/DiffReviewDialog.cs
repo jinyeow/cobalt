@@ -47,12 +47,12 @@ public sealed class DiffReviewDialog(
     // RightIndex), rebuilt with _diffRows so IsLineVisible / SelectDiffLine are O(1) rather than
     // an O(rows) scan on every n/N, hunk/thread nav and search hop (RENDER-7).
     private IReadOnlyDictionary<int, int> _lineToRow = new Dictionary<int, int>();
-    private string? _searchQuery;
-    private IReadOnlyList<(int LineIndex, LineSpan Span)> _searchMatches = [];
-    private int _searchIndex;
     private int _lastDialogWidth = -1;
     private int _diffContentWidth = 1;
     private readonly DiffPaneComposer _composer = new();
+    // The dialog's view-state half (ADR 0004): everything DISPLAYED-side that needs no widget.
+    // Dialog-owned like _composer, so construction (and every test's) is unchanged.
+    private readonly DiffReviewViewModel _review = new(vm);
     private readonly CoalescingGate _statsRefresh = new();
     private int _prefetchLaunched;
 
@@ -86,7 +86,7 @@ public sealed class DiffReviewDialog(
     internal Action<PrVote>? VoteAction { get; set; }
 
     /// <summary>Test seam: the number of matches for the active search (0 when no search).</summary>
-    internal int SearchMatchCount => _searchMatches.Count;
+    internal int SearchMatchCount => _review.MatchCount;
 
     /// <summary>Test seam: the changed-file list pane.</summary>
     internal ListView FileList => _fileList;
@@ -669,38 +669,27 @@ public sealed class DiffReviewDialog(
 
     private void ApplySearch(string? query)
     {
-        if (vm.CurrentDiff is not { } diff || string.IsNullOrWhiteSpace(query))
+        // The state transition is the view-model's; the render, the jump and the log are the
+        // dialog's. Render still runs before either, exactly as it did when this was one method.
+        var outcome = _review.ApplySearch(query);
+        Render(includeFileList: false); // applying/clearing the search only re-decorates the diff pane
+        if (outcome.JumpToLine is { } line)
         {
-            _searchQuery = null;
-            _searchMatches = [];
-            Render(includeFileList: false); // clearing the search only re-decorates the diff pane
-            return;
+            EnsureVisibleAndSelect(line);
         }
-        _searchQuery = query.Trim();
-        _searchMatches = DiffSearch.Find(diff.Lines, _searchQuery);
-        _searchIndex = 0;
-        Render(includeFileList: false); // applying the search only re-decorates the diff pane
-        if (_searchMatches.Count > 0)
+        else if (outcome.NoMatchesFor is { } unmatched)
         {
-            EnsureVisibleAndSelect(_searchMatches[_searchIndex].LineIndex);
-        }
-        else
-        {
-            log($"no matches for \"{_searchQuery}\"");
+            log($"no matches for \"{unmatched}\"");
         }
     }
 
     /// <summary>n/N: move to the next/previous search match, wrapping, expanding a fold that hides it.</summary>
     private void StepSearch(bool forward)
     {
-        if (_searchMatches.Count == 0)
+        if (_review.StepSearch(forward) is { } line)
         {
-            return;
+            EnsureVisibleAndSelect(line);
         }
-        _searchIndex = forward
-            ? DiffSearch.Next(_searchMatches, _searchIndex)
-            : DiffSearch.Prev(_searchMatches, _searchIndex);
-        EnsureVisibleAndSelect(_searchMatches[_searchIndex].LineIndex);
     }
 
     /// <summary>Select the row showing a unified line, expanding all folds first if that line is hidden.</summary>
@@ -1030,8 +1019,7 @@ public sealed class DiffReviewDialog(
             if (!sameFile)
             {
                 // Search matches are line-index scoped to one file; drop them when the file changes.
-                _searchQuery = null;
-                _searchMatches = [];
+                _review.ClearSearch();
             }
             _renderedDiffPath = snap.Path;
 
@@ -1041,7 +1029,7 @@ public sealed class DiffReviewDialog(
             var (commentedLeft, commentedRight) = vm.CommentedLinesFor(snap.Path);
             var composition = _composer.Compose(new DiffPaneRequest(
                 snap.Diff, snap.Path, _sideBySide, sameFile ? _foldState : null,
-                _searchMatches, _diffContentWidth, commentedLeft, commentedRight));
+                _review.Matches, _diffContentWidth, commentedLeft, commentedRight));
             _foldState = composition.FoldState;
             _diffRows = composition.Rows;
             _lineToRow = composition.LineToRow;
