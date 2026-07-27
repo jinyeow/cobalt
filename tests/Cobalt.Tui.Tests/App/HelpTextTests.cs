@@ -165,6 +165,168 @@ public class HelpTextTests
         Assert.Equal("Enter", open.KeyHint);
     }
 
+    // ---- Golden pins: the exact overlay text as of the pre-menu implementation (00916f1) ----
+
+    /// <summary>
+    /// The cheatsheet's rows exactly as the pre-menu renderer emitted them, transcribed from that
+    /// implementation's own output rather than re-derived from today's builder — so a change in
+    /// the row builder moves only one side of the comparison and the pin actually fails.
+    /// </summary>
+    private static readonly string[] WorkItemListPreviewHidden =
+    [
+        "  c        comment",
+        "  s        change state",
+        "  a        assign",
+        "  t        edit tags",
+        "  Backspace focus pane left",
+        "  j        move down",
+        "  k        move up",
+        "  gg       jump to top",
+        "  G        jump to bottom",
+        "  C-d      half page down",
+        "  C-u      half page up",
+        "  Enter    open selection",
+        "  q        quit (also :q)",
+        "  r        refresh",
+        "  ?        this help",
+        "  :        command palette (:q, :context NAME, :scope, :done, :project NAME, :theme dark|light|system, :preview auto|off)",
+        "  /        filter list",
+        "  Tab      next tab",
+        "  S-Tab    previous tab",
+        "  C-l      focus pane right",
+        "  gt       next section",
+        "  gT       previous section",
+        "  g1       work items section",
+        "  g2       pull requests section",
+        "  yy       yank id/url",
+        "  gx       open in browser",
+    ];
+
+    private static readonly string[] WorkItemListPreviewShown =
+    [
+        "  c        comment",
+        "  s        change state",
+        "  a        assign",
+        "  t        edit tags",
+        "  Tab      switch list / preview",
+        "  Backspace focus pane left",
+        "  j        move down",
+        "  k        move up",
+        "  gg       jump to top",
+        "  G        jump to bottom",
+        "  C-d      half page down",
+        "  C-u      half page up",
+        "  Enter    open selection",
+        "  q        quit (also :q)",
+        "  r        refresh",
+        "  ?        this help",
+        "  :        command palette (:q, :context NAME, :scope, :done, :project NAME, :theme dark|light|system, :preview auto|off)",
+        "  /        filter list",
+        "  Tab      next tab",
+        "  S-Tab    previous tab",
+        "  C-l      focus pane right",
+        "  gt       next section",
+        "  gT       previous section",
+        "  g1       work items section",
+        "  g2       pull requests section",
+        "  yy       yank id/url",
+        "  gx       open in browser",
+    ];
+
+    private static readonly string[] PullRequestListPreviewHidden =
+    [
+        "  v        vote on PR",
+        "  ]        next tab",
+        "  [        previous tab",
+        "  Backspace focus pane left",
+        "  j        move down",
+        "  k        move up",
+        "  gg       jump to top",
+        "  G        jump to bottom",
+        "  C-d      half page down",
+        "  C-u      half page up",
+        "  Enter    open selection",
+        "  q        quit (also :q)",
+        "  r        refresh",
+        "  ?        this help",
+        "  :        command palette (:q, :context NAME, :scope, :done, :project NAME, :theme dark|light|system, :preview auto|off)",
+        "  /        filter list",
+        "  C-l      focus pane right",
+        "  gt       next section",
+        "  gT       previous section",
+        "  g1       work items section",
+        "  g2       pull requests section",
+        "  yy       yank id/url",
+        "  gx       open in browser",
+    ];
+
+    private static readonly string[] PullRequestListPreviewShown =
+    [
+        "  v        vote on PR",
+        "  ]        next tab",
+        "  [        previous tab",
+        "  Tab      switch list / preview",
+        "  Backspace focus pane left",
+        "  j        move down",
+        "  k        move up",
+        "  gg       jump to top",
+        "  G        jump to bottom",
+        "  C-d      half page down",
+        "  C-u      half page up",
+        "  Enter    open selection",
+        "  q        quit (also :q)",
+        "  r        refresh",
+        "  ?        this help",
+        "  :        command palette (:q, :context NAME, :scope, :done, :project NAME, :theme dark|light|system, :preview auto|off)",
+        "  /        filter list",
+        "  C-l      focus pane right",
+        "  gt       next section",
+        "  gT       previous section",
+        "  g1       work items section",
+        "  g2       pull requests section",
+        "  yy       yank id/url",
+        "  gx       open in browser",
+    ];
+
+    private static readonly string[] WorkItemDetailDialog =
+    [
+        "  c        comment",
+        "  e        edit in $EDITOR",
+        "  s        change state",
+        "  a        assign",
+        "  t        edit tags",
+        "  j        move down",
+        "  k        move up",
+        "  gg       jump to top",
+        "  G        jump to bottom",
+        "  C-d      half page down",
+        "  C-u      half page up",
+        "  q        quit (also :q)",
+        "  ?        this help",
+    ];
+    /// <summary>The overlay's line separator is the platform's, so join rather than hardcode it.</summary>
+    private static string Overlay(string[] rows) => string.Join(Environment.NewLine, rows) + Environment.NewLine;
+
+    [Fact]
+    public void Work_Item_List_Help_Still_Renders_The_Pre_Menu_Overlay()
+    {
+        Assert.Equal(Overlay(WorkItemListPreviewHidden), HelpText.For(Table, KeyScope.WorkItemList, previewVisible: false));
+        Assert.Equal(Overlay(WorkItemListPreviewShown), HelpText.For(Table, KeyScope.WorkItemList, previewVisible: true));
+    }
+
+    [Fact]
+    public void Pull_Request_List_Help_Still_Renders_The_Pre_Menu_Overlay()
+    {
+        Assert.Equal(Overlay(PullRequestListPreviewHidden), HelpText.For(Table, KeyScope.PullRequestList, previewVisible: false));
+        Assert.Equal(Overlay(PullRequestListPreviewShown), HelpText.For(Table, KeyScope.PullRequestList, previewVisible: true));
+    }
+
+    [Fact]
+    public void Dialog_Help_Still_Renders_The_Pre_Menu_Overlay()
+    {
+        Assert.Equal(Overlay(WorkItemDetailDialog), HelpText.ForDialog(Table, KeyScope.WorkItemDetail));
+    }
+
     /// <summary>The cheatsheet's row format, spelled out here independently of the production
     /// renderer so the byte-identical pins above compare against a real second opinion.</summary>
     private static string ReEmit(IReadOnlyList<MenuOption<AppCommand>> rows)
