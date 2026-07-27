@@ -26,12 +26,19 @@ internal static class MenuDialog
     {
         var vm = new MenuViewModel<T>(options);
         MenuOption<T>? chosen = null;
+        // The close callback needs the dialog Build is about to return, so it reads the variable
+        // (assigned below, before the run loop that can invoke it) rather than a captured value.
         Dialog? dialog = null;
+        void Close()
+        {
+            if (dialog is { } running)
+            {
+                app.RequestStop(running);
+            }
+        }
+
         using var built = Build(
-            app, title, vm, bindings,
-            onAccept: option => chosen = option,
-            requestClose: () => app.RequestStop(dialog!),
-            out _, out _);
+            app, title, vm, bindings, onAccept: option => chosen = option, requestClose: Close, out _, out _);
         dialog = built;
         app.Run(built);
         return chosen;
