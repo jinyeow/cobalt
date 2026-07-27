@@ -651,6 +651,21 @@ public class DiffReviewViewModelTests
     }
 
     [Fact]
+    public async Task An_Empty_Tree_Reports_No_Row_To_Highlight()
+    {
+        // The gate tests never drive the tree to zero rows — the T-filter fixtures always leave a
+        // file — so this path is covered here instead. RowCount 0 tells the dialog to skip the
+        // selection write entirely rather than clamping against an empty list.
+        var review = new DiffReviewViewModel(await EmptyVm());
+
+        var update = review.RebuildTree("/gone.cs");
+
+        Assert.Equal(0, update.RowCount);
+        Assert.Null(update.TargetRow);
+        Assert.Empty(review.Rows);
+    }
+
+    [Fact]
     public async Task An_Unknown_Path_Has_No_File_Index()
     {
         var review = new DiffReviewViewModel(await TreeVm());
