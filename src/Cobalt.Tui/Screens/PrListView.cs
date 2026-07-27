@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using Cobalt.Core.Models;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
@@ -324,28 +323,14 @@ public sealed class PrListView : View
             return;
         }
 
-        var now = _now();
-
-        // SetSource nulls SelectedItem in 2.4.16, so capture the reviewer's current
-        // row first and restore it (clamped) — otherwise a background reload snaps
-        // the highlight back to the top. The list is the source of truth.
+        // Captured before the tail rebinds the source, which nulls SelectedItem (see ListRenderTail).
         var target = tabChanged ? 0 : (_list.SelectedItem ?? _vm.SelectedIndex);
-        if (_vm.Rows.Count == 0 && _vm.EmptyStateText is { } emptyText)
+        _rendered = ListRenderTail.Apply(_list, _vm.Rows.Count, _vm.EmptyStateText, () =>
         {
-            // Helpful-empty-states (item 3): explain why the list is empty instead of a blank body.
-            _rendered = [emptyText];
-        }
-        else
-        {
+            var now = _now();
             var cols = PrColumns.For(_vm.Rows);
-            _rendered = [.. _vm.Rows.Select(pr => PrRowFormatter.Format(pr, width, cols, now, _comments?.TryGet(pr)))];
-        }
-        var rows = new ObservableCollection<string>(_rendered);
-        _list.SetSource(rows);
-        if (_vm.Rows.Count > 0)
-        {
-            _list.SelectedItem = Math.Clamp(target, 0, _vm.Rows.Count - 1);
-        }
+            return [.. _vm.Rows.Select(pr => PrRowFormatter.Format(pr, width, cols, now, _comments?.TryGet(pr)))];
+        }, target);
 
         // Lazily fill comment counts for the on-screen rows in the background; cached and capped,
         // so it never blocks this render and re-renders each row as counts land. Only the visible
