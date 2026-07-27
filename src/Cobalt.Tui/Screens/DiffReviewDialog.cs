@@ -569,29 +569,12 @@ public sealed class DiffReviewDialog(
         // interactive thread overlay (reply / resolve / reactivate) on the anchored thread(s).
         if (ViewThreadAction is not null)
         {
-            ViewThreadAction(FormatThreads(threads));
+            ViewThreadAction(ThreadFormatter.Format(threads));
         }
         else
         {
             new ThreadViewDialog(app, vm, textInput, log, threads, _bindings, _post).Show();
         }
-    }
-
-    private static string FormatThreads(IReadOnlyList<PrThread> threads)
-    {
-        var lines = new List<string>();
-        foreach (var thread in threads)
-        {
-            if (lines.Count > 0)
-            {
-                lines.Add("");
-            }
-            lines.Add($"#{thread.Id} [{thread.Status}]");
-            lines.AddRange(thread.Comments
-                .Where(c => !c.IsSystem)
-                .Select(c => $"  {c.Author}: {c.Content}"));
-        }
-        return string.Join('\n', lines);
     }
 
     /// <summary>s: flip the diff pane between unified and side-by-side, keeping the cursor on the same line.</summary>
@@ -1232,31 +1215,5 @@ public sealed class DiffReviewDialog(
         var unresolved = row.HasUnresolved ? " ●" : "";
         var stats = row.Additions is { } a && row.Deletions is { } d ? $"  +{a} -{d}" : "";
         return $"{indent}{viewed}{glyph} {row.Label}{unresolved}{stats}";
-    }
-}
-
-/// <summary>
-/// Collapses a burst of events into a single queued refresh: the first caller to
-/// <see cref="TryQueue"/> owns the refresh, every caller after it is told one is already coming,
-/// and <see cref="Run"/> reopens the gate before running it. Interlocked because the raising
-/// thread and the running (UI) thread are not the same.
-/// </summary>
-internal sealed class CoalescingGate
-{
-    private int _queued;
-
-    /// <summary>True if the caller should queue the refresh; false if one is already queued.</summary>
-    public bool TryQueue() => Interlocked.CompareExchange(ref _queued, 1, 0) == 0;
-
-    /// <summary>
-    /// Runs the queued refresh, reopening the gate first so an event raised while
-    /// <paramref name="refresh"/> is running queues a new one instead of being dropped. The order
-    /// lives here rather than at the call site because it is the whole point of the gate and
-    /// nothing at the call site would reveal it being wrong.
-    /// </summary>
-    public void Run(Action refresh)
-    {
-        Interlocked.Exchange(ref _queued, 0);
-        refresh();
     }
 }

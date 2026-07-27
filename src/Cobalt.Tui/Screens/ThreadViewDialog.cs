@@ -85,7 +85,7 @@ public sealed class ThreadViewDialog(
     internal Dialog Build()
     {
         var first = threads[0];
-        _lastBody = FormatThreads(threads);
+        _lastBody = ThreadFormatter.Format(threads);
         var extra = threads.Count > 1 ? $" (of {threads.Count}, acting on #{first.Id})" : "";
         var dialog = new Dialog
         {
@@ -151,7 +151,7 @@ public sealed class ThreadViewDialog(
         {
             return; // retain the last-good body when the threads have (transiently) vanished
         }
-        var text = FormatThreads(current);
+        var text = ThreadFormatter.Format(current);
         if (text == _lastBody)
         {
             return; // unrelated tick: identical text; skip the reassign that would reset scroll
@@ -264,20 +264,4 @@ public sealed class ThreadViewDialog(
         _post.Post(() => log(vm.Error is { } e ? $"failed: {e}" : success));
     }
 
-    private static string FormatThreads(IReadOnlyList<PrThread> threads)
-    {
-        var lines = new List<string>();
-        foreach (var thread in threads)
-        {
-            if (lines.Count > 0)
-            {
-                lines.Add("");
-            }
-            lines.Add($"#{thread.Id} [{thread.Status}]");
-            lines.AddRange(thread.Comments
-                .Where(c => !c.IsSystem)
-                .Select(c => $"  {c.Author}: {c.Content}"));
-        }
-        return string.Join('\n', lines);
-    }
 }
