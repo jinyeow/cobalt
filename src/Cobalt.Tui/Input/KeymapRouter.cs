@@ -31,9 +31,6 @@ public sealed class KeymapRouter(KeyBindingTable table)
     // Accumulated numeric count prefix (vim "5j"). 0 means "no count".
     private int _count;
 
-    /// <summary>The binding table this router resolves against (shared, so a dialog needn't build a second one).</summary>
-    public KeyBindingTable Table => table;
-
     /// <summary>True when a count digit or a multi-key sequence is mid-entry — so Esc should clear it, not act.</summary>
     public bool HasPending => _pending.Count > 0 || _count > 0;
 

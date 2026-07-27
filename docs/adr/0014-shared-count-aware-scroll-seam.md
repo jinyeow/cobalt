@@ -51,3 +51,64 @@ off-limits). Digits are reserved for counts, so sections moved off `1`/`2` onto 
 state, and Terminal.Gui's per-key event delivery to the dialogs remains the only
 seam not exercised in CI (mitigated by headless view-level tests that drive
 `NewKeyDownEvent` through real routing).
+
+## Amendment (2026-07-27) — `DialogKeyRouter`, one adapter instead of four copies
+
+"Dialogs adopt the router" above gave each dialog its own `KeymapRouter` but left the
+state machine around it hand-rolled, so the same ~33 lines existed four times
+(`WorkItemDetailDialog`, `PrDetailDialog`, `ThreadViewDialog`, `DiffReviewDialog`),
+differing only in the `KeyScope` literal. An Esc-or-pending fix had to land four times.
+
+`Screens/DialogKeyRouter` now owns that machine — tokenize, snapshot `HasPending`, `Feed`,
+`Pending` swallows, `Matched` marks the key handled only when the dialog acted, `Esc` clears
+a pending sequence before it closes — taking `(KeyBindingTable, KeyScope,
+Func<AppCommand, int?, bool> dispatch, Action requestClose)`. Each dialog keeps only its
+`Dispatch` verb table. It lives in `Screens/` because it sets `Handled` on a Terminal.Gui
+`Key`: that rules out `ViewModels/`, which ADR 0004's `ViewModelPurityTests` polices, and
+equally `Input/`, which is deliberately Terminal.Gui-free (`KeymapRouter`: "Pure logic — no
+Terminal.Gui types"). `Screens/VimScroll` is the precedent — a shared key-behaviour helper
+that is not itself a screen.
+
+`Screens/TextDialog` keeps its own copy and is **not** migrated. It looks like a fifth
+instance of the machine but closes on the literal tokens `q`/`Esc`/`Enter` rather than on the
+commands they resolve to, so routing it through the adapter would newly close the overlay on
+`h` (Global → `Back`) and `l`/`o` (Global → `Open`). That is a behaviour change, not an
+extraction.
+
+Two constraints the shape has to respect:
+
+- **One instance per dialog, subscribed wherever that dialog needs it.** Three dialogs
+  subscribe both the body `TextView` and the dialog itself (a focused read-only `TextView`
+  swallows runes), so the count/pending state must be shared across both delivery points —
+  two instances would fork it and break `5j` across a focus change. `DiffReviewDialog`
+  subscribes once.
+- **`DiffReviewDialog`'s search-bar suppression stays caller-side**, as a guard in its own
+  subscription lambda rather than a parameter on the adapter. A suppression predicate would
+  be null for the other three, i.e. a behaviour switch on a shared type.
+
+That guard is live, not defensive. A headless probe against Terminal.Gui 2.4.17 — a focused
+child `TextField`, keys injected at the parent, which is the production entry point since the
+driver raises `KeyDown` on the top-level `Dialog` — shows runes, `Ctrl+D` and `Home` are
+consumed by the field, while `Enter`, `Esc`, `Tab`, `CursorDown`, `PageDown` and `Ctrl+U`
+still reach the parent. Reaching the parent is necessary but not sufficient — a key also has
+to tokenize, and it must not already be consumed by the bar's own handlers. Disabling the
+guard and re-running the dialog's headless tests separates them:
+
+| key | without the guard | why |
+| --- | --- | --- |
+| `PageDown` | unchanged | `KeyTokenizer` returns `null` — never a threat, despite being the key the review that raised this originally named |
+| `Esc` | unchanged | the bar's own `KeyDown` handler marks it handled first, so the router never sees it |
+| `Ctrl+U` | **half-pages the pane behind the bar** | tokenizes to `C-u` → `HalfPageUp` |
+| `Tab` | **focus lands on the diff pane instead of the bar merely hiding** | tokenizes to `Tab`, bound in this scope |
+
+So the guard earns its place on two keys, not one, and neither is knowable from the bubbling
+table alone. `DiffReviewDialogKeyTests` pins the `Ctrl+U` case.
+
+Cost: one delegate hop per key, and each dialog names its `KeyScope` twice — once to the
+adapter, once for `HelpText.ForDialog` — while holding the `KeyBindingTable` it also hands
+the adapter. Re-exposing scope and table off the adapter would delete that repetition, but
+the table is the *dialog's* dependency, not the adapter's: `PrDetailDialog` and
+`DiffReviewDialog` forward it to the child dialogs they open, so they would keep the field
+regardless, and the adapter would become a lookup for a concern it does not own.
+`KeymapRouter.Table`, which used to serve that read-back, is gone — the extraction left it
+with no callers.

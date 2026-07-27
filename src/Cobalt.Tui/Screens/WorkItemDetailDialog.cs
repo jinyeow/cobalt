@@ -23,7 +23,6 @@ public sealed class WorkItemDetailDialog
     private readonly WorkItemActions _actions;
     private readonly Action<string> _log;
     private readonly KeyBindingTable _bindings;
-    private readonly KeymapRouter _router;
     private readonly CancellationTokenSource _cts = new();
     private bool _closed;
     private Dialog? _dialog;
@@ -60,7 +59,6 @@ public sealed class WorkItemDetailDialog
         // The shell injects its (possibly remapped) table; a direct caller/test omits it and falls
         // back to the process-wide defaults. Help within the dialog renders from this same table.
         _bindings = bindings ?? KeyBindingTable.Shared;
-        _router = new KeymapRouter(_bindings);
     }
 
     public void Show()
@@ -111,9 +109,11 @@ public sealed class WorkItemDetailDialog
         // dialog's own KeyDown runs, so subscribe the verb handler to the TextView
         // too. Verbs it matches stop propagation; keys it ignores (arrows/PageUp/
         // PageDown/Home/End) fall through to the TextView's native scrolling. The
-        // dialog subscription stays as a safety net for when focus is elsewhere.
-        body.KeyDown += HandleKey;
-        dialog.KeyDown += HandleKey;
+        // dialog subscription stays as a safety net for when focus is elsewhere. One adapter
+        // instance for both, so a count/sequence survives a focus change between them.
+        var keys = new DialogKeyRouter(_bindings, KeyScope.WorkItemDetail, Dispatch, RequestClose);
+        body.KeyDown += keys.HandleKey;
+        dialog.KeyDown += keys.HandleKey;
 
         dialog.Add(body);
         body.Text = RenderBody();
@@ -128,40 +128,6 @@ public sealed class WorkItemDetailDialog
             _dialog.SetNeedsDraw();
         }
     });
-
-    private void HandleKey(object? sender, Terminal.Gui.Input.Key key)
-    {
-        var token = KeyTokenizer.ToToken(key);
-        if (token is null)
-        {
-            return;
-        }
-        // Esc clears a pending count/sequence first; it only closes when nothing is
-        // pending (mirrors the shell's Esc handling, L5).
-        var hadPending = _router.HasPending;
-        var result = _router.Feed(token, KeyScope.WorkItemDetail);
-        switch (result.Kind)
-        {
-            case KeyResultKind.Pending:
-                key.Handled = true; // swallow an in-progress sequence (e.g. after 'g')
-                break;
-            case KeyResultKind.Matched when Dispatch(result.Command, result.Count):
-                key.Handled = true;
-                break;
-            case KeyResultKind.Matched:
-                break; // matched but this dialog doesn't act — let native widget behavior run
-            default:
-                if (token == "Esc")
-                {
-                    key.Handled = true;
-                    if (!hadPending)
-                    {
-                        RequestClose();
-                    }
-                }
-                break;
-        }
-    }
 
     /// <summary>Runs the matched command; returns true when the dialog actually acted.</summary>
     private bool Dispatch(AppCommand command, int? count)

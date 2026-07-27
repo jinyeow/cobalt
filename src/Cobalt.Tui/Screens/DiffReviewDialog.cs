@@ -26,7 +26,9 @@ public sealed class DiffReviewDialog(
     // pure marshalling Invoke sites route through this seam (M2).
     private readonly IUiPost _post = post ?? new ApplicationUiPost(app);
     private readonly CancellationTokenSource _cts = new();
-    private readonly KeymapRouter _router = new(bindings ?? KeyBindingTable.Shared);
+    // The caller injects its (possibly remapped) table; a direct caller/test omits it and falls
+    // back to the process-wide defaults. Help and the child thread overlay use this same table.
+    private readonly KeyBindingTable _bindings = bindings ?? KeyBindingTable.Shared;
     private bool _closed;
     private Dialog? _dialog;
     private ListView _fileList = null!;
@@ -207,8 +209,8 @@ public sealed class DiffReviewDialog(
         };
 
         // A one-line inline search bar anchored to the bottom, hidden until '/'. Enter applies
-        // the query and hides it; Esc hides and clears. While it has focus HandleKey early-returns
-        // so typed runes reach the field rather than the command router; if focus leaves the bar
+        // the query and hides it; Esc hides and clears. While it has focus the key subscription
+        // below skips the command router, so the bar owns the key; if focus leaves the bar
         // any other way (Tab, a mouse click), HasFocusChanged hides it so it never orphans with
         // stale text (which would otherwise make the next q/Esc close the whole dialog).
         _searchBar = new TextField
@@ -252,7 +254,19 @@ public sealed class DiffReviewDialog(
         // and first diff settle (ASYNC-3).
         vm.BusyChanged += OnBusyChanged;
         vm.FilesLoaded += OnFilesLoaded;
-        dialog.KeyDown += HandleKey;
+        // While the inline search bar is focused the command router must not see the key. The
+        // field consumes runes itself, so what this actually suppresses is the control chords and
+        // navigation keys that still bubble to the Dialog (C-u, Enter, Esc) — without it they would
+        // act on the panes behind the bar. Guarded here rather than inside the shared adapter: the
+        // other three dialogs have no such bar, and a suppression parameter would be null for them.
+        var keys = new DialogKeyRouter(_bindings, KeyScope.DiffReview, Dispatch, RequestClose);
+        dialog.KeyDown += (sender, key) =>
+        {
+            if (!(_searchBar.Visible && _searchBar.HasFocus))
+            {
+                keys.HandleKey(sender, key);
+            }
+        };
         // Re-apply the responsive layout when the terminal (and so the dialog) is resized.
         dialog.ViewportChanged += OnViewportChanged;
 
@@ -328,46 +342,6 @@ public sealed class DiffReviewDialog(
         }
     }
 
-    private void HandleKey(object? sender, Terminal.Gui.Input.Key key)
-    {
-        // While the inline search bar is focused, let its own handlers (Enter/Esc) and the
-        // TextField (runes, '/', Tab) own the key — the command router must not intercept it.
-        if (_searchBar.Visible && _searchBar.HasFocus)
-        {
-            return;
-        }
-        var token = KeyTokenizer.ToToken(key);
-        if (token is null)
-        {
-            return;
-        }
-        // Esc's job is to clear a pending count/sequence first; only when nothing is
-        // pending does it close the dialog (mirrors the shell's Esc handling, L5).
-        var hadPending = _router.HasPending;
-        var result = _router.Feed(token, KeyScope.DiffReview);
-        switch (result.Kind)
-        {
-            case KeyResultKind.Pending:
-                key.Handled = true; // swallow an in-progress sequence (e.g. after 'g')
-                break;
-            case KeyResultKind.Matched when Dispatch(result.Command, result.Count):
-                key.Handled = true;
-                break;
-            case KeyResultKind.Matched:
-                break; // matched but unhandled — let native behavior run (e.g. Enter → file Accepting)
-            default:
-                if (token == "Esc")
-                {
-                    key.Handled = true;
-                    if (!hadPending)
-                    {
-                        RequestClose();
-                    }
-                }
-                break;
-        }
-    }
-
     /// <summary>Runs the matched command; returns true when the dialog actually acted.</summary>
     private bool Dispatch(AppCommand command, int? count)
     {
@@ -389,7 +363,7 @@ public sealed class DiffReviewDialog(
                 }
                 else
                 {
-                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.DiffReview), _router.Table);
+                    TextDialog.Show(app, "keys", HelpText.ForDialog(_bindings, KeyScope.DiffReview), _bindings);
                 }
                 return true;
             case AppCommand.ScrollLeft:
@@ -599,7 +573,7 @@ public sealed class DiffReviewDialog(
         }
         else
         {
-            new ThreadViewDialog(app, vm, textInput, log, threads, _router.Table, _post).Show();
+            new ThreadViewDialog(app, vm, textInput, log, threads, _bindings, _post).Show();
         }
     }
 

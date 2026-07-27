@@ -1233,6 +1233,27 @@ public class DiffReviewDialogKeyTests
         Assert.Equal(0, detail.SearchMatchCount); // cleared
     }
 
+    [Fact]
+    public async Task Ctrl_U_While_The_Search_Bar_Is_Focused_Does_Not_Scroll_Behind_It()
+    {
+        // Regression guard for the search-bar suppression: a focused TextField consumes runes,
+        // but control chords (C-u) still bubble to the Dialog's KeyDown, where the command router
+        // would scroll whichever pane is behind the bar. Not a bug reproduction — the guard
+        // already holds today; this pins it so the shared key adapter can't drop it.
+        var (detail, dialog) = await BuiltDialog();
+        detail.FileList.SelectedItem = 3; // the pane behind the bar, parked off row 0 so a scroll shows
+        Assert.Equal(3, detail.FileList.SelectedItem);
+
+        dialog.NewKeyDownEvent(new Key('/'));
+        Assert.True(detail.SearchBar.HasFocus);
+
+        dialog.NewKeyDownEvent(Key.U.WithCtrl);
+
+        Assert.Equal(3, detail.FileList.SelectedItem); // the pane behind the bar did not scroll
+        Assert.True(detail.SearchBar.Visible);
+        Assert.True(detail.SearchBar.HasFocus);
+    }
+
     // ---- Item 5: g b opens the PR's source branch in the browser ----
 
     [Fact]
