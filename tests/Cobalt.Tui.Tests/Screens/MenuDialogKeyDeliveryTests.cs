@@ -347,4 +347,22 @@ public class MenuDialogKeyDeliveryTests
 
         Assert.Equal(4, menu.List.SelectedItem);
     }
+
+    [Fact]
+    public void Disposing_The_Dialog_With_The_Filter_Still_Armed_Does_Not_Throw()
+    {
+        // Accept()'s requestClose() does not itself clear filter.Visible, so the real Run() path
+        // (/ -> type -> Enter -> Accept -> requestClose -> app.RequestStop) can dispose the built
+        // Dialog while the HasFocusChanged guard is still armed. If Terminal.Gui 2.4.17 raises
+        // HasFocusChanged during Dispose, the guard's Render()/SetFocus() would run against
+        // subviews mid-dispose.
+        var menu = NewMenu();
+        menu.Dialog.NewKeyDownEvent(new Key('/'));
+        menu.Dialog.NewKeyDownEvent(new Key('r'));
+        menu.Dialog.NewKeyDownEvent(Key.Enter);
+
+        Assert.True(menu.Filter.Visible);
+
+        menu.Dialog.Dispose();
+    }
 }

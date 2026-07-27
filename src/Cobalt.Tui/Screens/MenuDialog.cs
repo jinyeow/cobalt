@@ -108,7 +108,7 @@ internal static class MenuDialog
             {
                 onAccept(selected);
             }
-            requestClose();
+            RequestClose();
         }
 
         void HideFilter()
@@ -117,6 +117,17 @@ internal static class MenuDialog
             vm.SetFilter("");
             Render();
             rows.SetFocus();
+        }
+
+        // The dialog itself is about to be disposed once requestClose runs (Run's `using var
+        // built` / the caller's app.RequestStop), so the orphan guard below must not touch
+        // subviews after that point: it flips true before the close callback runs, and every
+        // requestClose call site routes through this wrapper.
+        var closing = false;
+        void RequestClose()
+        {
+            closing = true;
+            requestClose();
         }
 
         bool Dispatch(AppCommand command, int? count)
@@ -133,7 +144,7 @@ internal static class MenuDialog
                     Accept();
                     return true;
                 case AppCommand.Back:
-                    requestClose();
+                    RequestClose();
                     return true;
                 case AppCommand.FilterStart:
                     filter.Text = "";
@@ -163,7 +174,9 @@ internal static class MenuDialog
         // Idempotent with HideFilter, which clears Visible first (the DiffReviewDialog guard).
         filter.HasFocusChanged += (_, _) =>
         {
-            if (!filter.HasFocus && filter.Visible)
+            // Skip once closing: the dialog (and its subviews) are on their way to Dispose, so
+            // touching rows.SetSource/SetFocus here would run against subviews mid-dispose.
+            if (!closing && !filter.HasFocus && filter.Visible)
             {
                 HideFilter();
             }
@@ -178,7 +191,7 @@ internal static class MenuDialog
             }
         };
 
-        var keys = new DialogKeyRouter(bindings, KeyScope.Menu, Dispatch, requestClose);
+        var keys = new DialogKeyRouter(bindings, KeyScope.Menu, Dispatch, RequestClose);
         // Subscribed on both the focused list and the dialog so the pending/count state is shared
         // across both delivery points (the ADR 0014 one-instance rule).
         rows.KeyDown += keys.HandleKey;
