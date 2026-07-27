@@ -193,6 +193,30 @@ public class MenuDialogKeyDeliveryTests
     }
 
     [Fact]
+    public void An_Irrelevant_Global_Is_Consumed_So_It_Cannot_Reach_The_Shell()
+    {
+        // "Nothing happened here" is not enough: an unhandled key bubbles on to the shell, where
+        // '?' would open a second menu on top of this one.
+        var menu = NewMenu();
+
+        Assert.True(menu.Dialog.NewKeyDownEvent(new Key('?')));
+        Assert.True(menu.Dialog.NewKeyDownEvent(new Key('r')));
+    }
+
+    [Fact]
+    public void The_Menus_Letters_Reach_The_Router_Not_A_Type_Ahead_Search()
+    {
+        // A ListView's CollectionNavigator would consume 'r' as a search prefix and 'q' as its
+        // continuation, so the dismiss key would never reach the router (the PrListView lesson).
+        var menu = NewMenu();
+
+        menu.Dialog.NewKeyDownEvent(new Key('r'));
+        menu.Dialog.NewKeyDownEvent(new Key('q'));
+
+        Assert.Equal(1, menu.Closes);
+    }
+
+    [Fact]
     public void Type_Ahead_Does_Not_Steal_The_Menus_Letters()
     {
         // A ListView's CollectionNavigator would otherwise consume 'r'/'q' as a search prefix
@@ -264,6 +288,24 @@ public class MenuDialogKeyDeliveryTests
 
         // Only the next Esc dismisses the menu itself.
         menu.Dialog.NewKeyDownEvent(Key.Esc);
+        Assert.Equal(1, menu.Closes);
+    }
+
+    [Fact]
+    public void A_Filter_That_Matches_Nothing_Shows_The_Placeholder_And_Runs_Nothing()
+    {
+        var menu = NewMenu();
+        menu.Dialog.NewKeyDownEvent(new Key('/'));
+
+        menu.Dialog.NewKeyDownEvent(new Key('z'));
+
+        Assert.Empty(menu.Vm.VisibleOptions);
+        Assert.Equal("no matches", RowText(menu.List, 0));
+        Assert.Equal(0, menu.Closes);
+
+        // Enter on nothing dismisses without choosing (ADR 0025) — one Open path, no crash.
+        menu.Dialog.NewKeyDownEvent(Key.Enter);
+        Assert.Null(menu.Accepted);
         Assert.Equal(1, menu.Closes);
     }
 

@@ -158,6 +158,34 @@ public class MenuViewModelTests
     }
 
     [Fact]
+    public void SelectedIndex_Clamps_To_The_Filtered_Bound_Not_The_Full_Row_Count()
+    {
+        var vm = Vm();
+        vm.SetFilter("en"); // move down, open selection
+
+        vm.SelectedIndex = 99;
+
+        Assert.Equal(1, vm.SelectedIndex);
+        Assert.Equal(AppCommand.Open, vm.Selected?.Value);
+    }
+
+    [Fact]
+    public void A_Filter_That_Matches_Nothing_Leaves_No_Row_To_Execute()
+    {
+        var vm = Vm();
+
+        vm.SetFilter("zzz");
+
+        Assert.Empty(vm.VisibleOptions);
+        Assert.Empty(vm.FormatRows(width: 40));
+        Assert.Null(vm.Selected);
+        // Setting an index against an empty row set must not throw — the menu's render mirrors
+        // the list's placeholder row back into it on every keystroke.
+        vm.SelectedIndex = 0;
+        Assert.Equal(0, vm.SelectedIndex);
+    }
+
+    [Fact]
     public void FormatRows_Keeps_The_Hint_Column_Steady_While_Filtering()
     {
         // The type's whole reason for an order-preserving filter is that hints must not jump

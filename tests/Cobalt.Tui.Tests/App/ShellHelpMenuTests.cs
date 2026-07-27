@@ -64,6 +64,45 @@ public class ShellHelpMenuTests
     }
 
     [Fact]
+    public void The_Menu_Offers_The_Tab_Row_Only_While_The_Preview_Shows()
+    {
+        var vm = new ShellViewModel(["work"], "work");
+        using var shell = new CobaltShell(App, vm);
+        IReadOnlyList<MenuOption<AppCommand>>? offered = null;
+        shell.HelpMenuOverride = rows => { offered = rows; return null; };
+        shell.SetFocus();
+
+        // Hidden: Tab keeps its old NextTab meaning, so the menu must not advertise CyclePane.
+        shell.NewKeyDownEvent(new Key('?'));
+        Assert.DoesNotContain(offered!, r => r.Value == AppCommand.CyclePane);
+
+        shell.Workspace.SetPreviewVisible(true);
+        shell.NewKeyDownEvent(new Key('?'));
+
+        // Visible: the row the keybar advertises must be executable from the menu too.
+        Assert.Contains(
+            offered!,
+            r => r is { KeyHint: "Tab", Label: "switch list / preview", Value: AppCommand.CyclePane });
+    }
+
+    [Fact]
+    public void The_Menu_Follows_The_Active_Section_Into_Its_Own_Scope()
+    {
+        var vm = new ShellViewModel(["work"], "work");
+        using var shell = new CobaltShell(App, vm, pullRequests: PrAdapter());
+        IReadOnlyList<MenuOption<AppCommand>>? offered = null;
+        shell.HelpMenuOverride = rows => { offered = rows; return null; };
+        shell.SetFocus();
+        vm.HandleCommand(AppCommand.SectionPullRequests);
+
+        shell.NewKeyDownEvent(new Key('?'));
+
+        // PR-list verbs are offered; the work-item-only ones are not.
+        Assert.Contains(offered!, r => r is { KeyHint: "v", Value: AppCommand.Vote });
+        Assert.DoesNotContain(offered!, r => r.Value == AppCommand.EditTags);
+    }
+
+    [Fact]
     public void A_Chosen_Row_Is_Dispatched_After_The_Menu_Closes()
     {
         var vm = new ShellViewModel(["work"], "work");
