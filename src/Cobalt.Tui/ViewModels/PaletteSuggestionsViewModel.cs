@@ -115,29 +115,6 @@ public sealed class PaletteSuggestionsViewModel(
         _ => null,
     };
 
-    private static IReadOnlyList<string> Rank(IReadOnlyList<string> pool, string query)
-    {
-        if (query.Length == 0)
-        {
-            return pool;
-        }
-        var prefixMatches = pool.Where(p => p.StartsWith(query, StringComparison.OrdinalIgnoreCase)).ToList();
-        var fuzzyMatches = pool
-            .Where(p => !prefixMatches.Contains(p) && IsSubsequence(query, p))
-            .ToList();
-        return [.. prefixMatches, .. fuzzyMatches];
-    }
-
-    private static bool IsSubsequence(string query, string candidate)
-    {
-        var queryIndex = 0;
-        foreach (var ch in candidate)
-        {
-            if (queryIndex < query.Length && char.ToLowerInvariant(ch) == char.ToLowerInvariant(query[queryIndex]))
-            {
-                queryIndex++;
-            }
-        }
-        return queryIndex == query.Length;
-    }
+    private static IReadOnlyList<string> Rank(IReadOnlyList<string> pool, string query) =>
+        FuzzyFilter.Rank(pool, query);
 }
