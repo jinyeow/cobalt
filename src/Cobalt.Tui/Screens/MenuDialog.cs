@@ -31,7 +31,7 @@ internal static class MenuDialog
             app, title, vm, bindings,
             onAccept: option => chosen = option,
             requestClose: () => app.RequestStop(dialog!),
-            out _);
+            out _, out _);
         dialog = built;
         app.Run(built);
         return chosen;
@@ -39,11 +39,12 @@ internal static class MenuDialog
 
     /// <summary>
     /// Builds and wires the popup without starting the run loop, exposing the inner
-    /// <see cref="ListView"/> so a headless view-level test can drive the whole grammar.
+    /// <see cref="ListView"/> and filter <see cref="TextField"/> so a headless view-level test
+    /// can drive the whole grammar.
     /// </summary>
     internal static Dialog Build<T>(
         IApplication app, string title, MenuViewModel<T> vm, KeyBindingTable bindings,
-        Action<MenuOption<T>> onAccept, Action requestClose, out ListView list)
+        Action<MenuOption<T>> onAccept, Action requestClose, out ListView list, out TextField filterField)
     {
         var dialog = new Dialog
         {
@@ -65,6 +66,15 @@ internal static class MenuDialog
         rows.KeystrokeNavigator = null;
         list = rows;
 
+        // A one-line filter bar overlaying the bottom row, hidden until '/'.
+        var filter = new TextField
+        {
+            Y = Pos.AnchorEnd(1),
+            Width = Dim.Fill(),
+            Visible = false,
+        };
+        filterField = filter;
+
         var lastWidth = -1;
         void Render()
         {
@@ -74,6 +84,23 @@ internal static class MenuDialog
             // the view-model's clamped index is the restore target and the list mirrors back.
             ListRenderTail.Apply(rows, vm.VisibleOptions.Count, "no matches", () => vm.FormatRows(width), vm.SelectedIndex);
             vm.SelectedIndex = rows.SelectedItem ?? 0;
+        }
+
+        void Accept()
+        {
+            if (vm.Selected is { } selected)
+            {
+                onAccept(selected);
+            }
+            requestClose();
+        }
+
+        void HideFilter()
+        {
+            filter.Visible = false;
+            vm.SetFilter("");
+            Render();
+            rows.SetFocus();
         }
 
         bool Dispatch(AppCommand command, int? count)
@@ -87,25 +114,57 @@ internal static class MenuDialog
             switch (command)
             {
                 case AppCommand.Open:
-                    if (vm.Selected is { } selected)
-                    {
-                        onAccept(selected);
-                    }
-                    requestClose();
+                    Accept();
                     return true;
                 case AppCommand.Back:
                     requestClose();
+                    return true;
+                case AppCommand.FilterStart:
+                    filter.Text = "";
+                    filter.Visible = true;
+                    filter.SetFocus();
                     return true;
                 default:
                     return true; // a modal menu swallows every other matched global
             }
         }
 
+        // Typing narrows the rows on every keystroke; the highlight returns to the top match, so
+        // Enter straight after typing runs what the user is looking at.
+        filter.TextChanged += (_, _) =>
+        {
+            vm.SetFilter(filter.Text ?? "");
+            Render();
+        };
+        filter.Accepting += (_, e) =>
+        {
+            e.Handled = true; // stop the Dialog's default-accept from closing us first
+            Accept();
+        };
+        filter.KeyDown += (_, key) =>
+        {
+            if (key.KeyCode == Terminal.Gui.Drivers.KeyCode.Esc)
+            {
+                // Esc in the field cancels the filter only; the menu itself needs a second Esc.
+                key.Handled = true;
+                HideFilter();
+            }
+        };
+
         var keys = new DialogKeyRouter(bindings, KeyScope.Menu, Dispatch, requestClose);
         // Subscribed on both the focused list and the dialog so the pending/count state is shared
         // across both delivery points (the ADR 0014 one-instance rule).
         rows.KeyDown += keys.HandleKey;
-        dialog.KeyDown += keys.HandleKey;
+        // While the filter bar owns the keys the router must stand down: printable runes belong to
+        // the field, and the control chords that still bubble to the Dialog (C-u, C-d) would
+        // otherwise scroll the list underneath it (ADR 0014's search-bar guard).
+        dialog.KeyDown += (sender, key) =>
+        {
+            if (!(filter.Visible && filter.HasFocus))
+            {
+                keys.HandleKey(sender, key);
+            }
+        };
         // Row widths depend on the viewport, which is only known once the dialog is laid out and
         // again after a terminal resize; re-render on a real width change only.
         dialog.ViewportChanged += (_, _) =>
@@ -116,7 +175,7 @@ internal static class MenuDialog
             }
         };
 
-        dialog.Add(rows);
+        dialog.Add(rows, filter);
         Render();
         return dialog;
     }

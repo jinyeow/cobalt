@@ -33,6 +33,7 @@ public class MenuDialogKeyDeliveryTests
         public required MenuViewModel<AppCommand> Vm { get; init; }
         public required Dialog Dialog { get; init; }
         public required ListView List { get; init; }
+        public required TextField Filter { get; init; }
         public MenuOption<AppCommand>? Accepted { get; set; }
         public int Closes { get; set; }
     }
@@ -45,8 +46,8 @@ public class MenuDialogKeyDeliveryTests
             App, "keys", vm, KeyBindingTable.Shared,
             onAccept: option => harness!.Accepted = option,
             requestClose: () => harness!.Closes++,
-            out var list);
-        harness = new Harness { Vm = vm, Dialog = dialog, List = list };
+            out var list, out var filter);
+        harness = new Harness { Vm = vm, Dialog = dialog, List = list, Filter = filter };
         dialog.Layout(new Size(60, 12));
         dialog.SetFocus();
         return harness;
@@ -167,5 +168,84 @@ public class MenuDialogKeyDeliveryTests
         var menu = NewMenu();
 
         Assert.Null(menu.List.KeystrokeNavigator);
+    }
+
+    // ---- The filter bar (#20: "/ filters rows incrementally; filtered Enter still executes") ----
+
+    [Fact]
+    public void The_Filter_Bar_Is_Hidden_Until_Slash()
+    {
+        var menu = NewMenu();
+
+        Assert.False(menu.Filter.Visible);
+
+        menu.Dialog.NewKeyDownEvent(new Key('/'));
+
+        Assert.True(menu.Filter.Visible);
+        Assert.True(menu.Filter.HasFocus);
+    }
+
+    [Fact]
+    public void Typing_In_The_Filter_Bar_Narrows_The_Bound_Rows()
+    {
+        var menu = NewMenu();
+        menu.Dialog.NewKeyDownEvent(new Key('/'));
+
+        menu.Dialog.NewKeyDownEvent(new Key('r'));
+
+        // "r refresh", "Enter open selection" and "yy yank id/url" all carry an 'r'; the
+        // movement and help rows do not — and the survivors keep their original order.
+        Assert.Equal("r", menu.Filter.Text);
+        Assert.Equal(
+            [AppCommand.Refresh, AppCommand.Open, AppCommand.YankId],
+            menu.Vm.VisibleOptions.Select(o => o.Value));
+        Assert.Equal(3, menu.List.Source?.Count);
+    }
+
+    [Fact]
+    public void Enter_While_Filtering_Executes_The_Selected_Row()
+    {
+        var menu = NewMenu();
+        menu.Dialog.NewKeyDownEvent(new Key('/'));
+        menu.Dialog.NewKeyDownEvent(new Key('r'));
+
+        menu.Dialog.NewKeyDownEvent(Key.Enter);
+
+        Assert.Equal(AppCommand.Refresh, menu.Accepted?.Value);
+        Assert.Equal(1, menu.Closes);
+    }
+
+    [Fact]
+    public void Esc_In_The_Filter_Bar_Clears_It_And_Leaves_The_Menu_Open()
+    {
+        var menu = NewMenu();
+        menu.Dialog.NewKeyDownEvent(new Key('/'));
+        menu.Dialog.NewKeyDownEvent(new Key('r'));
+
+        menu.Dialog.NewKeyDownEvent(Key.Esc);
+
+        Assert.Equal(0, menu.Closes);
+        Assert.False(menu.Filter.Visible);
+        Assert.Equal("", menu.Vm.Filter);
+        Assert.Equal(5, menu.List.Source?.Count);
+        Assert.True(menu.List.HasFocus);
+
+        // Only the next Esc dismisses the menu itself.
+        menu.Dialog.NewKeyDownEvent(Key.Esc);
+        Assert.Equal(1, menu.Closes);
+    }
+
+    [Fact]
+    public void CtrlU_While_Filtering_Does_Not_Scroll_The_List_Underneath()
+    {
+        // The ADR 0014 search-bar guard: control chords bubble past the field to the dialog, so
+        // the dialog-level router must stand down while the field owns the keys.
+        var menu = NewMenu();
+        menu.Dialog.NewKeyDownEvent(new Key('G')); // selection on the last row
+        menu.Dialog.NewKeyDownEvent(new Key('/'));
+
+        menu.Dialog.NewKeyDownEvent(new Key('u').WithCtrl);
+
+        Assert.Equal(4, menu.List.SelectedItem);
     }
 }
