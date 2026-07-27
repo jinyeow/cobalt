@@ -9,6 +9,10 @@
   the title's `q to close` hint now reads whatever key `back` is actually bound to. `Esc`
   keeps its existing two-stage meaning (clears a pending count first, closes only once
   nothing is pending).
+- **The keybar now reflects which workspace pane has focus.** With the preview focused,
+  `j`/`k` advertise `scroll` rather than `move` — which is what they actually do there — and
+  `C-h` appears as the way back to the list. The bar also repaints on a focus change; until
+  now `Tab` moved focus while the bar kept advertising the previous pane's keys.
 
 ## 0.4.0 — 2026-07-25
 
