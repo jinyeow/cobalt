@@ -1,6 +1,6 @@
-using Cobalt.Tui.Screens;
+using Cobalt.Tui.Tasks;
 
-namespace Cobalt.Tui.Tests.Screens;
+namespace Cobalt.Tui.Tests.Tasks;
 
 /// <summary>
 /// The gate behind the diff dialog's stats-prefetch refresh. The prefetch raises one event per
