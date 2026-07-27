@@ -103,6 +103,18 @@ public class TextDialogScrollTests
     }
 
     [Fact]
+    public void Title_Close_Hint_Reflects_A_Remapped_Back_Key()
+    {
+        var keys = new KeysConfig(new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>
+        {
+            ["global"] = new Dictionary<string, IReadOnlyList<string>> { ["back"] = new[] { "x" } },
+        });
+        var dialog = TextDialog.Build(App, "keys", "text", out _, bindings: KeyBindingTable.FromConfig(keys));
+
+        Assert.Equal("keys — x to close", dialog.Title.ToString());
+    }
+
+    [Fact]
     public void Overlay_Scroll_Uses_The_Injected_Remap_Table()
     {
         // move-down remapped j -> n. The overlay (help/messages/:log) must scroll from the injected
