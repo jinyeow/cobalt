@@ -273,14 +273,20 @@ internal sealed class DiffReviewViewModel(PrDiffViewModel vm)
     /// rendered rows actually changed, because assigning a new source nulls the widget's selection;
     /// <paramref name="TargetRow"/> is the row to highlight, or null to leave the caller's own
     /// selection in place — which the caller must read <i>after</i> applying
-    /// <paramref name="Strings"/>, clamped to <paramref name="RowCount"/>.
+    /// <paramref name="Strings"/>, clamped to <see cref="Rows"/>.Count.
     /// </summary>
-    internal readonly record struct TreeUpdate(IReadOnlyList<string>? Strings, int? TargetRow, int RowCount);
+    internal readonly record struct TreeUpdate(IReadOnlyList<string>? Strings, int? TargetRow);
 
     /// <summary>
     /// Re-flattens the changed files into the directory tree and resolves the row to highlight.
     /// Under the unresolved-only filter the tree is built from the filtered projection; leaves
     /// still carry their real path as NodePath, so opening one resolves against vm.Files by path.
+    ///
+    /// <para><b>Contract the caller must honour:</b> when <c>Strings</c> comes back non-null the
+    /// caller <i>must</i> apply it to the list. This method records what it handed out in order to
+    /// answer "did the rows change" next time, so a caller that skips the assignment leaves that
+    /// record describing a list the widget never received — and because every later rebuild then
+    /// compares equal, the file list would stop updating permanently rather than visibly break.</para>
     /// </summary>
     internal TreeUpdate RebuildTree(string? selectNodePath)
     {
@@ -295,10 +301,10 @@ internal sealed class DiffReviewViewModel(PrDiffViewModel vm)
         }
         if (_rows.Count == 0)
         {
-            return new TreeUpdate(changed, null, 0);
+            return new TreeUpdate(changed, null);
         }
         var target = selectNodePath is null ? -1 : IndexOfNode(selectNodePath);
-        return new TreeUpdate(changed, target >= 0 ? target : null, _rows.Count);
+        return new TreeUpdate(changed, target >= 0 ? target : null);
     }
 
     /// <summary>Collapse or expand a directory node.</summary>
@@ -391,7 +397,7 @@ internal sealed class DiffReviewViewModel(PrDiffViewModel vm)
     }
 
     /// <summary>The index of a node among the current rows, or -1.</summary>
-    internal int IndexOfNode(string nodePath)
+    private int IndexOfNode(string nodePath)
     {
         for (var i = 0; i < _rows.Count; i++)
         {

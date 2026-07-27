@@ -56,14 +56,25 @@ while the previous one is still displayed. Anything acting on the *diff* must ke
 shipped bugs came from confusing them (line comments, thread replies, mark-viewed, `]t`/`[t`).
 
 The consequence for placement: a view-model may own **one** of those identities, never both. The
-extraction of `DiffReviewViewModel` (issue #77) therefore moved everything DISPLAYED-side — the
-search machine, fold state, the rendered path, the row maps, the pane mode — and everything
-identity-neutral (the file tree, which is keyed by node path), but deliberately left `_fileIndex`
-(CURSOR) in `DiffReviewDialog`. It is written synchronously inside the async select that must stay
-in the view, and hoisting it would have put both identities behind one object boundary — precisely
-the confusion the four bugs grew from. Tree navigation that needs the cursor takes the current path
-as a **parameter**, so the view-model never reads `SelectedFile` at all. That is grep-checkable,
-and it is the first thing to attack when reviewing a change to this dialog.
+extraction of `DiffReviewViewModel` (issue #77) therefore moved the DISPLAYED-side state — the
+search machine, fold state, the rendered path, the row maps, the pane mode — plus the
+identity-neutral file tree (keyed by node path), but deliberately left `_fileIndex` (CURSOR) in
+`DiffReviewDialog`. It is written synchronously inside the async select that must stay in the view,
+and hoisting it would have put both identities behind one object boundary — precisely the confusion
+the four bugs grew from.
+
+State on my mind, not logic: the boundary is **no cursor *state* in the view-model**, not "no cursor
+logic". `StepFileTarget`, `NextUnviewedTarget` and `FileIndexForPath` all compute indexes *into*
+`vm.Files` that the dialog then assigns to `_fileIndex` — the view-model is the authority on where
+the cursor goes, it just never holds where the cursor *is*, and it takes the current path as a
+**parameter** rather than reading it. So the view-model never references `SelectedFile` at all: that
+is grep-checkable, and it is the first thing to attack when reviewing a change to this dialog.
+
+The move was bounded, not exhaustive — `TitleFor` and the diff header's formatting are pure and
+identity-neutral and would be legitimate view-model material, but they are ~40 low-risk lines tied
+to chrome-only renders and were left for a follow-up rather than widening a high-risk diff.
+`NavHunk`/`NavThread` are the more substantial remainder: both derive a target line from the
+displayed snapshot with no widget contact, and are the natural next extraction.
 
 Two smaller things also stay in the view for a mechanical reason worth recording, since both look
 like pure logic that "should" have moved: the diff pane's kept cursor row and the file list's

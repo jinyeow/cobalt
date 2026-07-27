@@ -28,8 +28,13 @@ public class DiffReviewViewModelTests
         public Task<IReadOnlyList<FileChange>> GetIterationChangesAsync(string project, string repo, int prId, int iterationId, CancellationToken ct) =>
             Task.FromResult(Changes);
 
+        /// <summary>Blob fetches held open by path, so a test can act inside a select's await window.</summary>
+        public Dictionary<string, TaskCompletionSource<string>> Gates { get; } = new(StringComparer.Ordinal);
+
         public Task<string> GetFileContentAsync(string project, string repo, string path, string commit, CancellationToken ct) =>
-            Task.FromResult(Blobs.GetValueOrDefault((path, commit), ""));
+            Gates.TryGetValue(path, out var gate)
+                ? gate.Task
+                : Task.FromResult(Blobs.GetValueOrDefault((path, commit), ""));
 
         public Task<IReadOnlyList<PrThread>> GetThreadsAsync(string project, string repo, int prId, CancellationToken ct) =>
             Task.FromResult(Threads);
@@ -170,26 +175,32 @@ public class DiffReviewViewModelTests
     [Fact]
     public async Task Matches_Come_From_The_Displayed_Diff_Not_The_Tree_Cursor()
     {
-        // The identity rule in one assertion. The cursor is moved to a second file whose blob fetch
-        // never lands, so SelectedFile is /b.cs while /a.cs is still displayed. A search must find
-        // /a.cs's text — searching the cursor's file would find nothing (and a later select would
-        // decorate the wrong file's lines).
+        // The identity rule, exercised in the window where the two identities actually diverge.
+        // /b.cs's blob fetch is held open, so the select moves the tree cursor to /b.cs
+        // synchronously while /a.cs is still the file on screen. A search has to find /a.cs's text:
+        // keying on SelectedFile here would search a file the reviewer cannot see and decorate the
+        // displayed file's lines at another file's match positions. Awaiting the select instead
+        // would close the window and the test would pass either way — which is the whole point.
         var source = new FakeDiffSource
         {
             Changes = [new FileChange("/a.cs", FileChangeKind.Add), new FileChange("/b.cs", FileChangeKind.Add)],
         };
         source.Blobs[("/a.cs", "src")] = "alpha\nbeta\n";
-        source.Blobs[("/b.cs", "src")] = "delta\n";
+        source.Gates["/b.cs"] = new TaskCompletionSource<string>();
         var vm = new PrDiffViewModel(source, Pr());
         await vm.LoadAsync(TestContext.Current.CancellationToken);
         await vm.SelectFileAsync(0, TestContext.Current.CancellationToken);
         var review = new DiffReviewViewModel(vm);
 
-        await vm.SelectFileAsync(1, TestContext.Current.CancellationToken);
+        var pending = vm.SelectFileAsync(1, TestContext.Current.CancellationToken); // deliberately not awaited
 
-        Assert.Equal("/b.cs", vm.CurrentDiffPath);
-        Assert.Null(review.ApplySearch("alpha").JumpToLine);    // /a.cs's text is off screen now
-        Assert.NotNull(review.ApplySearch("delta").JumpToLine); // the displayed file is what's searched
+        Assert.Equal("/b.cs", vm.SelectedFile!.Path); // CURSOR has already moved
+        Assert.Equal("/a.cs", vm.CurrentDiffPath);    // DISPLAYED has not
+        Assert.NotNull(review.ApplySearch("alpha").JumpToLine); // searches what is on screen
+        Assert.Null(review.ApplySearch("delta").JumpToLine);    // not what the cursor points at
+
+        source.Gates["/b.cs"].SetResult("delta\n");
+        await pending;
     }
 
     // ---- pane composition ----------------------------------------------------------------
@@ -467,6 +478,23 @@ public class DiffReviewViewModelTests
         Assert.Equal(0, review.NearestLineAtRow(null)); // nothing composed yet
     }
 
+    [Fact]
+    public async Task Navigation_Scans_Backward_When_Nothing_Anchored_Lies_Ahead()
+    {
+        // The forward scan runs off the end when the cursor sits at or past the last anchored row
+        // — a trailing fold marker is exactly that position. The backward scan is what stops ]c/[t
+        // from silently restarting at line 0.
+        var review = new DiffReviewViewModel(await EmptyVm());
+        review.ComposePane((FoldingDiff(), "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+        var lastRow = review.DiffRows.Count - 1;
+        Assert.Null(review.DiffRows[lastRow].Anchor); // the fixture really does end on a fold marker
+
+        var from = review.NearestLineAtRow(lastRow);
+
+        Assert.NotEqual(0, from); // found by scanning back, not by the fallback
+        Assert.Contains(review.DiffRows, r => r.Anchor == from);
+    }
+
     // ---- file tree -----------------------------------------------------------------------
     //
     // Tree structure is keyed by node path and belongs to neither identity: it is built from
@@ -526,7 +554,7 @@ public class DiffReviewViewModelTests
         var update = review.RebuildTree("/nope.cs");
 
         Assert.Null(update.TargetRow);
-        Assert.Equal(review.Rows.Count, update.RowCount);
+        Assert.NotEmpty(review.Rows); // the caller clamps its own selection against these
     }
 
     [Fact]
@@ -578,6 +606,22 @@ public class DiffReviewViewModelTests
     }
 
     [Fact]
+    public async Task Z_On_A_Top_Level_File_With_No_Parent_Folder_Does_Nothing()
+    {
+        // A file at the tree root has no ancestor directory to fold up, so 'z' must be inert
+        // rather than collapsing something else.
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Add)] };
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var review = new DiffReviewViewModel(vm);
+        review.RebuildTree(selectNodePath: null);
+        var fileRow = Enumerable.Range(0, review.Rows.Count)
+            .First(i => review.Rows[i].Kind == FileTreeRowKind.File);
+
+        Assert.Null(review.ToggleDirAt(fileRow));
+    }
+
+    [Fact]
     public async Task Z_Outside_The_Rows_Does_Nothing()
     {
         var review = new DiffReviewViewModel(await TreeVm());
@@ -624,6 +668,21 @@ public class DiffReviewViewModelTests
     }
 
     [Fact]
+    public async Task Stepping_Unviewed_Backward_Skips_The_Files_Already_Marked()
+    {
+        // [v walks the other way through the same loop; the delta drives both the start offset and
+        // the step, so a sign error here would only ever show up going backward.
+        var vm = await TreeVm();
+        var review = new DiffReviewViewModel(vm);
+        review.RebuildTree(selectNodePath: null);
+        vm.MarkViewed("/docs/d.md"); // the leaf immediately before /src/a.cs
+
+        var target = review.NextUnviewedTarget("/src/a.cs", -1);
+
+        Assert.Equal(review.FileIndexForPath("/docs/c.md"), target);
+    }
+
+    [Fact]
     public async Task Stepping_Unviewed_Stops_When_Everything_Ahead_Is_Viewed()
     {
         var vm = await TreeVm();
@@ -660,9 +719,8 @@ public class DiffReviewViewModelTests
 
         var update = review.RebuildTree("/gone.cs");
 
-        Assert.Equal(0, update.RowCount);
         Assert.Null(update.TargetRow);
-        Assert.Empty(review.Rows);
+        Assert.Empty(review.Rows); // the dialog skips the selection write entirely on this
     }
 
     [Fact]

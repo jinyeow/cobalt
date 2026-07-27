@@ -1527,4 +1527,29 @@ public class DiffReviewDialogKeyTests
 
         Assert.Equal(1, detail.PrefetchLaunches);
     }
+
+    [Fact]
+    public async Task S_At_A_Narrow_Width_Reports_Unified_Because_That_Is_What_It_Shows()
+    {
+        // Below the two-column threshold the pane cannot go side-by-side: Render's responsive
+        // layout forces it straight back to unified. The message bar has to describe what ended up
+        // on screen rather than what was asked for, or it contradicts both the pane and the
+        // "(side-by-side)" marker in the header beside it.
+        var source = new FakeDiffSource { Changes = [new FileChange("/a.cs", FileChangeKind.Edit)] };
+        source.Blobs[("/a.cs", "base")] = "keep\nold\n";
+        source.Blobs[("/a.cs", "src")] = "keep\nnew\n";
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        var messages = new List<string>();
+        var detail = new DiffReviewDialog(App, vm, NoopTextInput(), messages.Add);
+        var dialog = detail.Build();
+        dialog.Layout(new Size(48, 24)); // too narrow for two columns
+        dialog.SetFocus();
+        detail.DiffPane.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('s'));
+
+        Assert.False(detail.SideBySide);
+        Assert.Equal("unified diff", messages[^1]);
+    }
 }

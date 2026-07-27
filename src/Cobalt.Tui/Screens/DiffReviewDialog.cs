@@ -571,11 +571,15 @@ public sealed class DiffReviewDialog(
     private void ToggleDiffMode()
     {
         var focused = SelectedDiffLine();
-        var sideBySide = _review.ToggleMode();
+        _review.ToggleMode();
         Render(includeFileList: false); // mode toggle changes only the diff pane, not file annotations
         SelectDiffLine(focused);
         _diffPane.SetNeedsDraw();
-        log(sideBySide ? "side-by-side diff" : "unified diff");
+        // Read the mode back *after* Render rather than using what ToggleMode returned: at a width
+        // too narrow for two columns, Render's ApplyResponsiveLayout forces it straight back to
+        // unified, and reporting the requested mode would tell the reviewer "side-by-side" while
+        // the pane is plainly unified.
+        log(_review.SideBySide ? "side-by-side diff" : "unified diff");
     }
 
     /// <summary>e: expand the fold whose marker is selected, or the first collapsed fold if the cursor is elsewhere.</summary>
@@ -965,14 +969,15 @@ public sealed class DiffReviewDialog(
         {
             _fileList.SetSource(new ObservableCollection<string>(strings));
         }
-        if (update.RowCount == 0)
+        var rowCount = _review.Rows.Count;
+        if (rowCount == 0)
         {
             return;
         }
         // The fallback reads the widget *after* SetSource, which nulls the selection — that
         // ordering is the whole reason the source is only reassigned when the rows changed, so the
         // clamp stays here rather than moving into the (widget-free) view-model.
-        _fileList.SelectedItem = update.TargetRow ?? Math.Clamp(_fileList.SelectedItem ?? 0, 0, update.RowCount - 1);
+        _fileList.SelectedItem = update.TargetRow ?? Math.Clamp(_fileList.SelectedItem ?? 0, 0, rowCount - 1);
     }
 
     /// <summary>Enter/click on a row: open the file, or toggle a folder's collapsed state.</summary>
