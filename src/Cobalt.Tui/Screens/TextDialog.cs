@@ -84,8 +84,17 @@ internal static class TextDialog
                 key.Handled = true;
                 return;
             }
-            // q (Back) / Enter (Open) / Esc all close the overlay.
-            if (token is "q" or "Esc" or "Enter")
+            // Back / Open close the overlay on the resolved command (issue #83), so a user's
+            // remap works here too; Esc keeps its own unconditional close below it never routes
+            // through the table (KeymapRouter always short-circuits Esc to cancel).
+            if (result.Kind == KeyResultKind.Matched
+                && (result.Command == AppCommand.Back || result.Command == AppCommand.Open))
+            {
+                key.Handled = true;
+                close();
+                return;
+            }
+            if (token == "Esc")
             {
                 key.Handled = true;
                 close();
