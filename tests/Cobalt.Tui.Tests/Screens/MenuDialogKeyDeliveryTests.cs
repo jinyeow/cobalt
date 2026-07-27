@@ -312,8 +312,10 @@ public class MenuDialogKeyDeliveryTests
     [Fact]
     public void Focus_Leaving_The_Filter_Bar_Cancels_The_Filter_Instead_Of_Orphaning_It()
     {
-        // Focus can reach the list without the menu's own cancel path running — a click on a row
-        // takes it (Terminal.Gui focuses a CanFocus view on press). A bar left visible with stale
+        // Focus can reach the list without the menu's own cancel path running; this test moves it
+        // directly, since neither a Tab-advance nor a view-level mouse event moves focus headlessly
+        // in 2.4.17. The guard is the paired orphan guard DiffReviewDialog's search bar carries.
+        // A bar left visible with stale
         // text keeps narrowing the rows, and the next Esc closes the menu instead of clearing the
         // filter, contradicting ADR 0025's "a second Esc closes the menu".
         var menu = NewMenu();
