@@ -15,8 +15,11 @@ namespace Cobalt.Tui.Screens;
 /// </summary>
 /// <remarks>
 /// Unlike the detail dialogs, <c>Dispatch</c> returns true for every matched command: a menu has
-/// no native widget behaviour worth falling through to, and letting the shell's own `?` through
-/// would open a menu on top of a menu.
+/// no native widget behaviour worth falling through to, and an unhandled `?` bubbling to the
+/// shell would open a second menu on top of the first. This guards the key path only — the
+/// offered Help row still reopens the menu, deliberately, but sequentially: the pick is
+/// dispatched only after this popup's run loop has stopped (<see cref="Run"/>), never from
+/// inside it.
 /// </remarks>
 internal static class MenuDialog
 {
