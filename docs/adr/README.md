@@ -29,3 +29,4 @@ immutable once accepted; superseding decisions get a new number that links back.
 | [0022](0022-lazygit-interaction-grammar-roadmap.md) | Adopt the lazygit interaction grammar (redesign roadmap) | Accepted |
 | [0023](0023-keybinding-remap-config.md) | Keybinding remap config: `[keys.<scope>]` in config.toml | Accepted |
 | [0024](0024-list-preview-workspace.md) | List + live-preview workspace: concrete design | Accepted |
+| [0025](0025-executable-menu-component.md) | Reusable menu component, and `?` as an executable menu | Accepted |
