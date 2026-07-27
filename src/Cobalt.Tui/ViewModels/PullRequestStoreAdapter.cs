@@ -1,6 +1,7 @@
 using Cobalt.Core.Ado;
 using Cobalt.Core.Config;
 using Cobalt.Core.Models;
+using Cobalt.Tui.Tasks;
 
 namespace Cobalt.Tui.ViewModels;
 
@@ -24,8 +25,11 @@ public sealed class PullRequestStoreAdapter(
     : IPullRequestSource, IPullRequestStore, IPrDiffSource
 {
     private Guid? _me;
-    private readonly object _teamsLock = new();
-    private Task<TeamDirectory>? _teamsInflight;
+
+    /// <summary>The degenerate key of the one team directory this adapter caches.</summary>
+    private readonly record struct TeamsKey;
+
+    private readonly JoinFlightCache<TeamsKey, TeamDirectory> _teams = new();
 
     /// <summary>The active PR-list breadth; flipped by the <c>:scope</c> command.</summary>
     public PrScope Scope { get; set; } = initialScope;
@@ -34,58 +38,18 @@ public sealed class PullRequestStoreAdapter(
         _me ??= await resolveMe(ct).ConfigureAwait(false);
 
     /// <summary>
-    /// The team directory, resolved once and shared. Single-flight and <em>start-detached</em>: the
-    /// first caller starts the build; every caller awaits it via <see cref="Task.WaitAsync(CancellationToken)"/>,
-    /// so one caller's cancellation cancels only its own await, never the shared build the others are
-    /// joined to (ADR 0008). The shared build runs on <see cref="CancellationToken.None"/>, and its
-    /// eviction is attached to the shared task (not any caller's await), so a build that ends
+    /// The team directory, resolved once and shared. <see cref="JoinFlightCache{TKey,TValue}"/> owns
+    /// the contract: the build is started detached, so one caller's cancellation cancels only its own
+    /// await and never the shared build the others are joined to (ADR 0008), and a build that ends
     /// unsuccessfully — faulted <em>or</em> canceled, e.g. an HttpClient timeout surfacing as a
     /// cancelled task — is evicted and retried rather than cached forever.
     /// </summary>
-    private Task<TeamDirectory> TeamsAsync(CancellationToken ct)
-    {
-        Task<TeamDirectory> shared;
-        lock (_teamsLock)
-        {
-            if (_teamsInflight is not { } existing)
-            {
-                existing = (resolveTeams ?? throw new InvalidOperationException("no team directory resolver configured"))(
-                    CancellationToken.None);
-                // Assign the field *before* attaching the eviction, so an already-completed build
-                // (e.g. Task.FromCanceled from an HttpClient timeout) evicts itself right here via
-                // the synchronous continuation instead of being cached before eviction can see it.
-                _teamsInflight = existing;
-                // Evict by identity the moment the shared build ends unsuccessfully (faulted OR
-                // canceled), observing any fault so it never reaches the crash-log hook (ADR 0013).
-                // Attached to the shared task, not a caller's WaitAsync, so a cancelled joiner still
-                // leaves the build running for the others and a cancelled build is not cached poison.
-                _ = existing.ContinueWith(
-                    EvictIfUnsuccessful,
-                    CancellationToken.None,
-                    TaskContinuationOptions.ExecuteSynchronously,
-                    TaskScheduler.Default);
-            }
-            // Local, so the synchronous eviction above nulling the field does not matter here.
-            shared = existing;
-        }
-        return shared.WaitAsync(ct);
-    }
-
-    private void EvictIfUnsuccessful(Task<TeamDirectory> build)
-    {
-        if (build.IsCompletedSuccessfully)
-        {
-            return;
-        }
-        _ = build.Exception; // observe a fault (a canceled task carries none)
-        lock (_teamsLock)
-        {
-            if (ReferenceEquals(_teamsInflight, build))
-            {
-                _teamsInflight = null;
-            }
-        }
-    }
+    private Task<TeamDirectory> TeamsAsync(CancellationToken ct) =>
+        _teams.GetOrJoinAsync(
+            default,
+            _ => (resolveTeams ?? throw new InvalidOperationException("no team directory resolver configured"))(
+                CancellationToken.None),
+            ct);
 
     public async Task<IReadOnlyList<PullRequest>> ListPullRequestsAsync(PrListFilter filter, CancellationToken ct)
     {

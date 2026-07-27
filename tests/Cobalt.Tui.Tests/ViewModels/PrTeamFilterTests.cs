@@ -219,6 +219,36 @@ public class PrTeamFilterTests : IDisposable
     }
 
     [Fact]
+    public async Task Team_Directory_Build_Survives_One_Caller_Cancelling_Its_Own_Load()
+    {
+        // The build is started detached, so a Team load that is cancelled mid-flight cancels only
+        // its own await: the other load still completes off the one shared build.
+        var calls = 0;
+        var gate = new TaskCompletionSource<TeamDirectory>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Func<CancellationToken, Task<TeamDirectory>> resolve = _ =>
+        {
+            Interlocked.Increment(ref calls);
+            return gate.Task;
+        };
+        var reviewer = $$"""{"value":[{{Pr(1, "someone", "2026-01-01T00:00:00Z", TeamId)}}]}""";
+        var handler = new DispatchHandler(reviewer, """{"value":[]}""");
+        var adapter = Adapter(handler, resolve);
+
+        using var quitter = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var leaving = adapter.ListPullRequestsAsync(PrListFilter.Team, quitter.Token);
+        var staying = adapter.ListPullRequestsAsync(PrListFilter.Team, TestContext.Current.CancellationToken);
+
+        await quitter.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => leaving);
+
+        gate.SetResult(new TeamDirectory([new TeamMembership(TeamId, "Proj", new HashSet<string> { TeammateId })]));
+        var prs = await staying;
+
+        Assert.Equal(1, Volatile.Read(ref calls)); // the quitter never cancelled the shared build
+        Assert.Equal([1], prs.Select(p => p.PullRequestId));
+    }
+
+    [Fact]
     public async Task Team_Directory_Is_Rebuilt_After_A_Failed_Build()
     {
         var calls = 0;
