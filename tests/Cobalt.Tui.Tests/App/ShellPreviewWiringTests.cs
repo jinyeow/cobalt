@@ -127,8 +127,13 @@ public class ShellPreviewWiringTests
                 Post.RunAll();
                 await Task.Delay(10, TestContext.Current.CancellationToken);
             }
-            Post.RunAll();
             Assert.True(Badged(), "the comment-count enrichment never settled");
+            // A badge proves the count reached the cache, and PrCommentCountEnricher writes the
+            // cache under its lock before raising CountAvailable outside it — so the last count's
+            // event can still be in flight here. One more settle cycle collects it.
+            Post.RunAll();
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+            Post.RunAll();
         }
 
         public void Dispose() => Shell.Dispose();
