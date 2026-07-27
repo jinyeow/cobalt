@@ -14,7 +14,7 @@ an interactive browser sign-in.
 
 ```sh
 dotnet build Cobalt.slnx                          # build all (src + tests)
-dotnet test  Cobalt.slnx                          # full suite (~1,310 tests)
+dotnet test  Cobalt.slnx                          # full suite (~1,360 tests)
 dotnet run --project src/Cobalt -- --help         # run the CLI/TUI
 
 # run a single test / class / trait
@@ -59,14 +59,21 @@ a `Screens/` view whenever you can. Terminal.Gui upgrades should touch only `Cob
 ## The vim input layer (ADR 0007)
 
 Modeled as pure data + pure functions so the product's core feel is fully tested without a
-terminal. The chain is `Key → KeyTokenizer → KeymapRouter → ShellViewModel`:
+terminal. The chain is
+`Key → KeyTokenizer → KeymapRouter → ShellCommandRouter → ShellViewModel`:
 
 - `KeyBindingTable` — `(token-sequence, command)` bindings per `KeyScope`; the single edit
-  point for a future remapping config.
+  point for the remapping config (ADR 0023).
 - `KeymapRouter` — stateful sequencer over string tokens (`"j"`, `"C-d"`, `"Esc"`),
   returning Matched/Pending/None, count-prefix aware.
 - `KeyTokenizer` — the **only** place a Terminal.Gui `Key` becomes one of our tokens.
+- `ShellCommandRouter` — maps a matched command plus the active section and workspace state
+  to a `ShellAction` the shell performs; the routing hop, so it is testable without a shell.
 - `PaletteCommandParser` / `ShellViewModel` — `:`-command parsing and dispatch, pure.
+
+The modal dialogs share `Screens/DialogKeyRouter`, which owns the same state machine on
+their side (Pending swallows, Matched is handled only when the dialog acted, Esc clears a
+pending sequence before it closes), so each dialog keeps only its own `Dispatch` verb table.
 
 Add or change a keybinding in `KeyBindingTable`; add its handling in the view-model — not
 in a view.
