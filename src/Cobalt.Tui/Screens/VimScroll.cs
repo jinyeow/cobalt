@@ -19,10 +19,10 @@ namespace Cobalt.Tui.Screens;
 #pragma warning disable CS0618 // read-only scrollable TextView pane; see WorkItemDetailDialog
 public static class VimScroll
 {
-    public static bool Applies(AppCommand command) => command is
-        AppCommand.MoveDown or AppCommand.MoveUp or
-        AppCommand.MoveTop or AppCommand.MoveBottom or
-        AppCommand.HalfPageDown or AppCommand.HalfPageUp;
+    /// <summary>Whether this command scrolls: the dialogs' gate before forwarding to
+    /// <see cref="Apply"/>. The set itself is <see cref="AppCommandExtensions.IsMovement"/>, so the
+    /// UI-free routing layer can ask the same question without reaching into this type.</summary>
+    public static bool Applies(AppCommand command) => command.IsMovement();
 
     public static void Apply(View target, AppCommand command, int? count)
     {

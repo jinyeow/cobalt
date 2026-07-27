@@ -35,6 +35,9 @@ public sealed class CobaltShell : Window
     // maps it onto a SetFocus. At M5 nothing sets the preview visible yet (#48 wires the
     // layout), so CyclePane always falls back to today's Tab semantics.
     private readonly WorkspaceViewModel _workspace = new();
+    // The section/workspace-aware command routing (#76): the shell asks what to do, then only does
+    // it. Reads _prList so the PR sub-tab intercept still gates on "has the screen been built".
+    private readonly ShellCommandRouter _commands;
     // The text the palette field held after the last Tab/S-Tab completion, so a subsequent Tab
     // cycles the existing suggestions instead of re-filtering; a user edit (field != this) restarts.
     private string? _lastCompletion;
@@ -145,6 +148,7 @@ public sealed class CobaltShell : Window
         // the keybar's Tab entry depends on whether the preview shows.
         _content.ViewportChanged += (_, _) => ApplyWorkspaceLayout();
 
+        _commands = new ShellCommandRouter(_workspace, () => _vm.ActiveSection, () => _prList is not null);
         _previewMode = vm.CurrentPreview;
         _previewCoord = new PreviewCoordinator(
             _previewPane, _workspace, _vm, _workItems, _pullRequests,
@@ -328,87 +332,56 @@ public sealed class CobaltShell : Window
 
     internal readonly record struct KeyDecision(bool Handled, AppCommand? Command);
 
+    /// <summary>
+    /// Performs one matched command. The section- and workspace-aware routing lives in
+    /// <see cref="ShellCommandRouter"/> (#76), so what remains here is the Terminal.Gui side
+    /// effects that routing asks for, plus the verbs that never branched on section — which the
+    /// router declines so they keep exactly their existing handling.
+    /// </summary>
     private void Dispatch(AppCommand command, int? count = null)
     {
-        // Workspace Tab (ADR 0024): with a visible preview, Tab cycles pane focus and is
-        // consumed; while the preview is hidden the workspace declines it and Tab keeps
-        // exactly today's semantics (the PR sub-tab intercept / section toggle below).
-        if (command == AppCommand.CyclePane)
+        var action = _commands.Route(command, count);
+        switch (action.Kind)
         {
-            if (_workspace.CyclePane())
-            {
+            case ShellActionKind.Consumed:
+                return;
+            case ShellActionKind.ApplyWorkspaceFocus:
                 ApplyWorkspaceFocus();
                 return;
-            }
-            Dispatch(AppCommand.NextTab, count);
-            return;
-        }
-
-        // C-h / C-l move workspace pane focus. When nothing changes (preview hidden, or
-        // already at that edge) fall through so the keys keep their current behaviour.
-        if (command is AppCommand.FocusLeft or AppCommand.FocusRight)
-        {
-            var changed = command == AppCommand.FocusLeft ? _workspace.FocusLeft() : _workspace.FocusRight();
-            if (changed)
-            {
-                ApplyWorkspaceFocus();
+            case ShellActionKind.PrNextTab:
+                _prList?.NextTab();
                 return;
-            }
+            case ShellActionKind.PrPrevTab:
+                _prList?.PrevTab();
+                return;
+            case ShellActionKind.ScrollPreview:
+            case ShellActionKind.NavigateWorkItemList:
+            case ShellActionKind.NavigatePrList:
+            case ShellActionKind.NavigateNothing:
+                Move(action);
+                return;
+            case ShellActionKind.RefreshWorkItemList:
+                _workItemList?.OnRefresh();
+                return;
+            case ShellActionKind.RefreshPrList:
+                _prList?.Refresh();
+                return;
+            case ShellActionKind.StartWorkItemFilter:
+                _workItemList?.StartFiltering();
+                return;
+            case ShellActionKind.OpenWorkItem:
+                _workItemList?.OnOpen();
+                return;
+            case ShellActionKind.OpenPr:
+                _prList?.OnOpen();
+                return;
+            default:
+                break;
         }
 
-        // In the PR section (with a built list), Tab/S-Tab cycle the PR sub-tabs (review
-        // queue/team/mine/active) rather than switching top-level sections; section switches go
-        // through the g-chords (gt/gT/g1/g2), handled by _vm.HandleCommand below. When the PR list
-        // isn't built (no connection → placeholder), fall through so Tab still toggles sections.
-        if (PullRequestsActive && _prList is not null && command is AppCommand.NextTab or AppCommand.PrevTab)
-        {
-            if (command == AppCommand.NextTab)
-            {
-                _prList.NextTab();
-            }
-            else
-            {
-                _prList.PrevTab();
-            }
-            return;
-        }
-
-        // Vim movement: the router matched and consumed the key, so forward it to the
-        // active section's list only (both are kept alive now, so a null check no longer
-        // identifies the visible one). ListView only navigates on arrow keys natively.
-        if (VimScroll.Applies(command))
-        {
-            View? moved = null;
-            // The workspace decides where movement lands (ADR 0024): the preview scrolls while
-            // it holds focus, the list cursor moves otherwise. Without this the focused preview
-            // would be a trap that j/k cannot move.
-            if (_workspace.Route(command) == WorkspaceKeyRoute.PreviewScroll)
-            {
-                _previewPane.Scroll(command, count);
-                moved = _previewPane;
-            }
-            else if (WorkItemsActive)
-            {
-                _workItemList?.Navigate(command, count);
-                moved = _workItemList;
-                _previewCoord.SelectionChanged(); // the cursor moved: tier 1 repaints now, tier 2 waits for the settle
-            }
-            else if (PullRequestsActive)
-            {
-                _prList?.Navigate(command, count);
-                moved = _prList;
-                _previewCoord.SelectionChanged();
-            }
-            // INPUT-1: dirty only the moved list and issue a non-forced layout+draw, instead of
-            // forcing a full-app repaint on every keystroke. A programmatic InvokeCommand move may
-            // not flag the view dirty on its own, so SetNeedsDraw supplies that flag explicitly —
-            // which is what the old force:true was compensating for (ADR 0016). UAT-gated on both
-            // the windows and dotnet drivers.
-            moved?.SetNeedsDraw();
-            (MovementRedrawOverride ?? _app.LayoutAndDraw)(false);
-            return;
-        }
-
+        // Unrouted — the shell's own commands. The router may have rewritten the command on the
+        // way here (Tab → NextTab while the preview is hidden), so act on the routed one.
+        command = action.Command;
         if (_vm.HandleCommand(command))
         {
             return;
@@ -418,34 +391,6 @@ public sealed class CobaltShell : Window
         {
             case AppCommand.CommandPalette:
                 OpenPalette();
-                break;
-            case AppCommand.Refresh:
-                // `r` forces a fresh load of the visible section only (CACHE-1 keeps the other's
-                // rows as-is until it is next shown or refreshed).
-                if (WorkItemsActive)
-                {
-                    _workItemList?.OnRefresh();
-                }
-                else if (PullRequestsActive)
-                {
-                    _prList?.Refresh();
-                }
-                break;
-            case AppCommand.FilterStart:
-                if (WorkItemsActive)
-                {
-                    _workItemList?.StartFiltering();
-                }
-                break;
-            case AppCommand.Open:
-                if (WorkItemsActive)
-                {
-                    _workItemList?.OnOpen();
-                }
-                else if (PullRequestsActive)
-                {
-                    _prList?.OnOpen();
-                }
                 break;
             case AppCommand.YankId:
                 CopyCurrentUrl();
@@ -474,6 +419,43 @@ public sealed class CobaltShell : Window
                 _vm.Messages.Info($"'{KeyLabel(command)}' not available here");
                 break;
         }
+    }
+
+    /// <summary>
+    /// Vim movement: the key router matched and consumed it, so it must be forwarded here or it is
+    /// swallowed. The workspace already decided where it lands (ADR 0024) — the preview scrolls
+    /// while it holds focus, the active section's list cursor moves otherwise; only a list move
+    /// refreshes the preview.
+    /// </summary>
+    private void Move(ShellAction action)
+    {
+        View? moved = null;
+        switch (action.Kind)
+        {
+            case ShellActionKind.ScrollPreview:
+                _previewPane.Scroll(action.Command, action.Count);
+                moved = _previewPane;
+                break;
+            case ShellActionKind.NavigateWorkItemList:
+                _workItemList?.Navigate(action.Command, action.Count);
+                moved = _workItemList;
+                _previewCoord.SelectionChanged(); // the cursor moved: tier 1 repaints now, tier 2 waits for the settle
+                break;
+            case ShellActionKind.NavigatePrList:
+                _prList?.Navigate(action.Command, action.Count);
+                moved = _prList;
+                _previewCoord.SelectionChanged();
+                break;
+            default:
+                break;
+        }
+        // INPUT-1: dirty only the moved list and issue a non-forced layout+draw, instead of
+        // forcing a full-app repaint on every keystroke. A programmatic InvokeCommand move may
+        // not flag the view dirty on its own, so SetNeedsDraw supplies that flag explicitly —
+        // which is what the old force:true was compensating for (ADR 0016). UAT-gated on both
+        // the windows and dotnet drivers.
+        moved?.SetNeedsDraw();
+        (MovementRedrawOverride ?? _app.LayoutAndDraw)(false);
     }
 
     /// <summary>The first key sequence bound to <paramref name="command"/> in the active scope, for messages.</summary>
