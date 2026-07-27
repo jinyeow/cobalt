@@ -61,7 +61,8 @@ shared router.
 It guards the key path only: the Help **row** is offered and, when chosen, dispatches back
 into the shell's `ShowHelp`. That is deliberate and safe — the pick is acted on after the
 popup's run loop has stopped, so the second menu opens *after* the first has closed rather
-than on top of it (`ShellHelpMenuTests.Choosing_The_Help_Row_Reopens_The_Menu_Sequentially`).
+than on top of it (`CobaltShell.ShowHelp`, `App/CobaltShell.cs:930-936`: the chosen row is
+dispatched only after `MenuDialog.Run` returns, never from inside its loop).
 
 The filter bar is a `TextField` on the bottom row, hidden until `/`. While it has focus the
 dialog-level router stands down (ADR 0014's search-bar guard): printable runes belong to the
@@ -100,8 +101,9 @@ shell's `?` (and `:help`) now open the menu; a chosen row goes through the shell
   executing a dialog verb from a nested modal across four dialogs; it is a clean follow-up
   (`MenuForDialog` rows, `Dispatch(row.Value, null)` on accept).
 - `TextDialog` stays in use for `:messages`, `:log`, and the dialog `?`.
-- Issue #26 adds pure row builders and re-points both injected pickers (`PrActions`,
-  `WorkItemActions`) at `MenuDialog.Run<T>` — no changes to the menu component itself.
+- Issue #26 adds pure row builders and re-points all three injected pickers (`PrActions`,
+  `WorkItemActions`, `DiffReviewDialog`'s `VoteChooser`) at `MenuDialog.Run<T>` — no changes
+  to the menu component itself.
 - `Enter` on a filter that matches nothing dismisses the menu without choosing, rather than
   doing nothing — one Open path, and it matches `Enter`-closes everywhere else in the app.
 - A long description (the command palette's) truncates in a narrow menu.
