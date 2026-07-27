@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using Cobalt.Core.Models;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
@@ -244,28 +243,17 @@ public sealed class WorkItemListView : View
         {
             _renderedRows = _vm.Rows;
 
-            // SetSource nulls SelectedItem in 2.4.16, so capture the reviewer's current
-            // row first and restore it (clamped) — otherwise a background reload snaps
-            // the highlight back to the top. The list is the source of truth.
+            // Captured before the tail rebinds the source, which nulls SelectedItem (see ListRenderTail).
             var target = _list.SelectedItem ?? _vm.SelectedIndex;
-            if (_vm.Rows.Count == 0 && _vm.EmptyStateText is { } emptyText)
+            var emptyText = _vm.EmptyStateText;
+            // Only the placeholder path paints guidance, and that path is exactly "no rows and
+            // guidance exists" — so the guard remembers it only when the list is empty.
+            _renderedEmptyStateText = _vm.Rows.Count == 0 ? emptyText : null;
+            _rendered = ListRenderTail.Apply(_list, _vm.Rows.Count, emptyText, () =>
             {
-                // Helpful-empty-states (item 3): explain why the list is empty instead of a blank body.
-                _rendered = [emptyText];
-                _renderedEmptyStateText = emptyText;
-            }
-            else
-            {
-                _renderedEmptyStateText = null;
                 var cols = WorkItemColumns.For(_vm.Rows);
-                _rendered = [.. _vm.Rows.Select(item => WorkItemRowFormatter.Format(item, width, cols))];
-            }
-            var rows = new ObservableCollection<string>(_rendered);
-            _list.SetSource(rows);
-            if (_vm.Rows.Count > 0)
-            {
-                _list.SelectedItem = Math.Clamp(target, 0, _vm.Rows.Count - 1);
-            }
+                return [.. _vm.Rows.Select(item => WorkItemRowFormatter.Format(item, width, cols))];
+            }, target);
         }
         SetNeedsDraw();
     }
