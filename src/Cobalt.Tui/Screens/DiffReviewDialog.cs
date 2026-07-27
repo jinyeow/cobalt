@@ -209,8 +209,8 @@ public sealed class DiffReviewDialog(
         };
 
         // A one-line inline search bar anchored to the bottom, hidden until '/'. Enter applies
-        // the query and hides it; Esc hides and clears. While it has focus HandleKey early-returns
-        // so typed runes reach the field rather than the command router; if focus leaves the bar
+        // the query and hides it; Esc hides and clears. While it has focus the key subscription
+        // below skips the command router, so the bar owns the key; if focus leaves the bar
         // any other way (Tab, a mouse click), HasFocusChanged hides it so it never orphans with
         // stale text (which would otherwise make the next q/Esc close the whole dialog).
         _searchBar = new TextField
