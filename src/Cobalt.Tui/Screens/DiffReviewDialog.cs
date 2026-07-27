@@ -39,19 +39,10 @@ public sealed class DiffReviewDialog(
     private IReadOnlyList<FileTreeRow> _rows = [];
     private List<string> _fileListStrings = [];
     private int _fileIndex;
-    private string? _renderedDiffPath;
-    private bool _sideBySide;
-    private DiffFoldState? _foldState;
-    private IReadOnlyList<DiffRow> _diffRows = [];
-    // unified line index → the first _diffRows index showing it (any of LineIndex/LeftIndex/
-    // RightIndex), rebuilt with _diffRows so IsLineVisible / SelectDiffLine are O(1) rather than
-    // an O(rows) scan on every n/N, hunk/thread nav and search hop (RENDER-7).
-    private IReadOnlyDictionary<int, int> _lineToRow = new Dictionary<int, int>();
     private int _lastDialogWidth = -1;
     private int _diffContentWidth = 1;
-    private readonly DiffPaneComposer _composer = new();
     // The dialog's view-state half (ADR 0004): everything DISPLAYED-side that needs no widget.
-    // Dialog-owned like _composer, so construction (and every test's) is unchanged.
+    // Dialog-owned like the composer it wraps, so construction (and every test's) is unchanged.
     private readonly DiffReviewViewModel _review = new(vm);
     private readonly CoalescingGate _statsRefresh = new();
     private int _prefetchLaunched;
@@ -110,14 +101,13 @@ public sealed class DiffReviewDialog(
     internal IReadOnlyList<FileTreeRow> Rows => _rows;
 
     /// <summary>Test seam: whether the diff pane is in side-by-side mode.</summary>
-    internal bool SideBySide => _sideBySide;
+    internal bool SideBySide => _review.SideBySide;
 
     /// <summary>Test seam: the side-by-side row map, projected from the unified row map (empty in unified mode).</summary>
-    internal IReadOnlyList<SideBySideRow> SideBySideRows =>
-        _sideBySide ? [.. _diffRows.Select(r => new SideBySideRow(r.LeftIndex, r.RightIndex))] : [];
+    internal IReadOnlyList<SideBySideRow> SideBySideRows => _review.SideBySideRows;
 
     /// <summary>Test seam: the single row→line map every diff-pane consumer (comment, thread, nav, search) goes through.</summary>
-    internal IReadOnlyList<DiffRow> DiffRows => _diffRows;
+    internal IReadOnlyList<DiffRow> DiffRows => _review.DiffRows;
 
     /// <summary>Test seam: the unified diff-line index the comment action would target for the current selection.</summary>
     internal int SelectedDiffLineIndex => SelectedDiffLine();
@@ -338,7 +328,7 @@ public sealed class DiffReviewDialog(
 
         if (!layout.AllowSideBySide)
         {
-            _sideBySide = false; // too narrow for two columns — stay unified
+            _review.ForceUnified(); // too narrow for two columns — stay unified
         }
     }
 
@@ -581,26 +571,18 @@ public sealed class DiffReviewDialog(
     private void ToggleDiffMode()
     {
         var focused = SelectedDiffLine();
-        _sideBySide = !_sideBySide;
+        var sideBySide = _review.ToggleMode();
         Render(includeFileList: false); // mode toggle changes only the diff pane, not file annotations
         SelectDiffLine(focused);
         _diffPane.SetNeedsDraw();
-        log(_sideBySide ? "side-by-side diff" : "unified diff");
+        log(sideBySide ? "side-by-side diff" : "unified diff");
     }
 
     /// <summary>e: expand the fold whose marker is selected, or the first collapsed fold if the cursor is elsewhere.</summary>
     private void ExpandFoldAtCursor()
     {
-        if (_sideBySide || _foldState is null)
+        if (_review.ExpandFoldAt(_diffPane.SelectedItem))
         {
-            return;
-        }
-        var sel = _diffPane.SelectedItem ?? -1;
-        var foldId = sel >= 0 && sel < _diffRows.Count ? _diffRows[sel].FoldId : null;
-        foldId ??= _diffRows.FirstOrDefault(r => r.FoldId is not null)?.FoldId;
-        if (foldId is { } id)
-        {
-            _foldState = _foldState.Expand(id);
             Render(includeFileList: false); // fold expand changes only the diff pane
             _diffPane.SetNeedsDraw();
         }
@@ -609,13 +591,11 @@ public sealed class DiffReviewDialog(
     /// <summary>E: expand every fold in the current file (show full context).</summary>
     private void ExpandAllFolds()
     {
-        if (_sideBySide || _foldState is null)
+        if (_review.ExpandAllFolds())
         {
-            return;
+            Render(includeFileList: false); // expand-all changes only the diff pane
+            _diffPane.SetNeedsDraw();
         }
-        _foldState = _foldState.ExpandAll();
-        Render(includeFileList: false); // expand-all changes only the diff pane
-        _diffPane.SetNeedsDraw();
     }
 
     /// <summary>/: reveal the inline search bar (or, under test, take the query from the seam).</summary>
@@ -695,16 +675,13 @@ public sealed class DiffReviewDialog(
     /// <summary>Select the row showing a unified line, expanding all folds first if that line is hidden.</summary>
     private void EnsureVisibleAndSelect(int lineIndex)
     {
-        if (!_sideBySide && _foldState is not null && !IsLineVisible(lineIndex))
+        if (_review.RevealLine(lineIndex))
         {
-            _foldState = _foldState.ExpandContaining(lineIndex);
             Render(includeFileList: false); // auto-expanding a fold for n/N or hunk/thread nav
         }
         SelectDiffLine(lineIndex);
         _diffPane.SetNeedsDraw();
     }
-
-    private bool IsLineVisible(int lineIndex) => _lineToRow.ContainsKey(lineIndex);
 
     /// <summary>]c/[c: move the diff-pane selection to the next/previous change hunk, count-aware.</summary>
     private void NavHunk(bool forward, int count)
@@ -745,17 +722,18 @@ public sealed class DiffReviewDialog(
     /// <summary>The unified diff-line nearest the cursor for navigation (skips forward off a fold marker).</summary>
     private int CurrentUnifiedLine()
     {
+        var rows = _review.DiffRows;
         var sel = _diffPane.SelectedItem ?? 0;
-        for (var i = sel; i < _diffRows.Count; i++)
+        for (var i = sel; i < rows.Count; i++)
         {
-            if (_diffRows[i].Anchor is { } a)
+            if (rows[i].Anchor is { } a)
             {
                 return a;
             }
         }
         for (var i = sel - 1; i >= 0; i--)
         {
-            if (_diffRows[i].Anchor is { } a)
+            if (rows[i].Anchor is { } a)
             {
                 return a;
             }
@@ -874,10 +852,11 @@ public sealed class DiffReviewDialog(
     /// </summary>
     private int SelectedDiffLine()
     {
+        var rows = _review.DiffRows;
         var sel = _diffPane.SelectedItem ?? 0;
-        if (sel >= 0 && sel < _diffRows.Count)
+        if (sel >= 0 && sel < rows.Count)
         {
-            return _diffRows[sel].Anchor ?? -1;
+            return rows[sel].Anchor ?? -1;
         }
         return -1;
     }
@@ -889,8 +868,7 @@ public sealed class DiffReviewDialog(
         {
             return;
         }
-        var target = _lineToRow.TryGetValue(unifiedIndex, out var row) ? row : 0;
-        _diffPane.SelectedItem = Math.Clamp(target, 0, source.Count - 1);
+        _diffPane.SelectedItem = Math.Clamp(_review.RowForLine(unifiedIndex), 0, source.Count - 1);
     }
 
     /// <summary>
@@ -950,7 +928,7 @@ public sealed class DiffReviewDialog(
         if (snapshot is { } snap)
         {
             var (diff, path) = snap;
-            var mode = _sideBySide ? "  (side-by-side)" : "";
+            var mode = _review.SideBySide ? "  (side-by-side)" : "";
             _diffHeader.Text = $" {path}   +{diff.Additions} -{diff.Deletions}" +
                 (diff.IsBinary ? "  (binary)" : diff.TooLarge ? "  (too large)" : mode);
         }
@@ -1011,32 +989,15 @@ public sealed class DiffReviewDialog(
 
         if (includeDiffPane && snapshot is { } snap)
         {
-            // Rebuild the diff pane (thread markers may have changed after a comment),
-            // but preserve the reviewer's line position on a same-file refresh; reset
-            // to the top only when the displayed file actually changed.
-            var sameFile = snap.Path == _renderedDiffPath;
-            var keepLine = sameFile ? _diffPane.SelectedItem : 0;
-            if (!sameFile)
+            // Rebuild the diff pane (thread markers may have changed after a comment). Every
+            // decision behind it — same-file detection, fold reuse, the search drop, the kept line
+            // — is the view-model's; the cursor row is read off the widget *before* the new source
+            // is assigned, because SetSource resets it.
+            var update = _review.ComposePane(snap, _diffContentWidth, _diffPane.SelectedItem);
+            _diffPane.Source = new DiffListDataSource(update.Styled);
+            if (update.SelectedRow is { } row)
             {
-                // Search matches are line-index scoped to one file; drop them when the file changes.
-                _review.ClearSearch();
-            }
-            _renderedDiffPath = snap.Path;
-
-            // All mode/fold/search branching lives in the pure composer (ADR 0004). The dialog only
-            // decides fold reuse — pass the retained state on a same-file refresh so e/E expansions
-            // survive (thread markers, mark-viewed), or null to rebuild — and stores what it returns.
-            var (commentedLeft, commentedRight) = vm.CommentedLinesFor(snap.Path);
-            var composition = _composer.Compose(new DiffPaneRequest(
-                snap.Diff, snap.Path, _sideBySide, sameFile ? _foldState : null,
-                _review.Matches, _diffContentWidth, commentedLeft, commentedRight));
-            _foldState = composition.FoldState;
-            _diffRows = composition.Rows;
-            _lineToRow = composition.LineToRow;
-            _diffPane.Source = new DiffListDataSource(composition.Styled);
-            if (composition.Styled.Count > 0)
-            {
-                _diffPane.SelectedItem = Math.Clamp(keepLine ?? 0, 0, composition.Styled.Count - 1);
+                _diffPane.SelectedItem = row;
             }
         }
         _diffPane.SetNeedsDraw();

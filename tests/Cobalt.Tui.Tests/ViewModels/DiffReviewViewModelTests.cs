@@ -1,4 +1,5 @@
 using Cobalt.Core.Models;
+using Cobalt.Core.Text;
 using Cobalt.Tui.ViewModels;
 
 namespace Cobalt.Tui.Tests.ViewModels;
@@ -189,5 +190,220 @@ public class DiffReviewViewModelTests
         Assert.Equal("/b.cs", vm.CurrentDiffPath);
         Assert.Null(review.ApplySearch("alpha").JumpToLine);    // /a.cs's text is off screen now
         Assert.NotNull(review.ApplySearch("delta").JumpToLine); // the displayed file is what's searched
+    }
+
+    // ---- pane composition ----------------------------------------------------------------
+    //
+    // ComposePane is the whole of the old Render diff-pane block: same-file detection, the
+    // search-state drop, fold reuse, the compose call, and the keep-line decision. The dialog is
+    // left assigning Source/SelectedItem from what it returns.
+
+    // A change at the top then 14 identical context lines: the trailing context run folds, so the
+    // unified projection has exactly one fold to expand (mirrors DiffPaneComposerTests).
+    private static FileDiff FoldingDiff()
+    {
+        var ctx = string.Join("\n", Enumerable.Range(0, 14).Select(i => $"ctx {i}"));
+        return DiffService.Unified("old\n" + ctx + "\n", "new\n" + ctx + "\n");
+    }
+
+    /// <summary>A view-model with no files, for tests that drive ComposePane with a hand-built diff.</summary>
+    private static async Task<PrDiffViewModel> EmptyVm()
+    {
+        var vm = new PrDiffViewModel(new FakeDiffSource(), Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        return vm;
+    }
+
+    [Fact]
+    public async Task Composing_The_Same_File_Again_Keeps_The_Cursor_Row()
+    {
+        // A comment or a mark-viewed re-renders the open file; the reviewer's line must not jump
+        // back to the top under them.
+        var review = new DiffReviewViewModel(await EmptyVm());
+        var diff = FoldingDiff();
+        review.ComposePane((diff, "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+
+        var update = review.ComposePane((diff, "/a.cs"), contentWidth: 120, paneSelectedRow: 4);
+
+        Assert.Equal(4, update.SelectedRow);
+    }
+
+    [Fact]
+    public async Task Composing_A_Different_File_Resets_To_The_Top()
+    {
+        var review = new DiffReviewViewModel(await EmptyVm());
+        var diff = FoldingDiff();
+        review.ComposePane((diff, "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+
+        // The cursor row is carried in from the widget but must be ignored: row 4 of the old file
+        // means nothing in the new one.
+        var update = review.ComposePane((diff, "/b.cs"), contentWidth: 120, paneSelectedRow: 4);
+
+        Assert.Equal(0, update.SelectedRow);
+    }
+
+    [Fact]
+    public async Task The_Kept_Row_Is_Clamped_To_The_New_Row_Count()
+    {
+        // A same-file recompose can shrink the pane (a fold re-collapsing, a narrower width), and
+        // an out-of-range SelectedItem would throw at the widget.
+        var review = new DiffReviewViewModel(await EmptyVm());
+        var diff = FoldingDiff();
+        var first = review.ComposePane((diff, "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+
+        var update = review.ComposePane((diff, "/a.cs"), contentWidth: 120, paneSelectedRow: 9_999);
+
+        Assert.Equal(first.Styled.Count - 1, update.SelectedRow);
+    }
+
+    [Fact]
+    public async Task An_Empty_Diff_Reports_No_Row_To_Select()
+    {
+        // Nothing to select rather than row 0 — the dialog skips the SelectedItem write entirely,
+        // as it always has.
+        var review = new DiffReviewViewModel(await EmptyVm());
+
+        var update = review.ComposePane((DiffService.Unified("", ""), "/a.cs"), contentWidth: 120, paneSelectedRow: 3);
+
+        Assert.Empty(update.Styled);
+        Assert.Null(update.SelectedRow);
+    }
+
+    [Fact]
+    public async Task Composing_A_Different_File_Drops_The_Search()
+    {
+        // Match line-indexes belong to one file. Carrying them over would paint the new file's
+        // lines as hits at the old file's positions.
+        var vm = await LoadedVm();
+        var review = new DiffReviewViewModel(vm);
+        review.ComposePane((vm.CurrentDiff!, "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+        review.ApplySearch("alpha");
+        Assert.Equal(2, review.MatchCount);
+
+        review.ComposePane((vm.CurrentDiff!, "/b.cs"), contentWidth: 120, paneSelectedRow: null);
+
+        Assert.Equal(0, review.MatchCount);
+    }
+
+    [Fact]
+    public async Task Composing_The_Same_File_Again_Keeps_The_Search()
+    {
+        var vm = await LoadedVm();
+        var review = new DiffReviewViewModel(vm);
+        review.ComposePane((vm.CurrentDiff!, "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+        review.ApplySearch("alpha");
+
+        review.ComposePane((vm.CurrentDiff!, "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+
+        Assert.Equal(2, review.MatchCount);
+    }
+
+    [Fact]
+    public async Task An_Expanded_Fold_Survives_A_Same_File_Recompose()
+    {
+        // e/E expansions must outlive the re-render a comment or mark-viewed triggers.
+        var review = new DiffReviewViewModel(await EmptyVm());
+        var diff = FoldingDiff();
+        var folded = review.ComposePane((diff, "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+        Assert.Contains(review.DiffRows, r => r.FoldId is not null); // the fixture really folds
+        Assert.True(review.ExpandAllFolds());
+
+        var expanded = review.ComposePane((diff, "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+
+        Assert.DoesNotContain(review.DiffRows, r => r.FoldId is not null);
+        Assert.True(expanded.Styled.Count > folded.Styled.Count); // the hidden context is now shown
+    }
+
+    [Fact]
+    public async Task Fold_State_Is_Rebuilt_When_The_Displayed_File_Changes()
+    {
+        var review = new DiffReviewViewModel(await EmptyVm());
+        var diff = FoldingDiff();
+        review.ComposePane((diff, "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+        review.ExpandAllFolds();
+
+        review.ComposePane((diff, "/b.cs"), contentWidth: 120, paneSelectedRow: null);
+
+        // A fresh file starts folded again, however the previous one was left.
+        Assert.Contains(review.DiffRows, r => r.FoldId is not null);
+    }
+
+    [Fact]
+    public async Task Forcing_Unified_Is_Sticky_Until_The_User_Toggles_Back()
+    {
+        // The narrow-width force is one-way by design: widening the dialog does not silently
+        // restore side-by-side, and nothing but 's' does. ForceUnified is deliberately not a
+        // setter for that reason.
+        var review = new DiffReviewViewModel(await EmptyVm());
+        Assert.True(review.ToggleMode()); // 's' → side-by-side
+
+        review.ForceUnified();
+
+        Assert.False(review.SideBySide);
+        review.ForceUnified(); // a second narrow render changes nothing
+        Assert.False(review.SideBySide);
+        Assert.True(review.ToggleMode()); // only the user's 's' brings it back
+    }
+
+    [Fact]
+    public async Task Toggling_The_Mode_Reports_The_Mode_It_Landed_In()
+    {
+        // The dialog logs off the return value rather than re-reading the field.
+        var review = new DiffReviewViewModel(await EmptyVm());
+
+        Assert.True(review.ToggleMode());
+        Assert.False(review.ToggleMode());
+    }
+
+    [Fact]
+    public async Task Side_By_Side_Carries_No_Folds_To_Expand()
+    {
+        // The composer returns no fold state in side-by-side (full context is shown), so e/E are
+        // inert there and must not trigger a re-render.
+        var review = new DiffReviewViewModel(await EmptyVm());
+        review.ToggleMode();
+        review.ComposePane((FoldingDiff(), "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+
+        Assert.False(review.ExpandAllFolds());
+        Assert.False(review.ExpandFoldAt(0));
+    }
+
+    [Fact]
+    public async Task Expanding_At_The_Cursor_Falls_Back_To_The_First_Fold()
+    {
+        // 'e' with the cursor on an ordinary line expands the first collapsed fold rather than
+        // doing nothing.
+        var review = new DiffReviewViewModel(await EmptyVm());
+        review.ComposePane((FoldingDiff(), "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+
+        Assert.True(review.ExpandFoldAt(0)); // row 0 is a changed line, not the fold marker
+    }
+
+    [Fact]
+    public async Task Expanding_Reports_Nothing_To_Do_When_There_Are_No_Folds_Left()
+    {
+        var review = new DiffReviewViewModel(await EmptyVm());
+        review.ComposePane((FoldingDiff(), "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+        review.ExpandAllFolds();
+        review.ComposePane((FoldingDiff(), "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+
+        Assert.False(review.ExpandFoldAt(0)); // nothing collapsed remains
+    }
+
+    [Fact]
+    public async Task Revealing_A_Hidden_Line_Expands_The_Fold_Containing_It()
+    {
+        // n/N and hunk/thread nav land on lines the fold hides; the caller re-renders only when
+        // this reports that it changed the fold state.
+        var review = new DiffReviewViewModel(await EmptyVm());
+        var diff = FoldingDiff();
+        review.ComposePane((diff, "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+        var hidden = Enumerable.Range(0, diff.Lines.Count).First(i => !review.IsLineVisible(i));
+
+        Assert.True(review.RevealLine(hidden));
+
+        review.ComposePane((diff, "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+        Assert.True(review.IsLineVisible(hidden));
+        Assert.False(review.RevealLine(hidden)); // already visible: no re-render needed
     }
 }
