@@ -268,6 +268,29 @@ public class MenuDialogKeyDeliveryTests
     }
 
     [Fact]
+    public void Focus_Leaving_The_Filter_Bar_Cancels_The_Filter_Instead_Of_Orphaning_It()
+    {
+        // Focus can reach the list without the menu's own cancel path running — a click on a row
+        // takes it (Terminal.Gui focuses a CanFocus view on press). A bar left visible with stale
+        // text keeps narrowing the rows, and the next Esc closes the menu instead of clearing the
+        // filter, contradicting ADR 0025's "a second Esc closes the menu".
+        var menu = NewMenu();
+        menu.Dialog.NewKeyDownEvent(new Key('/'));
+        menu.Dialog.NewKeyDownEvent(new Key('r'));
+
+        menu.List.SetFocus();
+
+        Assert.False(menu.Filter.HasFocus);
+        Assert.False(menu.Filter.Visible);
+        Assert.Equal("", menu.Vm.Filter);
+        Assert.Equal(5, menu.List.Source?.Count);
+
+        // And the one Esc the user has left dismisses the menu, as the ADR says.
+        menu.Dialog.NewKeyDownEvent(Key.Esc);
+        Assert.Equal(1, menu.Closes);
+    }
+
+    [Fact]
     public void CtrlU_While_Filtering_Does_Not_Scroll_The_List_Underneath()
     {
         // The ADR 0014 search-bar guard: control chords bubble past the field to the dialog, so

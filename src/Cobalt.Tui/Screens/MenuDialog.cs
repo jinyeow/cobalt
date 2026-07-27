@@ -154,6 +154,17 @@ internal static class MenuDialog
             e.Handled = true; // stop the Dialog's default-accept from closing us first
             Accept();
         };
+        // Focus escaping the bar without Esc (a click on a row) must not leave it orphaned: a
+        // visible bar with stale text keeps narrowing the rows while the dialog-level guard has
+        // already stood down, so the next Esc would close the menu instead of clearing the filter.
+        // Idempotent with HideFilter, which clears Visible first (the DiffReviewDialog guard).
+        filter.HasFocusChanged += (_, _) =>
+        {
+            if (!filter.HasFocus && filter.Visible)
+            {
+                HideFilter();
+            }
+        };
         filter.KeyDown += (_, key) =>
         {
             if (key.KeyCode == Terminal.Gui.Drivers.KeyCode.Esc)
