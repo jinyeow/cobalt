@@ -90,12 +90,19 @@ That guard is live, not defensive. A headless probe against Terminal.Gui 2.4.17 
 child `TextField`, keys injected at the parent, which is the production entry point since the
 driver raises `KeyDown` on the top-level `Dialog` — shows runes, `Ctrl+D` and `Home` are
 consumed by the field, while `Enter`, `Esc`, `Tab`, `CursorDown`, `PageDown` and `Ctrl+U`
-still reach the parent. Only the ones `KeyTokenizer` recognises can act, which excludes
-`PageDown` — it tokenizes to `null` and was never a threat, despite being the key the review
-that raised this originally named. The rest are recognised and bound (`Ctrl+U` → `HalfPageUp`,
-`Tab` → `CyclePane`, `Esc` → close), so the guard is doing real work; do not narrow it to
-control chords on the strength of the one case pinned by test.
-`DiffReviewDialogKeyTests` pins `Ctrl+U`, which would half-page the pane behind the bar.
+still reach the parent. Reaching the parent is necessary but not sufficient — a key also has
+to tokenize, and it must not already be consumed by the bar's own handlers. Disabling the
+guard and re-running the dialog's headless tests separates them:
+
+| key | without the guard | why |
+| --- | --- | --- |
+| `PageDown` | unchanged | `KeyTokenizer` returns `null` — never a threat, despite being the key the review that raised this originally named |
+| `Esc` | unchanged | the bar's own `KeyDown` handler marks it handled first, so the router never sees it |
+| `Ctrl+U` | **half-pages the pane behind the bar** | tokenizes to `C-u` → `HalfPageUp` |
+| `Tab` | **focus lands on the diff pane instead of the bar merely hiding** | tokenizes to `Tab`, bound in this scope |
+
+So the guard earns its place on two keys, not one, and neither is knowable from the bubbling
+table alone. `DiffReviewDialogKeyTests` pins the `Ctrl+U` case.
 
 Cost: one delegate hop per key, and each dialog names its `KeyScope` twice — once to the
 adapter, once for `HelpText.ForDialog` — while holding the `KeyBindingTable` it also hands
