@@ -276,9 +276,10 @@ status line (` ctx:work  <Your Name>` once identity resolves), message bar
   `unknown command: garbage`. Empty input + Enter → nothing.
   Result: ______
 - [ ] **D7 — `:help` and `?`.** Both open a modal titled `keys — q to close`
-  listing bindings with descriptions (e.g. `j        move down`,
+  (the hint reflects whatever key `back` is currently bound to) listing
+  bindings with descriptions (e.g. `j        move down`,
   `:        command palette (:q quit, :ctx NAME)`); aliases collapse (Enter/o
-  shows once). `q`, `Esc`, or `Enter` closes it.
+  shows once). `q` (or the current `back` binding), `Esc`, or `Enter` closes it.
   Result: ______
 - [ ] **D8 — `:messages`.** Open the palette, type `messages`, Enter.
   Expect: modal titled `messages — q to close` with one line per event:

@@ -70,10 +70,16 @@ Terminal.Gui types"). `Screens/VimScroll` is the precedent — a shared key-beha
 that is not itself a screen.
 
 `Screens/TextDialog` keeps its own copy and is **not** migrated. It looks like a fifth
-instance of the machine but closes on the literal tokens `q`/`Esc`/`Enter` rather than on the
-commands they resolve to, so routing it through the adapter would newly close the overlay on
-`h` (Global → `Back`) and `l`/`o` (Global → `Open`). That is a behaviour change, not an
-extraction.
+instance of the machine, but the adapter's `Esc`-or-pending handling is only part of what it
+does; adopting it wholesale would still be an extraction decision on its own, separate from
+what it closes on.
+
+**Amendment (issue #83):** `TextDialog` used to close on the literal tokens `q`/`Esc`/`Enter`
+rather than the commands they resolve to, so a remapped `back` binding did nothing and the
+default `q` kept closing the overlay even after being rebound away. It now closes on the
+resolved `Back`/`Open` commands, same as every other screen — which, as an accepted
+consequence, also closes it on `h` (Global → `Back`) and `l`/`o` (Global → `Open`). The title's
+close hint is derived from the table (`KeyBindingTable.KeyFor`) instead of hardcoding `q`.
 
 Two constraints the shape has to respect:
 
