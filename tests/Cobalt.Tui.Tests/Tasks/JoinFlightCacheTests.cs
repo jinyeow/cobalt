@@ -182,13 +182,16 @@ public class JoinFlightCacheTests
     }
 
     [Fact]
-    public async Task A_Fault_With_No_Remaining_Awaiter_Is_Still_Observed_And_Evicted()
+    public async Task A_Fault_With_No_Remaining_Awaiter_Still_Evicts_So_The_Next_Call_Refetches()
     {
         // The sole caller walks away first, so nobody is left to see the fault. Eviction hangs off
-        // the shared task rather than any caller's await, so the fault is consumed there
-        // (`_ = fetch.Exception`) instead of reaching the UnobservedTaskException crash-log hook
-        // (ADR 0013), and the poisoned entry is gone before the next caller arrives — the next call
-        // re-fetches rather than paying one guaranteed failure first.
+        // the shared task rather than any caller's await, so the poisoned entry is gone before the
+        // next caller arrives — it re-fetches rather than paying one guaranteed failure first.
+        // Scope note: this pins the eviction, NOT the `_ = fetch.Exception` observation beside it.
+        // Asserting that needs TaskScheduler.UnobservedTaskException — a process-global hook that
+        // would cross-talk with a parallel suite run — so the observation is argued in the
+        // primitive's doc comment (ADR 0013) rather than pinned by a test that would still pass
+        // with it deleted.
         var cache = new JoinFlightCache<string, int>();
         var starts = 0;
         var gate = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -213,12 +216,16 @@ public class JoinFlightCacheTests
     }
 
     [Fact]
-    public async Task A_Failed_Fetchs_Eviction_Does_Not_Remove_The_Entry_That_Replaced_It()
+    public async Task A_Retry_After_A_Fault_Keeps_Its_Result_Cached()
     {
-        // The failed fetch's eviction is only best-effort-synchronous, so it can still be pending
-        // when its replacement is already cached. It evicts by identity, so it can only ever remove
-        // the task it was attached to — the observable consequence being that the retry's result
-        // stays cached rather than being torn out from under the next caller.
+        // The consequence form of identity eviction: once a fault has evicted, the retry's result
+        // must stay cached rather than be torn out from under the next caller.
+        // Scope note: this does NOT construct the stale-continuation interleaving it protects
+        // against, and would still pass if eviction removed by key alone. That ordering — a late
+        // continuation running after a newer entry exists — is not deterministically schedulable
+        // from outside, since a newer entry can only be installed once the old task completed.
+        // Identity eviction is therefore structural: the ReferenceEquals guard in
+        // EvictIfUnsuccessful is where it is enforced and reviewed, not proven here.
         var cache = new JoinFlightCache<string, int>();
         var starts = 0;
         var gate = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);

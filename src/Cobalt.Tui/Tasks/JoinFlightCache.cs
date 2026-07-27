@@ -37,6 +37,11 @@ public sealed class JoinFlightCache<TKey, TValue> where TKey : notnull
     /// Returns the cached result for <paramref name="key"/>, joins the fetch already in flight for
     /// it, or starts one with <paramref name="start"/> — awaited through <paramref name="ct"/>, which
     /// governs only this caller's await.
+    /// <para><b>Precondition on <paramref name="start"/>:</b> it is invoked while the cache lock is
+    /// held, so it must return its task promptly and must not block — issue the request and return,
+    /// as both call sites do. Blocking there stalls every other key, and synchronously waiting on
+    /// anything that itself calls back into this cache deadlocks. The lock is what makes
+    /// "exactly one fetch per key" atomic with the lookup, so the call stays inside it.</para>
     /// </summary>
     public Task<TValue> GetOrJoinAsync(TKey key, Func<TKey, Task<TValue>> start, CancellationToken ct)
     {
