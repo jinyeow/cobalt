@@ -720,26 +720,7 @@ public sealed class DiffReviewDialog(
     }
 
     /// <summary>The unified diff-line nearest the cursor for navigation (skips forward off a fold marker).</summary>
-    private int CurrentUnifiedLine()
-    {
-        var rows = _review.DiffRows;
-        var sel = _diffPane.SelectedItem ?? 0;
-        for (var i = sel; i < rows.Count; i++)
-        {
-            if (rows[i].Anchor is { } a)
-            {
-                return a;
-            }
-        }
-        for (var i = sel - 1; i >= 0; i--)
-        {
-            if (rows[i].Anchor is { } a)
-            {
-                return a;
-            }
-        }
-        return 0;
-    }
+    private int CurrentUnifiedLine() => _review.NearestLineAtRow(_diffPane.SelectedItem);
 
     /// <summary>]v/[v: select the next/previous file whose diff has not been marked viewed.</summary>
     private async Task StepUnviewedFile(int delta)
@@ -850,16 +831,7 @@ public sealed class DiffReviewDialog(
     /// preferred). Returns -1 for an anchorless row (a fold marker) so comment/thread guards
     /// bail cleanly rather than anchoring to line 0.
     /// </summary>
-    private int SelectedDiffLine()
-    {
-        var rows = _review.DiffRows;
-        var sel = _diffPane.SelectedItem ?? 0;
-        if (sel >= 0 && sel < rows.Count)
-        {
-            return rows[sel].Anchor ?? -1;
-        }
-        return -1;
-    }
+    private int SelectedDiffLine() => _review.LineAtRow(_diffPane.SelectedItem);
 
     /// <summary>Move the diff-pane cursor to the row showing a given unified diff line, in either mode.</summary>
     private void SelectDiffLine(int unifiedIndex)

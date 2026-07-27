@@ -105,6 +105,46 @@ internal sealed class DiffReviewViewModel(PrDiffViewModel vm)
     internal IReadOnlyList<SideBySideRow> SideBySideRows =>
         _sideBySide ? [.. _diffRows.Select(r => new SideBySideRow(r.LeftIndex, r.RightIndex))] : [];
 
+    /// <summary>
+    /// The unified diff line the pane cursor points at, in either mode (new side preferred).
+    /// Returns -1 for an anchorless row (a fold marker) so comment/thread guards bail cleanly
+    /// rather than anchoring to line 0.
+    /// </summary>
+    internal int LineAtRow(int? paneSelectedRow)
+    {
+        var sel = paneSelectedRow ?? 0;
+        if (sel >= 0 && sel < _diffRows.Count)
+        {
+            return _diffRows[sel].Anchor ?? -1;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// The unified line nearest the cursor, for navigation that has to start somewhere: scans
+    /// forward off a fold marker, then backward. Unlike <see cref="LineAtRow"/> this never refuses
+    /// — ]c/[c and ]t/[t need a line to move *from*, where a comment needs a line to attach *to*.
+    /// </summary>
+    internal int NearestLineAtRow(int? paneSelectedRow)
+    {
+        var sel = paneSelectedRow ?? 0;
+        for (var i = sel; i < _diffRows.Count; i++)
+        {
+            if (_diffRows[i].Anchor is { } a)
+            {
+                return a;
+            }
+        }
+        for (var i = sel - 1; i >= 0; i--)
+        {
+            if (_diffRows[i].Anchor is { } a)
+            {
+                return a;
+            }
+        }
+        return 0;
+    }
+
     /// <summary>Whether a unified line currently has a row on screen (false when a fold hides it).</summary>
     internal bool IsLineVisible(int lineIndex) => _lineToRow.ContainsKey(lineIndex);
 

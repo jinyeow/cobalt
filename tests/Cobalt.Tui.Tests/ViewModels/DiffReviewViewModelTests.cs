@@ -406,4 +406,64 @@ public class DiffReviewViewModelTests
         Assert.True(review.IsLineVisible(hidden));
         Assert.False(review.RevealLine(hidden)); // already visible: no re-render needed
     }
+
+    // ---- cursor row ↔ unified line -------------------------------------------------------
+    //
+    // Two different questions with two different answers on a fold marker: "what line would a
+    // comment attach to here" must refuse (-1), while "where should ]c jump from" must pick a
+    // usable neighbour. Keeping them as one method is how a comment could anchor to line 0.
+
+    [Fact]
+    public async Task The_Line_At_A_Fold_Marker_Row_Is_Refused()
+    {
+        // A fold marker anchors to nothing. Returning 0 here would let 'c' attach a comment to the
+        // first line of the file instead of bailing.
+        var review = new DiffReviewViewModel(await EmptyVm());
+        review.ComposePane((FoldingDiff(), "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+        var markerRow = Enumerable.Range(0, review.DiffRows.Count).First(i => review.DiffRows[i].Anchor is null);
+
+        Assert.Equal(-1, review.LineAtRow(markerRow));
+    }
+
+    [Fact]
+    public async Task The_Line_At_An_Ordinary_Row_Is_That_Rows_Anchor()
+    {
+        var review = new DiffReviewViewModel(await EmptyVm());
+        review.ComposePane((FoldingDiff(), "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+        var row = Enumerable.Range(0, review.DiffRows.Count).First(i => review.DiffRows[i].Anchor is not null);
+
+        Assert.Equal(review.DiffRows[row].Anchor, review.LineAtRow(row));
+    }
+
+    [Fact]
+    public async Task An_Out_Of_Range_Row_Is_Refused()
+    {
+        var review = new DiffReviewViewModel(await EmptyVm());
+        review.ComposePane((FoldingDiff(), "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+
+        Assert.Equal(-1, review.LineAtRow(9_999));
+    }
+
+    [Fact]
+    public async Task Navigation_Skips_Forward_Off_A_Fold_Marker_To_A_Real_Line()
+    {
+        // ]c/[t start from wherever the cursor is, including a fold marker; they need a usable
+        // line rather than the refusal LineAtRow gives.
+        var review = new DiffReviewViewModel(await EmptyVm());
+        review.ComposePane((FoldingDiff(), "/a.cs"), contentWidth: 120, paneSelectedRow: null);
+        var markerRow = Enumerable.Range(0, review.DiffRows.Count).First(i => review.DiffRows[i].Anchor is null);
+
+        var from = review.NearestLineAtRow(markerRow);
+
+        Assert.NotEqual(-1, from);
+        Assert.Contains(review.DiffRows, r => r.Anchor == from);
+    }
+
+    [Fact]
+    public async Task Navigation_Falls_Back_To_Line_Zero_When_Nothing_Is_Anchored()
+    {
+        var review = new DiffReviewViewModel(await EmptyVm());
+
+        Assert.Equal(0, review.NearestLineAtRow(null)); // nothing composed yet
+    }
 }
