@@ -216,4 +216,24 @@ public class ShellPreviewWiringTests
         Assert.Equal("(no preview)", harness.PaneText);
         Assert.Equal(0, harness.Handler.DetailCalls);
     }
+
+    [Fact]
+    public async Task Disposing_The_Shell_Detaches_The_List_Subscription()
+    {
+        // The teardown order in Dispose detaches the list->preview subscription before the preview
+        // itself is torn down (see CobaltShell.Dispose). If that detach were skipped, a list VM that
+        // raises Changed after Dispose would still enqueue a UI-thread preview refresh — this is the
+        // discriminating observable (a disposed PreviewViewModel would swallow the fetch itself
+        // regardless, so asserting on the fetch count would not catch a missed detach).
+        var harness = await LoadedShellAsync();
+        var listVm = harness.Shell.PrListVm!;
+
+        harness.Shell.Dispose();
+
+        // Setting the client-side filter re-applies it and raises Changed synchronously — a stand-in
+        // for a background load landing after teardown, without needing a dedicated test seam.
+        listVm.ProjectFilter = "Proj";
+
+        Assert.Empty(harness.Post.Posted);
+    }
 }
