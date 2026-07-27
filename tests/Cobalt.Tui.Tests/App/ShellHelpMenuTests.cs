@@ -120,6 +120,23 @@ public class ShellHelpMenuTests
     }
 
     [Fact]
+    public void Choosing_The_Help_Row_Reopens_The_Menu_Sequentially()
+    {
+        // The swallow-all rule stops the '?' KEY reaching a second menu, but the Help ROW is
+        // offered and dispatches back into ShowHelp. That is benign only because the pick is acted
+        // on after the popup's run loop has stopped: the reopen is sequential, never nested.
+        var vm = new ShellViewModel(["work"], "work");
+        using var shell = new CobaltShell(App, vm);
+        var opens = 0;
+        shell.HelpMenuOverride = _ => ++opens == 1 ? AppCommand.Help : null;
+        shell.SetFocus();
+
+        shell.NewKeyDownEvent(new Key('?'));
+
+        Assert.Equal(2, opens);
+    }
+
+    [Fact]
     public void Dismissing_The_Menu_Dispatches_Nothing()
     {
         var vm = new ShellViewModel(["work"], "work");

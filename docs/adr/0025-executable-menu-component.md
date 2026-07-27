@@ -8,8 +8,9 @@ ADR 0022 stage C names a popup menu as the grammar's third stage: a list of rows
 can navigate, filter, and **run**, with its own key scope. Two surfaces want it. The `?`
 help was a static string cheatsheet — it told you `s` changes state but you still had to
 close it and press `s`. The vote and work-item-state pickers (issue #26) currently go
-through `PrActions`' injected `Func<string, IReadOnlyList<string>, int?>` picker, which is
-a `MessageBox` with no filtering and no vim keys.
+through an injected `Func<string, IReadOnlyList<string>, int?>` picker — one seam each in
+`PrActions` and `WorkItemActions` — which defaults to a `MessageBox` with no filtering and
+no vim keys.
 
 Building the menu for `?` alone would produce a help-shaped thing #26 could not reuse, so
 the component is generic from the start and `?` is its first consumer.
@@ -53,8 +54,14 @@ menu, consistent with every other screen.
 Unlike the four detail dialogs — where `DialogKeyRouter` deliberately lets a
 matched-but-unhandled command fall through to the widget's native behaviour — the menu's
 `Dispatch` returns `true` for **every** match. A menu has no native behaviour worth falling
-through to, and letting `?` through would open a menu on top of a menu. This is a
-`Dispatch` return value, not a change to the shared router.
+through to, and an unhandled key bubbles on to the shell, where `?` would open a second
+menu while the first is still up. This is a `Dispatch` return value, not a change to the
+shared router.
+
+It guards the key path only: the Help **row** is offered and, when chosen, dispatches back
+into the shell's `ShowHelp`. That is deliberate and safe — the pick is acted on after the
+popup's run loop has stopped, so the second menu opens *after* the first has closed rather
+than on top of it (`ShellHelpMenuTests.Choosing_The_Help_Row_Reopens_The_Menu_Sequentially`).
 
 The filter bar is a `TextField` on the bottom row, hidden until `/`. While it has focus the
 dialog-level router stands down (ADR 0014's search-bar guard): printable runes belong to the
@@ -62,7 +69,9 @@ field, and the control chords that still bubble to the `Dialog` — `C-u`, `C-d`
 otherwise scroll the list underneath it. Verified, not assumed: with the guard removed,
 `C-u` while filtering moves the selection
 (`MenuDialogKeyDeliveryTests.CtrlU_While_Filtering_Does_Not_Scroll_The_List_Underneath`).
-`Esc` in the field cancels the filter only; a second `Esc` closes the menu.
+`Esc` in the field cancels the filter only; a second `Esc` closes the menu. Focus leaving
+the field by any other route (a click on a row) cancels the filter too, so the bar is never
+left visible with stale text while the guard has already stood down.
 
 ### The choice is executed after the run loop stops
 
@@ -76,7 +85,9 @@ palette, `PrActions`).
 `HelpText.MenuFor` / `MenuForDialog` build the rows; `For` / `ForDialog` re-emit the string
 cheatsheet from them. Every suppression rule — the preview-dependent `Tab` wording (#48),
 the dead-dialog-globals filter (M3), first-binding-wins alias collapse — lives once, in the
-row builder, so `HelpTextTests`' byte-for-byte pins guard both representations. The
+row builder. `HelpTextTests` pins the string overlay against the pre-menu implementation's
+own output (golden rows per scope and preview state) and pins the rows against that same
+overlay, so a change in the shared builder has to break one of them. The
 shell's `?` (and `:help`) now open the menu; a chosen row goes through the shell's existing
 `Dispatch`, so a row that is not available in the current context lands in its existing
 "not available here" message.
@@ -89,8 +100,8 @@ shell's `?` (and `:help`) now open the menu; a chosen row goes through the shell
   executing a dialog verb from a nested modal across four dialogs; it is a clean follow-up
   (`MenuForDialog` rows, `Dispatch(row.Value, null)` on accept).
 - `TextDialog` stays in use for `:messages`, `:log`, and the dialog `?`.
-- Issue #26 adds pure row builders and re-points `PrActions`' injected picker at
-  `MenuDialog.Run<PrVote>` — no changes to the menu component itself.
+- Issue #26 adds pure row builders and re-points both injected pickers (`PrActions`,
+  `WorkItemActions`) at `MenuDialog.Run<T>` — no changes to the menu component itself.
 - `Enter` on a filter that matches nothing dismisses the menu without choosing, rather than
   doing nothing — one Open path, and it matches `Enter`-closes everywhere else in the app.
 - A long description (the command palette's) truncates in a narrow menu.
