@@ -97,6 +97,10 @@ internal static class MenuDialog
 
         void Accept()
         {
+            // The list is the source of truth for the highlight: a key the router does not
+            // tokenize (End, PageDown) moves it natively, so mirror before reading the row.
+            // Harmless when the filter matches nothing — the setter clamps to 0 and Selected is null.
+            vm.SelectedIndex = rows.SelectedItem ?? 0;
             if (vm.Selected is { } selected)
             {
                 onAccept(selected);

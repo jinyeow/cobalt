@@ -130,6 +130,22 @@ public class MenuDialogKeyDeliveryTests
     }
 
     [Fact]
+    public void A_Selection_Moved_By_A_Native_Key_Still_Executes_The_Highlighted_Row()
+    {
+        // End/PageDown carry no vim token, so the router stands down and the ListView moves its
+        // own highlight. Enter must run the row the user is looking at, not the last one the
+        // router happened to mirror.
+        var menu = NewMenu();
+
+        menu.Dialog.NewKeyDownEvent(Key.End);
+        var highlighted = menu.List.SelectedItem;
+        menu.Dialog.NewKeyDownEvent(Key.Enter);
+
+        Assert.Equal(4, highlighted);
+        Assert.Equal(AppCommand.YankId, menu.Accepted?.Value);
+    }
+
+    [Fact]
     public void Esc_Closes_Without_Accepting_Anything()
     {
         var menu = NewMenu();
