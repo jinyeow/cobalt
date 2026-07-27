@@ -466,4 +466,195 @@ public class DiffReviewViewModelTests
 
         Assert.Equal(0, review.NearestLineAtRow(null)); // nothing composed yet
     }
+
+    // ---- file tree -----------------------------------------------------------------------
+    //
+    // Tree structure is keyed by node path and belongs to neither identity: it is built from
+    // vm.Files, not from the cursor or the displayed diff. The methods that navigate it take the
+    // current path as a *parameter*, so this class still never reads SelectedFile.
+
+    /// <summary>Four files across two directories, so the tree has folders to collapse.</summary>
+    private static async Task<PrDiffViewModel> TreeVm()
+    {
+        var source = new FakeDiffSource
+        {
+            Changes =
+            [
+                new FileChange("/src/a.cs", FileChangeKind.Add),
+                new FileChange("/src/b.cs", FileChangeKind.Add),
+                new FileChange("/docs/c.md", FileChangeKind.Add),
+                new FileChange("/docs/d.md", FileChangeKind.Add),
+            ],
+        };
+        var vm = new PrDiffViewModel(source, Pr());
+        await vm.LoadAsync(TestContext.Current.CancellationToken);
+        return vm;
+    }
+
+    [Fact]
+    public async Task Rebuilding_The_Tree_Reports_New_Strings_Only_When_The_Rows_Change()
+    {
+        // SetSource nulls the list's selection, so the dialog must only call it when the rendered
+        // rows actually differ — an unconditional refresh would drop the highlight on every render.
+        var review = new DiffReviewViewModel(await TreeVm());
+
+        var first = review.RebuildTree(selectNodePath: null);
+        var second = review.RebuildTree(selectNodePath: null);
+
+        Assert.NotNull(first.Strings);
+        Assert.Null(second.Strings); // identical rows: no SetSource
+    }
+
+    [Fact]
+    public async Task Rebuilding_The_Tree_Resolves_The_Row_To_Highlight()
+    {
+        var review = new DiffReviewViewModel(await TreeVm());
+
+        var update = review.RebuildTree("/src/b.cs");
+
+        Assert.NotNull(update.TargetRow);
+        Assert.Equal("/src/b.cs", review.Rows[update.TargetRow!.Value].NodePath);
+    }
+
+    [Fact]
+    public async Task An_Unknown_Node_Leaves_The_Highlight_To_The_Caller()
+    {
+        // No target means "keep whatever the list is on" — the dialog clamps the widget's own
+        // selection, which it must read *after* SetSource has reset it.
+        var review = new DiffReviewViewModel(await TreeVm());
+
+        var update = review.RebuildTree("/nope.cs");
+
+        Assert.Null(update.TargetRow);
+        Assert.Equal(review.Rows.Count, update.RowCount);
+    }
+
+    [Fact]
+    public async Task Collapsing_A_Directory_Hides_Its_Files()
+    {
+        var review = new DiffReviewViewModel(await TreeVm());
+        review.RebuildTree(selectNodePath: null);
+        Assert.Contains(review.Rows, r => r.NodePath == "/src/a.cs");
+
+        review.ToggleDir("/src");
+        review.RebuildTree(selectNodePath: null);
+
+        Assert.DoesNotContain(review.Rows, r => r.NodePath == "/src/a.cs");
+        review.ToggleDir("/src"); // and it toggles back
+        review.RebuildTree(selectNodePath: null);
+        Assert.Contains(review.Rows, r => r.NodePath == "/src/a.cs");
+    }
+
+    [Fact]
+    public async Task Z_On_A_Directory_Row_Toggles_It()
+    {
+        var review = new DiffReviewViewModel(await TreeVm());
+        review.RebuildTree(selectNodePath: null);
+        var dirRow = Enumerable.Range(0, review.Rows.Count)
+            .First(i => review.Rows[i].Kind == FileTreeRowKind.Directory);
+        var nodePath = review.Rows[dirRow].NodePath;
+
+        Assert.Equal(nodePath, review.ToggleDirAt(dirRow));
+
+        review.RebuildTree(selectNodePath: null);
+        Assert.True(review.Rows.First(r => r.NodePath == nodePath).Collapsed);
+    }
+
+    [Fact]
+    public async Task Z_On_A_File_Row_Collapses_Its_Directory_Rather_Than_Toggling()
+    {
+        // Always collapse, never expand: 'z' on a file means "fold up the thing I'm inside", so
+        // pressing it twice must not re-open the folder the first press closed.
+        var review = new DiffReviewViewModel(await TreeVm());
+        review.RebuildTree(selectNodePath: null);
+        var fileRow = Enumerable.Range(0, review.Rows.Count)
+            .First(i => review.Rows[i].NodePath == "/src/a.cs");
+
+        var target = review.ToggleDirAt(fileRow);
+
+        Assert.Equal("/src", target);
+        review.RebuildTree(selectNodePath: null);
+        Assert.DoesNotContain(review.Rows, r => r.NodePath == "/src/a.cs");
+    }
+
+    [Fact]
+    public async Task Z_Outside_The_Rows_Does_Nothing()
+    {
+        var review = new DiffReviewViewModel(await TreeVm());
+        review.RebuildTree(selectNodePath: null);
+
+        Assert.Null(review.ToggleDirAt(null));
+        Assert.Null(review.ToggleDirAt(9_999));
+    }
+
+    [Fact]
+    public async Task Stepping_Files_Walks_The_Visible_Leaves_And_Stops_At_The_Ends()
+    {
+        // '[' and ']' skip folder rows, and clamp rather than wrap.
+        var review = new DiffReviewViewModel(await TreeVm());
+        review.RebuildTree(selectNodePath: null);
+
+        Assert.Equal(review.FileIndexForPath("/docs/d.md"), review.StepFileTarget("/docs/c.md", 1));
+        Assert.Equal(review.FileIndexForPath("/docs/c.md"), review.StepFileTarget("/docs/d.md", -1));
+        // Already at the last leaf: clamped to itself, not wrapped to the first.
+        Assert.Equal(review.FileIndexForPath("/src/b.cs"), review.StepFileTarget("/src/b.cs", 1));
+    }
+
+    [Fact]
+    public async Task Stepping_Files_With_No_Leaves_Has_Nowhere_To_Go()
+    {
+        var review = new DiffReviewViewModel(await EmptyVm());
+        review.RebuildTree(selectNodePath: null);
+
+        Assert.Null(review.StepFileTarget(null, 1));
+        Assert.Null(review.NextUnviewedTarget(null, 1));
+    }
+
+    [Fact]
+    public async Task Stepping_Unviewed_Skips_The_Files_Already_Marked()
+    {
+        var vm = await TreeVm();
+        var review = new DiffReviewViewModel(vm);
+        review.RebuildTree(selectNodePath: null);
+        vm.MarkViewed("/docs/d.md"); // the next leaf after c.md is viewed; skip to the one after
+
+        var target = review.NextUnviewedTarget("/docs/c.md", 1);
+
+        Assert.Equal(review.FileIndexForPath("/src/a.cs"), target);
+    }
+
+    [Fact]
+    public async Task Stepping_Unviewed_Stops_When_Everything_Ahead_Is_Viewed()
+    {
+        var vm = await TreeVm();
+        var review = new DiffReviewViewModel(vm);
+        review.RebuildTree(selectNodePath: null);
+        foreach (var file in vm.Files)
+        {
+            vm.MarkViewed(file.Path);
+        }
+
+        Assert.Null(review.NextUnviewedTarget("/docs/c.md", 1));
+    }
+
+    [Fact]
+    public async Task Tree_Rows_Carry_The_Viewed_Marker()
+    {
+        var vm = await TreeVm();
+        var review = new DiffReviewViewModel(vm);
+        vm.MarkViewed("/src/a.cs");
+
+        review.RebuildTree(selectNodePath: null);
+
+        Assert.True(review.Rows.First(r => r.NodePath == "/src/a.cs").Viewed);
+        Assert.False(review.Rows.First(r => r.NodePath == "/src/b.cs").Viewed);
+    }
+
+    [Fact]
+    public async Task An_Unknown_Path_Has_No_File_Index()
+    {
+        var review = new DiffReviewViewModel(await TreeVm());
+
+        Assert.Equal(-1, review.FileIndexForPath("/not-a-file.cs"));
+    }
 }

@@ -35,9 +35,9 @@ public sealed class DiffReviewDialog(
     private ListView _diffPane = null!;
     private Label _diffHeader = null!;
     private TextField _searchBar = null!;
-    private readonly HashSet<string> _collapsedDirs = new(StringComparer.Ordinal);
-    private IReadOnlyList<FileTreeRow> _rows = [];
-    private List<string> _fileListStrings = [];
+    // CURSOR, deliberately kept here: SelectFile writes it synchronously inside the async select
+    // that must stay in the dialog, and moving it into the view-model would put both file
+    // identities behind one object boundary — the confusion four shipped bugs grew from.
     private int _fileIndex;
     private int _lastDialogWidth = -1;
     private int _diffContentWidth = 1;
@@ -98,7 +98,7 @@ public sealed class DiffReviewDialog(
     internal int FileIndex => _fileIndex;
 
     /// <summary>Test seam: the flattened file-tree rows currently shown in the file list.</summary>
-    internal IReadOnlyList<FileTreeRow> Rows => _rows;
+    internal IReadOnlyList<FileTreeRow> Rows => _review.Rows;
 
     /// <summary>Test seam: whether the diff pane is in side-by-side mode.</summary>
     internal bool SideBySide => _review.SideBySide;
@@ -725,20 +725,9 @@ public sealed class DiffReviewDialog(
     /// <summary>]v/[v: select the next/previous file whose diff has not been marked viewed.</summary>
     private async Task StepUnviewedFile(int delta)
     {
-        var fileRows = _rows.Where(r => r.FileIndex is not null).ToList();
-        if (fileRows.Count == 0)
+        if (_review.NextUnviewedTarget(SelectedFileNodePath(), delta) is { } target)
         {
-            return;
-        }
-        var currentPath = _fileIndex >= 0 && _fileIndex < vm.Files.Count ? vm.Files[_fileIndex].Path : null;
-        var current = fileRows.FindIndex(r => string.Equals(r.NodePath, currentPath, StringComparison.Ordinal));
-        for (var i = (current < 0 ? 0 : current) + delta; i >= 0 && i < fileRows.Count; i += delta)
-        {
-            if (!vm.IsViewed(fileRows[i].NodePath))
-            {
-                await SelectFile(FileIndexForPath(fileRows[i].NodePath));
-                return;
-            }
+            await SelectFile(target);
         }
     }
 
@@ -787,7 +776,7 @@ public sealed class DiffReviewDialog(
         if (vm.OnlyUnresolvedFiles && vm.FilteredFiles.Count > 0 && vm.SelectedFile is { } file &&
             !vm.FilteredFiles.Any(f => string.Equals(f.Path, file.Path, StringComparison.Ordinal)))
         {
-            _ = SelectFile(FileIndexForPath(vm.FilteredFiles[0].Path));
+            _ = SelectFile(_review.FileIndexForPath(vm.FilteredFiles[0].Path));
         }
     }
 
@@ -812,18 +801,6 @@ public sealed class DiffReviewDialog(
     {
         await vm.VoteAsync(vote, Token).ConfigureAwait(false);
         _post.Post(() => log(vm.Error is { } e ? $"vote failed: {e}" : $"voted: {label}"));
-    }
-
-    private int FileIndexForPath(string path)
-    {
-        for (var i = 0; i < vm.Files.Count; i++)
-        {
-            if (string.Equals(vm.Files[i].Path, path, StringComparison.Ordinal))
-            {
-                return i;
-            }
-        }
-        return -1;
     }
 
     /// <summary>
@@ -983,32 +960,29 @@ public sealed class DiffReviewDialog(
     /// </summary>
     private void RebuildFileList(string? selectNodePath)
     {
-        // When the unresolved filter is on, build the tree from the filtered projection; leaves
-        // still carry their real path as NodePath, so opening resolves to vm.Files by path.
-        var files = vm.OnlyUnresolvedFiles ? vm.FilteredFiles : vm.Files;
-        _rows = FileTree.Flatten(files, _collapsedDirs, BuildAnnotations());
-        var strings = _rows.Select(FormatRow).ToList();
-        if (!strings.SequenceEqual(_fileListStrings, StringComparer.Ordinal))
+        var update = _review.RebuildTree(selectNodePath);
+        if (update.Strings is { } strings)
         {
-            _fileListStrings = strings;
             _fileList.SetSource(new ObservableCollection<string>(strings));
         }
-        if (_rows.Count == 0)
+        if (update.RowCount == 0)
         {
             return;
         }
-        var target = selectNodePath is null ? -1 : IndexOfNode(selectNodePath);
-        _fileList.SelectedItem = target >= 0 ? target : Math.Clamp(_fileList.SelectedItem ?? 0, 0, _rows.Count - 1);
+        // The fallback reads the widget *after* SetSource, which nulls the selection — that
+        // ordering is the whole reason the source is only reassigned when the rows changed, so the
+        // clamp stays here rather than moving into the (widget-free) view-model.
+        _fileList.SelectedItem = update.TargetRow ?? Math.Clamp(_fileList.SelectedItem ?? 0, 0, update.RowCount - 1);
     }
 
     /// <summary>Enter/click on a row: open the file, or toggle a folder's collapsed state.</summary>
     private void ActivateRow(int rowIndex)
     {
-        if (rowIndex < 0 || rowIndex >= _rows.Count)
+        if (rowIndex < 0 || rowIndex >= _review.Rows.Count)
         {
             return;
         }
-        var row = _rows[rowIndex];
+        var row = _review.Rows[rowIndex];
         if (row.Kind == FileTreeRowKind.Directory)
         {
             ToggleFold(row.NodePath);
@@ -1017,7 +991,7 @@ public sealed class DiffReviewDialog(
         {
             // Resolve by path (not the row's FileIndex, which is filtered-relative) so the diff
             // pane and _fileIndex always track the same identity in vm.Files.
-            var fileIndex = FileIndexForPath(row.NodePath);
+            var fileIndex = _review.FileIndexForPath(row.NodePath);
             if (fileIndex >= 0)
             {
                 _ = SelectFile(fileIndex);
@@ -1028,32 +1002,16 @@ public sealed class DiffReviewDialog(
     /// <summary>z: collapse/expand the folder under the cursor, or the nearest ancestor folder of a file row.</summary>
     private void ToggleFoldAtCursor()
     {
-        var sel = _fileList.SelectedItem ?? -1;
-        if (sel < 0 || sel >= _rows.Count)
+        if (_review.ToggleDirAt(_fileList.SelectedItem) is { } nodePath)
         {
-            return;
-        }
-        var row = _rows[sel];
-        if (row.Kind == FileTreeRowKind.Directory)
-        {
-            ToggleFold(row.NodePath);
-            return;
-        }
-        var parent = NearestAncestorDir(sel);
-        if (parent is not null)
-        {
-            _collapsedDirs.Add(parent.NodePath);
-            RebuildFileList(parent.NodePath);
+            RebuildFileList(nodePath);
             _fileList.SetNeedsDraw();
         }
     }
 
     private void ToggleFold(string nodePath)
     {
-        if (!_collapsedDirs.Remove(nodePath))
-        {
-            _collapsedDirs.Add(nodePath);
-        }
+        _review.ToggleDir(nodePath);
         RebuildFileList(nodePath);
         _fileList.SetNeedsDraw();
     }
@@ -1061,80 +1019,13 @@ public sealed class DiffReviewDialog(
     /// <summary>[ / ]: move to the previous/next file among the visible leaves, skipping folder rows.</summary>
     private async Task StepFile(int delta)
     {
-        var fileRows = _rows.Where(r => r.FileIndex is not null).ToList();
-        if (fileRows.Count == 0)
+        if (_review.StepFileTarget(SelectedFileNodePath(), delta) is { } target)
         {
-            return;
+            await SelectFile(target);
         }
-        var currentPath = _fileIndex >= 0 && _fileIndex < vm.Files.Count ? vm.Files[_fileIndex].Path : null;
-        var current = fileRows.FindIndex(r => string.Equals(r.NodePath, currentPath, StringComparison.Ordinal));
-        var next = Math.Clamp((current < 0 ? 0 : current) + delta, 0, fileRows.Count - 1);
-        await SelectFile(FileIndexForPath(fileRows[next].NodePath));
     }
 
-    /// <summary>Per-file review metadata (diff stat, viewed, unresolved) keyed by path for the tree.</summary>
-    private IReadOnlyDictionary<string, FileAnnotation> BuildAnnotations()
-    {
-        // The unresolved-file set is recomputed once per Threads write in the view-model
-        // (HarvestThreadsAsync), so a file's "has unresolved comments" dot is an O(1) lookup
-        // here instead of scanning every thread per file on each file-tree rebuild (RENDER-2).
-        var unresolved = vm.UnresolvedFilePaths;
-        var map = new Dictionary<string, FileAnnotation>(StringComparer.Ordinal);
-        foreach (var file in vm.Files)
-        {
-            var stats = vm.StatsFor(file.Path);
-            map[file.Path] = new FileAnnotation(
-                stats?.Additions, stats?.Deletions, vm.IsViewed(file.Path), unresolved.Contains(file.Path));
-        }
-        return map;
-    }
-
-    private FileTreeRow? NearestAncestorDir(int rowIndex)
-    {
-        var depth = _rows[rowIndex].Depth;
-        for (var i = rowIndex - 1; i >= 0; i--)
-        {
-            if (_rows[i].Kind == FileTreeRowKind.Directory && _rows[i].Depth < depth)
-            {
-                return _rows[i];
-            }
-        }
-        return null;
-    }
-
-    private int IndexOfNode(string nodePath)
-    {
-        for (var i = 0; i < _rows.Count; i++)
-        {
-            if (string.Equals(_rows[i].NodePath, nodePath, StringComparison.Ordinal))
-            {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    /// <summary>The tree node path of the file currently shown in the diff pane, for highlight restore.</summary>
+    /// <summary>The tree node path of the file under the cursor, for highlight restore.</summary>
     private string? SelectedFileNodePath() =>
         _fileIndex >= 0 && _fileIndex < vm.Files.Count ? vm.Files[_fileIndex].Path : null;
-
-    private static string FormatRow(FileTreeRow row)
-    {
-        var indent = new string(' ', row.Depth * 2);
-        if (row.Kind == FileTreeRowKind.Directory)
-        {
-            return $"{indent}{(row.Collapsed ? "▸" : "▾")} {row.Label}/";
-        }
-        var glyph = row.ChangeType switch
-        {
-            FileChangeKind.Add => "+",
-            FileChangeKind.Delete => "-",
-            FileChangeKind.Rename => "»",
-            _ => "~",
-        };
-        var viewed = row.Viewed ? "[✓] " : "[ ] ";
-        var unresolved = row.HasUnresolved ? " ●" : "";
-        var stats = row.Additions is { } a && row.Deletions is { } d ? $"  +{a} -{d}" : "";
-        return $"{indent}{viewed}{glyph} {row.Label}{unresolved}{stats}";
-    }
 }

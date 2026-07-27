@@ -1,3 +1,4 @@
+using Cobalt.Core.Models;
 using Cobalt.Core.Text;
 
 namespace Cobalt.Tui.ViewModels;
@@ -252,5 +253,208 @@ internal sealed class DiffReviewViewModel(PrDiffViewModel vm)
             return true;
         }
         return false;
+    }
+
+    // ---- file tree ---------------------------------------------------------------------------
+    //
+    // NEITHER identity: the tree is keyed by node path and built from vm.Files, independent of both
+    // the cursor and the displayed diff. The navigation methods take the current path as a
+    // parameter rather than reading it, which is what keeps the CURSOR half out of this class.
+
+    private readonly HashSet<string> _collapsedDirs = new(StringComparer.Ordinal);
+    private IReadOnlyList<FileTreeRow> _rows = [];
+    private List<string> _fileListStrings = [];
+
+    /// <summary>The flattened file-tree rows currently shown in the file list.</summary>
+    internal IReadOnlyList<FileTreeRow> Rows => _rows;
+
+    /// <summary>
+    /// What the file list should now show. <paramref name="Strings"/> is non-null only when the
+    /// rendered rows actually changed, because assigning a new source nulls the widget's selection;
+    /// <paramref name="TargetRow"/> is the row to highlight, or null to leave the caller's own
+    /// selection in place — which the caller must read <i>after</i> applying
+    /// <paramref name="Strings"/>, clamped to <paramref name="RowCount"/>.
+    /// </summary>
+    internal readonly record struct TreeUpdate(IReadOnlyList<string>? Strings, int? TargetRow, int RowCount);
+
+    /// <summary>
+    /// Re-flattens the changed files into the directory tree and resolves the row to highlight.
+    /// Under the unresolved-only filter the tree is built from the filtered projection; leaves
+    /// still carry their real path as NodePath, so opening one resolves against vm.Files by path.
+    /// </summary>
+    internal TreeUpdate RebuildTree(string? selectNodePath)
+    {
+        var files = vm.OnlyUnresolvedFiles ? vm.FilteredFiles : vm.Files;
+        _rows = FileTree.Flatten(files, _collapsedDirs, BuildAnnotations());
+        var strings = _rows.Select(FormatRow).ToList();
+        IReadOnlyList<string>? changed = null;
+        if (!strings.SequenceEqual(_fileListStrings, StringComparer.Ordinal))
+        {
+            _fileListStrings = strings;
+            changed = strings;
+        }
+        if (_rows.Count == 0)
+        {
+            return new TreeUpdate(changed, null, 0);
+        }
+        var target = selectNodePath is null ? -1 : IndexOfNode(selectNodePath);
+        return new TreeUpdate(changed, target >= 0 ? target : null, _rows.Count);
+    }
+
+    /// <summary>Collapse or expand a directory node.</summary>
+    internal void ToggleDir(string nodePath)
+    {
+        if (!_collapsedDirs.Remove(nodePath))
+        {
+            _collapsedDirs.Add(nodePath);
+        }
+    }
+
+    /// <summary>
+    /// z: collapse/expand the folder under the cursor, or collapse the nearest ancestor folder of a
+    /// file row. Returns the node to re-highlight, or null when the row means nothing. The file-row
+    /// case always collapses and never expands — "fold up what I am inside" — so pressing z twice
+    /// on a file does not re-open the folder the first press closed.
+    /// </summary>
+    internal string? ToggleDirAt(int? rowIndex)
+    {
+        var sel = rowIndex ?? -1;
+        if (sel < 0 || sel >= _rows.Count)
+        {
+            return null;
+        }
+        var row = _rows[sel];
+        if (row.Kind == FileTreeRowKind.Directory)
+        {
+            ToggleDir(row.NodePath);
+            return row.NodePath;
+        }
+        if (NearestAncestorDir(sel) is not { } parent)
+        {
+            return null;
+        }
+        _collapsedDirs.Add(parent.NodePath);
+        return parent.NodePath;
+    }
+
+    /// <summary>
+    /// [f/]f: the vm.Files index of the previous/next file among the visible leaves, skipping
+    /// folder rows and clamping at the ends. Null when the tree has no leaves at all; otherwise the
+    /// raw lookup, which the caller's select clamps exactly as it always has.
+    /// </summary>
+    internal int? StepFileTarget(string? currentPath, int delta)
+    {
+        var fileRows = FileRows();
+        if (fileRows.Count == 0)
+        {
+            return null;
+        }
+        var current = IndexOfLeaf(fileRows, currentPath);
+        var next = Math.Clamp((current < 0 ? 0 : current) + delta, 0, fileRows.Count - 1);
+        return FileIndexForPath(fileRows[next].NodePath);
+    }
+
+    /// <summary>
+    /// [v/]v: the vm.Files index of the nearest file in that direction not yet marked viewed, or
+    /// null when there is none — the cursor then stays put rather than jumping to an end.
+    /// </summary>
+    internal int? NextUnviewedTarget(string? currentPath, int delta)
+    {
+        var fileRows = FileRows();
+        if (fileRows.Count == 0)
+        {
+            return null;
+        }
+        var current = IndexOfLeaf(fileRows, currentPath);
+        for (var i = (current < 0 ? 0 : current) + delta; i >= 0 && i < fileRows.Count; i += delta)
+        {
+            if (!vm.IsViewed(fileRows[i].NodePath))
+            {
+                return FileIndexForPath(fileRows[i].NodePath);
+            }
+        }
+        return null;
+    }
+
+    /// <summary>The vm.Files index of a path, or -1. Rows carry filtered-relative indexes, so
+    /// opening one must resolve by path to keep the diff pane and the cursor on one identity.</summary>
+    internal int FileIndexForPath(string path)
+    {
+        for (var i = 0; i < vm.Files.Count; i++)
+        {
+            if (string.Equals(vm.Files[i].Path, path, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /// <summary>The index of a node among the current rows, or -1.</summary>
+    internal int IndexOfNode(string nodePath)
+    {
+        for (var i = 0; i < _rows.Count; i++)
+        {
+            if (string.Equals(_rows[i].NodePath, nodePath, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private List<FileTreeRow> FileRows() => [.. _rows.Where(r => r.FileIndex is not null)];
+
+    private static int IndexOfLeaf(List<FileTreeRow> fileRows, string? path) =>
+        fileRows.FindIndex(r => string.Equals(r.NodePath, path, StringComparison.Ordinal));
+
+    private FileTreeRow? NearestAncestorDir(int rowIndex)
+    {
+        var depth = _rows[rowIndex].Depth;
+        for (var i = rowIndex - 1; i >= 0; i--)
+        {
+            if (_rows[i].Kind == FileTreeRowKind.Directory && _rows[i].Depth < depth)
+            {
+                return _rows[i];
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Per-file review metadata (diff stat, viewed, unresolved) keyed by path for the tree.</summary>
+    private IReadOnlyDictionary<string, FileAnnotation> BuildAnnotations()
+    {
+        // The unresolved-file set is recomputed once per Threads write in the view-model
+        // (HarvestThreadsAsync), so a file's "has unresolved comments" dot is an O(1) lookup
+        // here instead of scanning every thread per file on each file-tree rebuild (RENDER-2).
+        var unresolved = vm.UnresolvedFilePaths;
+        var map = new Dictionary<string, FileAnnotation>(StringComparer.Ordinal);
+        foreach (var file in vm.Files)
+        {
+            var stats = vm.StatsFor(file.Path);
+            map[file.Path] = new FileAnnotation(
+                stats?.Additions, stats?.Deletions, vm.IsViewed(file.Path), unresolved.Contains(file.Path));
+        }
+        return map;
+    }
+
+    private static string FormatRow(FileTreeRow row)
+    {
+        var indent = new string(' ', row.Depth * 2);
+        if (row.Kind == FileTreeRowKind.Directory)
+        {
+            return $"{indent}{(row.Collapsed ? "▸" : "▾")} {row.Label}/";
+        }
+        var glyph = row.ChangeType switch
+        {
+            FileChangeKind.Add => "+",
+            FileChangeKind.Delete => "-",
+            FileChangeKind.Rename => "»",
+            _ => "~",
+        };
+        var viewed = row.Viewed ? "[✓] " : "[ ] ";
+        var unresolved = row.HasUnresolved ? " ●" : "";
+        var stats = row.Additions is { } a && row.Deletions is { } d ? $"  +{a} -{d}" : "";
+        return $"{indent}{viewed}{glyph} {row.Label}{unresolved}{stats}";
     }
 }
