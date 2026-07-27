@@ -53,12 +53,14 @@ public sealed class MenuViewModel<T>
 
     /// <summary>
     /// The visible rows as "  &lt;hint&gt; &lt;label&gt;", the hint column padded to the widest
-    /// visible hint (never under the string cheatsheet's 8), each row truncated to
-    /// <paramref name="width"/>.
+    /// hint of *all* rows (never under the string cheatsheet's 8) so filtering never shifts the
+    /// labels, each row truncated to <paramref name="width"/>.
     /// </summary>
     public IReadOnlyList<string> FormatRows(int width)
     {
-        var hintColumn = Math.Max(8, VisibleOptions.Count == 0 ? 0 : VisibleOptions.Max(o => o.KeyHint.Length));
+        // Over ALL options, not the visible ones: a column measured on the filtered rows re-flows
+        // every surviving label the moment the widest hint is filtered out.
+        var hintColumn = Math.Max(8, _options.Count == 0 ? 0 : _options.Max(o => o.KeyHint.Length));
         return
         [
             .. VisibleOptions.Select(o =>

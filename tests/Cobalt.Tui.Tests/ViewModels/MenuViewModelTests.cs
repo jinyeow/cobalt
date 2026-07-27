@@ -158,6 +158,27 @@ public class MenuViewModelTests
     }
 
     [Fact]
+    public void FormatRows_Keeps_The_Hint_Column_Steady_While_Filtering()
+    {
+        // The type's whole reason for an order-preserving filter is that hints must not jump
+        // under the user's eyes; a column that re-flows when the widest hint is filtered out
+        // shifts every surviving label just as badly.
+        var vm = new MenuViewModel<AppCommand>(
+        [
+            new MenuOption<AppCommand>("previous unviewed file", "[v", AppCommand.PrevUnviewedFile),
+            new MenuOption<AppCommand>("previous tab", "S-Tab", AppCommand.PrevTab),
+            new MenuOption<AppCommand>("focus pane left", "Backspace", AppCommand.FocusLeft),
+        ]);
+
+        // "previous" drops the widest-hint row (Backspace) and keeps the other two.
+        vm.SetFilter("previous");
+
+        Assert.Equal(
+            ["  [v        previous unviewed file", "  S-Tab     previous tab"],
+            vm.FormatRows(width: 40));
+    }
+
+    [Fact]
     public void FormatRows_Truncates_To_The_Available_Width()
     {
         var vm = Vm();
