@@ -34,3 +34,27 @@ it is a thin adapter (`CobaltShell.WireKeys`).
 The behavior that carries product risk is fully tested and fast. The Terminal.Gui
 binding stays a thin, reviewable adapter. Cost: the adapter itself relies on
 manual/PTY verification rather than CI.
+
+## Amendment (2026-07-27) — `ShellCommandRouter`, the routing hop
+
+The chain above ends at `ShellViewModel`, but a matched command is not dispatched there
+directly: `CobaltShell.Dispatch` first has to decide *which screen* it targets, and that
+decision depends on the active section and on workspace pane focus (ADR 0024). Left in the
+shell, that routing was ~147 lines of section branching interleaved with Terminal.Gui side
+effects, testable only through a live shell — the one part of the input chain this ADR's
+premise did not cover.
+
+The chain is therefore `Key → KeyTokenizer → KeymapRouter → ShellCommandRouter → ShellViewModel`.
+`ViewModels/ShellCommandRouter` maps `(AppCommand, count, active section, workspace state,
+"is the PR list built")` to a `ShellAction` the shell merely performs. It is a view-model, not
+a pure function: `WorkspaceViewModel.CyclePane`/`FocusLeft`/`FocusRight` both move focus and
+report whether they consumed the key, so the mutation *is* the decision. It stays UI-free, so
+ADR 0004's `ViewModelPurityTests` guards it.
+
+Deliberately narrow: the router owns only the arms that branch on section or workspace state
+(`CyclePane`, `FocusLeft`/`FocusRight`, the PR sub-tab intercept, movement, `Refresh`,
+`FilterStart`, `Open`) and returns `NotRouted` for everything else, so the shell's remaining
+verbs keep their existing handling unchanged. Two consequences worth naming: a `NotRouted`
+action carries the *rewritten* command (Tab → `NextTab` while the preview is hidden), and
+`Consumed` is distinct from `NotRouted` because some arms — `/` in the PR section — must do
+nothing *quietly*, where declining would surface a "not available here" message.
