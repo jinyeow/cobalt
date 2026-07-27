@@ -53,16 +53,31 @@ public class ShellCommandRouterTests
         Assert.Equal(expected, action.Kind);
     }
 
-    [Fact]
-    public void Tab_Still_Toggles_Sections_When_The_Pr_List_Was_Never_Built()
+    [Theory]
+    [InlineData(AppCommand.NextTab)]
+    [InlineData(AppCommand.PrevTab)]
+    public void Tab_Still_Toggles_Sections_When_The_Pr_List_Was_Never_Built(AppCommand command)
     {
         // No connection → the PR screen is a placeholder, so the sub-tab intercept must not
         // swallow Tab; it gates on "is the list built", not on the section alone.
         var action = Router(new WorkspaceViewModel(), AppSection.PullRequests, prListBuilt: false)
-            .Route(AppCommand.NextTab, null);
+            .Route(command, null);
 
         Assert.Equal(ShellActionKind.NotRouted, action.Kind);
-        Assert.Equal(AppCommand.NextTab, action.Command);
+        Assert.Equal(command, action.Command);
+    }
+
+    [Fact]
+    public void FocusLeft_Moves_Focus_Back_To_The_List()
+    {
+        var workspace = new WorkspaceViewModel();
+        workspace.SetPreviewVisible(true);
+        workspace.FocusRight();
+
+        var action = Router(workspace).Route(AppCommand.FocusLeft, null);
+
+        Assert.Equal(ShellActionKind.ApplyWorkspaceFocus, action.Kind);
+        Assert.Equal(WorkspacePane.List, workspace.FocusedPane);
     }
 
     [Fact]

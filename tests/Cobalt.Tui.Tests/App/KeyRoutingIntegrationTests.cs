@@ -17,6 +17,10 @@ public class KeyRoutingIntegrationTests
         private readonly KeymapRouter _router = new(KeyBindingTable.Default());
         private readonly WorkspaceViewModel _workspace = new();
         public ShellViewModel Vm { get; } = new(["work", "oss"], "work");
+        private readonly ShellCommandRouter _commands;
+
+        public Harness() =>
+            _commands = new ShellCommandRouter(_workspace, () => Vm.ActiveSection, () => false);
         public List<AppCommand> Unhandled { get; } = [];
 
         // The commands CobaltShell.Dispatch (or the active screen) consumes after the
@@ -52,14 +56,11 @@ public class KeyRoutingIntegrationTests
                 return;
             }
             LastCount = result.Count;
-            var command = result.Command;
-            // Mirror CobaltShell.Dispatch's workspace intercept (ADR 0024): while the
-            // preview is hidden the workspace declines Tab (CyclePane → false) and the
-            // shell falls back to today's NextTab semantics.
-            if (command == AppCommand.CyclePane && !_workspace.CyclePane())
-            {
-                command = AppCommand.NextTab;
-            }
+            // The real routing hop the shell runs (ADR 0007 amendment), not a copy of its rules:
+            // while the preview is hidden the workspace declines Tab (CyclePane → false) and the
+            // router rewrites it to today's NextTab semantics. No PR list exists in this harness,
+            // so the sub-tab intercept never claims Tab here.
+            var command = _commands.Route(result.Command, result.Count).Command;
             if (Vm.HandleCommand(command))
             {
                 return;
