@@ -1,7 +1,7 @@
-using System.Collections.Concurrent;
 using Cobalt.Core.Ado;
 using Cobalt.Core.Config;
 using Cobalt.Core.Models;
+using Cobalt.Tui.Tasks;
 
 namespace Cobalt.Tui.ViewModels;
 
@@ -14,9 +14,10 @@ public sealed class WorkItemStoreAdapter(WorkItemsApi api, PrScope initialScope 
 
     // Allowed states are per-project process metadata that never change within a session, but the
     // state-change dialog re-fetches them every time it opens. Cache per (project, type) so the
-    // second and later opens are instant. A faulted fetch is evicted (below) so a transient
-    // failure can be retried; the Core transport stays stateless.
-    private readonly ConcurrentDictionary<(string Project, string Type), Lazy<Task<IReadOnlyList<WorkItemStateDto>>>>
+    // second and later opens are instant. JoinFlightCache owns the join contract: overlapping opens
+    // share one fetch, a caller's cancel never cancels it for the others, and an unsuccessful fetch
+    // is evicted so a transient failure can be retried. The Core transport stays stateless.
+    private readonly JoinFlightCache<(string Project, string Type), IReadOnlyList<WorkItemStateDto>>
         _statesCache = new();
 
     public Task<IReadOnlyList<WorkItem>> QueryMyWorkItemsAsync(WorkItemQuery query, CancellationToken ct) =>
@@ -33,37 +34,11 @@ public sealed class WorkItemStoreAdapter(WorkItemsApi api, PrScope initialScope 
         // A null/blank project resolves to the context project on the wire, so fold it onto the
         // same cache key — otherwise a null-project and a context-project call would duplicate.
         var key = (string.IsNullOrEmpty(project) ? api.ContextProject : project, type);
-        // Lazy so the fetch is started at most once per key even under concurrent opens; the
-        // detached start (CancellationToken.None) means a joiner is never bound to a cancelled
-        // starter — each caller observes its own token via WaitAsync (ADR 0008).
-        var lazy = _statesCache.GetOrAdd(key, _ =>
-            new Lazy<Task<IReadOnlyList<WorkItemStateDto>>>(() => api.GetStatesAsync(type, project, CancellationToken.None)));
-        return AwaitStatesAsync(key, lazy, ct);
-    }
-
-    private async Task<IReadOnlyList<WorkItemStateDto>> AwaitStatesAsync(
-        (string, string) key,
-        Lazy<Task<IReadOnlyList<WorkItemStateDto>>> lazy,
-        CancellationToken ct)
-    {
-        try
-        {
-            return await lazy.Value.WaitAsync(ct).ConfigureAwait(false);
-        }
-        catch
-        {
-            // Evict if the shared fetch itself faulted OR was cancelled (an HttpClient timeout
-            // surfaces as a canceled task, not a faulted one) so a retry re-fetches. A *caller*
-            // cancel where the fetch is still pending/succeeded leaves the underlying task
-            // un-cancelled, so a good entry is kept; removing this exact Lazy never evicts a newer
-            // attempt.
-            if (lazy.IsValueCreated && (lazy.Value.IsFaulted || lazy.Value.IsCanceled))
-            {
-                _statesCache.TryRemove(new KeyValuePair<(string, string), Lazy<Task<IReadOnlyList<WorkItemStateDto>>>>(key, lazy));
-            }
-
-            throw;
-        }
+        // The fetch keeps the caller's raw project (null resolves to the context project on the
+        // wire); the folding above is cache-key-only. Started detached, so a joiner is never bound
+        // to a cancelled starter — each caller observes its own token instead (ADR 0008).
+        return _statesCache.GetOrJoinAsync(
+            key, _ => api.GetStatesAsync(type, project, CancellationToken.None), ct);
     }
 
     public Task<WorkItem> UpdateFieldsAsync(long id, JsonPatchBuilder patch, string? project, CancellationToken ct) =>

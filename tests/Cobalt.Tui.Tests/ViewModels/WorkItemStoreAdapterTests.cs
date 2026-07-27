@@ -170,4 +170,32 @@ public class WorkItemStoreAdapterTests : IDisposable
 
         Assert.Equal(1, handler.Calls); // single-flight: one fetch served both overlapping callers
     }
+
+    [Fact]
+    public async Task GetStates_Keeps_The_Shared_Fetch_Alive_When_One_Caller_Cancels()
+    {
+        // The fetch is started detached, so a caller who gives up cancels only its own await: the
+        // other caller still gets its states off the one in-flight request, and the entry it fills
+        // stays cached rather than being evicted by someone else's cancellation.
+        var handler = new GatedStatesHandler(StatesJson);
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://dev.azure.com/contoso/") };
+        _disposables.Add(httpClient);
+        var adapter = new WorkItemStoreAdapter(new WorkItemsApi(new AdoHttp(httpClient), Context));
+
+        using var quitter = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var leaving = adapter.GetStatesAsync("Bug", "Proj", quitter.Token);
+        var staying = adapter.GetStatesAsync("Bug", "Proj", TestContext.Current.CancellationToken);
+
+        await quitter.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => leaving);
+
+        handler.Release();
+        var states = await staying;
+        Assert.Equal(["New"], states.Select(s => s.Name));
+
+        // A later caller is still served from the cache the surviving fetch filled.
+        var later = await adapter.GetStatesAsync("Bug", "Proj", TestContext.Current.CancellationToken);
+        Assert.Same(states, later);
+        Assert.Equal(1, handler.Calls);
+    }
 }
