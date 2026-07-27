@@ -266,6 +266,21 @@ public class ShellWorkspaceLayoutTests
     }
 
     [Fact]
+    public void The_Keybar_Reflects_The_Focused_Pane()
+    {
+        // Width 400: the bar is width-fitted and the new preview-focused entries sit late
+        // in bind order, so a realistic width truncates them before they can be asserted on.
+        using var shell = LaidOutShell(400);
+        Assert.DoesNotContain("scroll", shell.KeybarText);
+
+        shell.NewKeyDownEvent(new Key(KeyCode.Tab)); // cycles workspace pane focus to Preview
+        Assert.Equal(WorkspacePane.Preview, shell.Workspace.FocusedPane);
+
+        Assert.Contains("j/k:scroll", shell.KeybarText);
+        Assert.Contains("C-h:list", shell.KeybarText);
+    }
+
+    [Fact]
     public void The_Keybar_Advertises_Tab_Only_While_The_Preview_Shows()
     {
         // Width 400: the bar is width-fitted and CyclePane sits late in bind order, so a
