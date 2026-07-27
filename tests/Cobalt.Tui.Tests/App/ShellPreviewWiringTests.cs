@@ -114,6 +114,28 @@ public class ShellPreviewWiringTests
             Assert.Contains(text, PaneText);
         }
 
+        /// <summary>Drains until the lazy comment-count enrichment (ADR 0012) has settled: every
+        /// loaded row carries its badge, so every count sits in the enricher's cache and a further
+        /// <c>Enqueue</c> finds nothing to fetch — no later <c>CountAvailable</c> can post.</summary>
+        public async Task DrainUntilCommentCountsSettleAsync()
+        {
+            var list = Shell.PrListScreen!;
+            bool Badged() => Enumerable.Range(0, Shell.PrListVm!.Rows.Count)
+                .All(i => list.RowText(i).Contains("💬", StringComparison.Ordinal));
+            for (var i = 0; i < 300 && !Badged(); i++)
+            {
+                Post.RunAll();
+                await Task.Delay(10, TestContext.Current.CancellationToken);
+            }
+            Assert.True(Badged(), "the comment-count enrichment never settled");
+            // A badge proves the count reached the cache, and PrCommentCountEnricher writes the
+            // cache under its lock before raising CountAvailable outside it — so the last count's
+            // event can still be in flight here. One more settle cycle collects it.
+            Post.RunAll();
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+            Post.RunAll();
+        }
+
         public void Dispose() => Shell.Dispose();
     }
 
@@ -227,6 +249,10 @@ public class ShellPreviewWiringTests
         // regardless, so asserting on the fetch count would not catch a missed detach).
         var harness = await LoadedShellAsync();
         var listVm = harness.Shell.PrListVm!;
+        // Assert.Empty is a whole-queue assertion, so the lazy comment-count enrichment the list
+        // screen kicks off must be settled first — otherwise a count landing in the window between
+        // the load and the dispose posts its own (unrelated) repaint and fails the assertion.
+        await harness.DrainUntilCommentCountsSettleAsync();
 
         harness.Shell.Dispose();
 
