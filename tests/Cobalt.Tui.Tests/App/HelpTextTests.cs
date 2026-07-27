@@ -1,6 +1,8 @@
+using System.Text;
 using Cobalt.Core.Config;
 using Cobalt.Tui.App;
 using Cobalt.Tui.Input;
+using Cobalt.Tui.ViewModels;
 
 namespace Cobalt.Tui.Tests.App;
 
@@ -113,5 +115,65 @@ public class HelpTextTests
 
         Assert.Contains("n        move down", help);
         Assert.DoesNotContain("j        move down", help);
+    }
+
+    // ---- The executable menu shares one row builder with the string help (#20) ----
+
+    [Theory]
+    [InlineData(KeyScope.WorkItemList, false)]
+    [InlineData(KeyScope.WorkItemList, true)]
+    [InlineData(KeyScope.PullRequestList, true)]
+    [InlineData(KeyScope.DiffReview, false)]
+    public void Shell_Menu_Rows_Re_Emit_The_String_Help_Byte_For_Byte(KeyScope scope, bool previewVisible)
+    {
+        // One suppression engine for both surfaces: whatever the string help advertises, the
+        // menu offers, in the same order and with the same wording.
+        var rows = HelpText.MenuFor(Table, scope, previewVisible);
+
+        Assert.Equal(HelpText.For(Table, scope, previewVisible), ReEmit(rows));
+    }
+
+    [Fact]
+    public void Dialog_Menu_Rows_Re_Emit_The_Dialog_String_Help_Byte_For_Byte()
+    {
+        var rows = HelpText.MenuForDialog(Table, KeyScope.WorkItemDetail);
+
+        Assert.Equal(HelpText.ForDialog(Table, KeyScope.WorkItemDetail), ReEmit(rows));
+    }
+
+    [Fact]
+    public void Dialog_Menu_Rows_Carry_The_Key_Hint_And_Description_And_No_Dead_Global()
+    {
+        var rows = HelpText.MenuForDialog(Table, KeyScope.WorkItemDetail);
+
+        Assert.Contains(rows, r => r is { KeyHint: "s", Label: "change state", Value: AppCommand.ChangeState });
+        Assert.Contains(rows, r => r is { KeyHint: "j", Label: "move down", Value: AppCommand.MoveDown });
+        // The M3 suppression applies to the rows themselves, not just their rendering: a menu
+        // must never offer a verb the dialog does not dispatch.
+        Assert.DoesNotContain(rows, r => r.Value == AppCommand.Refresh);
+        Assert.DoesNotContain(rows, r => r.Value == AppCommand.YankId);
+    }
+
+    [Fact]
+    public void Menu_Rows_Collapse_Aliases_To_The_First_Binding()
+    {
+        // Enter/o/l all open; the menu shows one executable row for the command, as the string
+        // cheatsheet always has.
+        var rows = HelpText.MenuFor(Table, KeyScope.WorkItemList, previewVisible: false);
+
+        var open = Assert.Single(rows, r => r.Value == AppCommand.Open);
+        Assert.Equal("Enter", open.KeyHint);
+    }
+
+    /// <summary>The cheatsheet's row format, spelled out here independently of the production
+    /// renderer so the byte-identical pins above compare against a real second opinion.</summary>
+    private static string ReEmit(IReadOnlyList<MenuOption<AppCommand>> rows)
+    {
+        var sb = new StringBuilder();
+        foreach (var row in rows)
+        {
+            sb.AppendLine($"  {row.KeyHint,-8} {row.Label}");
+        }
+        return sb.ToString();
     }
 }
