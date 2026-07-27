@@ -60,6 +60,30 @@ public class KeyBindingTableTests
             .First(b => b.Sequence is ["Backspace"]).Command);
     }
 
+    // ---- KeyFor: reverse command->key lookup (issue #83, TextDialog's close hint) ----
+
+    [Fact]
+    public void KeyFor_Returns_The_First_Visible_Sequence_Bound_To_The_Command()
+    {
+        Assert.Equal("q", KeyBindingTable.Default().KeyFor(KeyScope.Global, AppCommand.Back));
+    }
+
+    [Fact]
+    public void KeyFor_Reflects_A_Remapped_Binding()
+    {
+        var table = KeyBindingTable.FromConfig(Keys("global", ("back", "x")));
+
+        Assert.Equal("x", table.KeyFor(KeyScope.Global, AppCommand.Back));
+    }
+
+    [Fact]
+    public void KeyFor_Returns_Null_When_The_Command_Has_No_Visible_Binding()
+    {
+        var table = KeyBindingTable.FromConfig(Keys("global", ("back", "")));
+
+        Assert.Null(table.KeyFor(KeyScope.Global, AppCommand.Back));
+    }
+
     // ---- INPUT-2: per-scope binding arrays are cached, not rebuilt on every router lookup ----
 
     [Fact]
