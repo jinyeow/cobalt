@@ -29,7 +29,9 @@ public sealed class PrDetailDialog(
     // held for its non-marshalling uses — dialog/child-dialog construction, RequestStop, MessageBox.
     private readonly IUiPost _post = post ?? new ApplicationUiPost(app);
     private readonly PrActions _actions = new(app, log);
-    private readonly KeymapRouter _router = new(bindings ?? KeyBindingTable.Shared);
+    // The shell injects its (possibly remapped) table; a direct caller/test omits it and falls
+    // back to the process-wide defaults. Help and the child diff dialog render from this same table.
+    private readonly KeyBindingTable _bindings = bindings ?? KeyBindingTable.Shared;
     private bool _closed;
     private Dialog? _dialog;
 #pragma warning disable CS0618 // read-only scrollable pane; see WorkItemDetailDialog
@@ -112,9 +114,11 @@ public sealed class PrDetailDialog(
         // dialog's own KeyDown runs, so subscribe the verb handler to the TextView
         // too. Verbs it matches stop propagation; keys it ignores (arrows/PageUp/
         // PageDown/Home/End) fall through to the TextView's native scrolling. The
-        // dialog subscription stays as a safety net for when focus is elsewhere.
-        body.KeyDown += HandleKey;
-        dialog.KeyDown += HandleKey;
+        // dialog subscription stays as a safety net for when focus is elsewhere. One adapter
+        // instance for both, so a count/sequence survives a focus change between them.
+        var keys = new DialogKeyRouter(_bindings, KeyScope.PullRequestDetail, Dispatch, RequestClose);
+        body.KeyDown += keys.HandleKey;
+        dialog.KeyDown += keys.HandleKey;
 
         dialog.Add(body);
         body.Text = RenderBody();
@@ -129,40 +133,6 @@ public sealed class PrDetailDialog(
             _dialog.SetNeedsDraw();
         }
     });
-
-    private void HandleKey(object? sender, Terminal.Gui.Input.Key key)
-    {
-        var token = KeyTokenizer.ToToken(key);
-        if (token is null)
-        {
-            return;
-        }
-        // Esc clears a pending count/sequence first; it only closes when nothing is
-        // pending (mirrors the shell's Esc handling, L5).
-        var hadPending = _router.HasPending;
-        var result = _router.Feed(token, KeyScope.PullRequestDetail);
-        switch (result.Kind)
-        {
-            case KeyResultKind.Pending:
-                key.Handled = true; // swallow an in-progress sequence (e.g. after 'g')
-                break;
-            case KeyResultKind.Matched when Dispatch(result.Command, result.Count):
-                key.Handled = true;
-                break;
-            case KeyResultKind.Matched:
-                break; // matched but this dialog doesn't act — let native widget behavior run
-            default:
-                if (token == "Esc")
-                {
-                    key.Handled = true;
-                    if (!hadPending)
-                    {
-                        RequestClose();
-                    }
-                }
-                break;
-        }
-    }
 
     /// <summary>Runs the matched command; returns true when the dialog actually acted.</summary>
     private bool Dispatch(AppCommand command, int? count)
@@ -184,7 +154,7 @@ public sealed class PrDetailDialog(
                 }
                 else
                 {
-                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.PullRequestDetail), _router.Table);
+                    TextDialog.Show(app, "keys", HelpText.ForDialog(_bindings, KeyScope.PullRequestDetail), _bindings);
                 }
                 return true;
             case AppCommand.Vote:
@@ -351,7 +321,7 @@ public sealed class PrDetailDialog(
             return;
         }
         var diffVm = new PrDiffViewModel(diffSource, vm.PullRequest);
-        new DiffReviewDialog(app, diffVm, textInput, log, context, _router.Table, _post).Show();
+        new DiffReviewDialog(app, diffVm, textInput, log, context, _bindings, _post).Show();
     }
 
     private void OpenBranch()

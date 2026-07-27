@@ -28,7 +28,9 @@ public sealed class ThreadViewDialog(
     // UI-thread marshalling seam for all pure Invoke marshalling (M2); Terminal.Gui (app) is still
     // held for its non-marshalling uses — dialog construction, RequestStop, help child dialog.
     private readonly IUiPost _post = post ?? new ApplicationUiPost(app);
-    private readonly KeymapRouter _router = new(bindings ?? KeyBindingTable.Shared);
+    // The caller injects its (possibly remapped) table; a direct caller/test omits it and falls
+    // back to the process-wide defaults. Help within the overlay renders from this same table.
+    private readonly KeyBindingTable _bindings = bindings ?? KeyBindingTable.Shared;
     private readonly IReadOnlyList<int> _threadIds = threads.Select(t => t.Id).ToList();
     private bool _closed;
     private Dialog? _dialog;
@@ -109,9 +111,12 @@ public sealed class ThreadViewDialog(
         _body = body;
 
         // A focused ReadOnly TextView swallows printable runes before dialog.KeyDown runs, so
-        // subscribe the verb handler to the TextView too (mirrors PrDetailDialog).
-        body.KeyDown += HandleKey;
-        dialog.KeyDown += HandleKey;
+        // subscribe the verb handler to the TextView too (mirrors PrDetailDialog). One adapter
+        // instance for both, so a count/sequence survives a focus change between them. This
+        // overlay's Dispatch takes no count — it discards the router's, as it always has.
+        var keys = new DialogKeyRouter(_bindings, KeyScope.ThreadView, (command, _) => Dispatch(command), RequestClose);
+        body.KeyDown += keys.HandleKey;
+        dialog.KeyDown += keys.HandleKey;
 
         // A resolve/reactivate/reply refetches vm.Threads and raises Changed; re-render the
         // body from that live state so the open overlay's [status] updates in place instead of
@@ -156,38 +161,6 @@ public sealed class ThreadViewDialog(
         _dialog?.SetNeedsDraw();
     }
 
-    private void HandleKey(object? sender, Terminal.Gui.Input.Key key)
-    {
-        var token = KeyTokenizer.ToToken(key);
-        if (token is null)
-        {
-            return;
-        }
-        var hadPending = _router.HasPending;
-        var result = _router.Feed(token, KeyScope.ThreadView);
-        switch (result.Kind)
-        {
-            case KeyResultKind.Pending:
-                key.Handled = true;
-                break;
-            case KeyResultKind.Matched when Dispatch(result.Command):
-                key.Handled = true;
-                break;
-            case KeyResultKind.Matched:
-                break;
-            default:
-                if (token == "Esc")
-                {
-                    key.Handled = true;
-                    if (!hadPending)
-                    {
-                        RequestClose();
-                    }
-                }
-                break;
-        }
-    }
-
     /// <summary>Runs the matched command; returns true when the dialog acted.</summary>
     private bool Dispatch(AppCommand command)
     {
@@ -208,7 +181,7 @@ public sealed class ThreadViewDialog(
                 }
                 else
                 {
-                    TextDialog.Show(app, "keys", HelpText.ForDialog(_router.Table, KeyScope.ThreadView), _router.Table);
+                    TextDialog.Show(app, "keys", HelpText.ForDialog(_bindings, KeyScope.ThreadView), _bindings);
                 }
                 return true;
             case AppCommand.Comment:
