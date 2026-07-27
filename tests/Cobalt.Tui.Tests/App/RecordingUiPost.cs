@@ -11,17 +11,39 @@ namespace Cobalt.Tui.Tests.App;
 /// </summary>
 internal sealed class RecordingUiPost : IUiPost
 {
+    private readonly Lock _gate = new();
+
     public List<Action> Posted { get; } = [];
 
-    public void Post(Action action) => Posted.Add(action);
+    /// <summary>Production posts arrive on threadpool continuations (a landed comment count, a
+    /// finished detail load), so the queue is guarded — an unsynchronised <see cref="List{T}"/>
+    /// mutated by a background <see cref="Post"/> while the test thread drains can lose items or
+    /// throw out of <see cref="RunAll"/>.</summary>
+    public void Post(Action action)
+    {
+        lock (_gate)
+        {
+            Posted.Add(action);
+        }
+    }
 
     /// <summary>Runs every queued action in FIFO order, including any it queues while draining.</summary>
     public void RunAll()
     {
-        while (Posted.Count > 0)
+        while (true)
         {
-            var action = Posted[0];
-            Posted.RemoveAt(0);
+            Action action;
+            lock (_gate)
+            {
+                if (Posted.Count == 0)
+                {
+                    return;
+                }
+                action = Posted[0];
+                Posted.RemoveAt(0);
+            }
+            // Invoked outside the lock: a drained action may post again, and a background Post
+            // must never block behind a running action.
             action();
         }
     }
