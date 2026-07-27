@@ -83,6 +83,20 @@ called out in the plan as the riskiest single item.
   ever introduced, each caller must await via `WaitAsync(ct)` so awaiter-cancel is
   decoupled from fetch-cancel — which in turn needs the orphaned shared task's
   fault observed, or it reaches the crash-log hook.
+- **The detached-start variant of this contract is a type, not a per-adapter idiom**
+  (2026-07-27): `Tasks/JoinFlightCache` encodes start-detached, per-caller
+  `WaitAsync(ct)` join, keep-on-success, and evict-by-identity when the shared fetch
+  ends unsuccessfully — faulted *or* canceled, since an HttpClient timeout surfaces
+  as the latter — with the fault observed off the shared task so an orphan can never
+  reach the crash-log hook (ADR 0013). The work-item states cache
+  (`WorkItemStoreAdapter`) and the PR team directory (`PullRequestStoreAdapter`) both
+  run on it; each had re-derived it by hand, and only one of the two had the
+  fault-observation.
+- The diff pane deliberately keeps its own copy. Its two axes above — the fetch on the
+  starter's caller token, and eviction on success as well as failure — are precisely
+  what the shared type does not do, and serving both from one type would take mode
+  parameters. That trade is rejected here: the caller-token binding is the behaviour
+  this section exists to protect.
 
 ### Background prefetch start (round 2, ASYNC-3)
 

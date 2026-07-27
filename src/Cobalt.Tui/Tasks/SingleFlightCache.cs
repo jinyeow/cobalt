@@ -5,9 +5,9 @@ namespace Cobalt.Tui.Tasks;
 /// scheduling a new key cancels and abandons the previous one and only the newest may publish.
 /// Generalizes the <c>_loadSeq</c> stamp guard proven in <c>PrListViewModel.LoadTabAsync</c> —
 /// cancellation is cooperative, so a fetch may ignore its token and still complete, and the
-/// stamp comparison (not the cancel) is what keeps its stale result from landing. This is NOT
-/// the diff dialog's join/dedup cache (the <c>ConcurrentDictionary</c>+<c>Lazy</c> single-flight
-/// in ADR 0008 §"Single-flight diff fetches") — that shares one fetch between converging
+/// stamp comparison (not the cancel) is what keeps its stale result from landing. This is NOT the
+/// join/dedup cache (<see cref="JoinFlightCache{TKey,TValue}"/>, and the diff dialog's hand-rolled
+/// variant in ADR 0008 §"Single-flight diff fetches") — that shares one fetch between converging
 /// callers; this one abandons the old fetch entirely.
 /// </summary>
 public sealed class SingleFlightCache<TKey, TValue> : IDisposable where TKey : notnull
