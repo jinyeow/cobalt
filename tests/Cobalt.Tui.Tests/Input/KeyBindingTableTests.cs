@@ -330,4 +330,28 @@ public class KeyBindingTableTests
 
         Assert.Contains("refresh", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    // ---- The menu component's scope (#20, ADR 0022 stage C) ----
+
+    [Fact]
+    public void Menu_Scope_Sees_Exactly_The_Global_Bindings()
+    {
+        // The menu deliberately owns no bindings: movement, Enter/o/l (execute), q/h (dismiss)
+        // and / (filter) are all Global already, so Visible(Menu) is the Global list verbatim.
+        var table = KeyBindingTable.Default();
+
+        Assert.Equal(
+            table.Visible(KeyScope.Global).Select(b => (string.Join(' ', b.Sequence), b.Command)),
+            table.Visible(KeyScope.Menu).Select(b => (string.Join(' ', b.Sequence), b.Command)));
+    }
+
+    [Fact]
+    public void FromConfig_Resolves_A_Keys_Menu_Section()
+    {
+        // ResolveScope walks the enum, so [keys.menu] is a valid remap section the day the
+        // scope exists (ADR 0023).
+        var table = KeyBindingTable.FromConfig(Keys("menu", ("refresh", "R")));
+
+        Assert.Contains(table.Visible(KeyScope.Menu), b => b.Command == AppCommand.Refresh && b.Sequence is ["R"]);
+    }
 }

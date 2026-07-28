@@ -175,7 +175,7 @@ command names, and for `:context`/`:project`/`:theme`/`:preview`, their argument
 (`:q` quit, `:context NAME` switch context, `:scope org|project` list breadth,
 `:done show|hide` completed work items, `:project NAME` narrow to one project,
 `:preview auto|off` the preview pane,
-`:help`, `:messages`, `:log` recent Azure DevOps requests) · `?` help ·
+`:help`, `:messages`, `:log` recent Azure DevOps requests) · `?` help menu ·
 `r` refresh. On a work item (the highlighted list row or its detail): `s` state ·
 `c` comment · `a` assign · `t` tags; the detail additionally has `e` edit
 description in `$EDITOR`. In the PR section: `[`/`]` cycle the team /
@@ -212,10 +212,16 @@ rows, `10G` jumps to line 10, `3]f` advances three files in diff review, and a c
 multiplies `Ctrl-d`/`Ctrl-u`. Digits are reserved for counts, which is why sections
 moved off `1`/`2` and onto the `gt`/`gT`/`g1`/`g2` chords.
 
+**The `?` help menu.** `?` (and `:help`) opens the current context's keys as a menu you can
+*run*, not a static cheatsheet: `j`/`k` move (counts, `gg`/`G` and `Ctrl-d`/`Ctrl-u` all
+work), `/` filters the rows as you type, `Enter` runs the highlighted row, and `q`/`Esc`
+closes. Inside the detail dialogs `?` still shows a scrollable key reference — listing only
+the keys that actually work there. See [docs/adr/0025](docs/adr/0025-executable-menu-component.md).
+
 **In-view scrolling.** The detail dialogs (work item, PR, diff review) and the `?`/
 `:messages` overlays are scrollable with the same keys — `j/k`, `gg`/`G`,
-`Ctrl-d`/`Ctrl-u` (with counts) — and `?` shows the key reference for the current
-view. In diff review those keys scroll whichever pane (file list or diff) has focus.
+`Ctrl-d`/`Ctrl-u` (with counts). In diff review those keys scroll whichever pane
+(file list or diff) has focus.
 
 ## Lists
 

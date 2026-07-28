@@ -1,6 +1,7 @@
 using System.Text;
 using Cobalt.Core.Config;
 using Cobalt.Tui.Input;
+using Cobalt.Tui.ViewModels;
 
 namespace Cobalt.Tui.App;
 
@@ -97,13 +98,27 @@ public static class HelpText
     /// a caller forgetting to say which state it is in.
     /// </summary>
     public static string For(KeyBindingTable table, KeyScope scope, bool previewVisible) =>
-        Emit(table, scope, _ => true, previewVisible);
+        Render(MenuFor(table, scope, previewVisible));
+
+    /// <summary>
+    /// The same help as <see cref="For"/> as executable menu rows (ADR 0022 stage C): one row per
+    /// visible command, carrying the key that would run it directly and the command itself. The
+    /// string overlay is re-emitted from these rows, so both surfaces share one suppression engine.
+    /// </summary>
+    public static IReadOnlyList<MenuOption<AppCommand>> MenuFor(
+        KeyBindingTable table, KeyScope scope, bool previewVisible) =>
+        BuildRows(table, scope, _ => true, previewVisible);
 
     /// <summary>
     /// Help for a modal dialog: only the verbs it dispatches — its scope's own bindings plus
     /// the shared scroll/help/close keys — so it never lists keys that do nothing (M3).
     /// </summary>
-    public static string ForDialog(KeyBindingTable table, KeyScope scope)
+    public static string ForDialog(KeyBindingTable table, KeyScope scope) =>
+        Render(MenuForDialog(table, scope));
+
+    /// <summary>The dialog help of <see cref="ForDialog"/> as executable menu rows — the M3
+    /// suppression applies to the rows themselves, so a menu can never offer a dead verb.</summary>
+    public static IReadOnlyList<MenuOption<AppCommand>> MenuForDialog(KeyBindingTable table, KeyScope scope)
     {
         var allowed = new HashSet<AppCommand>(DialogGlobals);
         foreach (var (_, command) in table.ScopedOnly(scope))
@@ -112,16 +127,33 @@ public static class HelpText
         }
         // A modal dialog has no workspace preview beside it; its own Tab (diff review) is
         // advertised with the diff wording, which the scope decides.
-        return Emit(table, scope, allowed.Contains, previewVisible: false);
+        return BuildRows(table, scope, allowed.Contains, previewVisible: false);
     }
 
     /// <summary>The two workspace list scopes, where Tab's meaning depends on the preview.</summary>
     private static bool IsWorkspaceList(KeyScope scope) =>
         scope is KeyScope.WorkItemList or KeyScope.PullRequestList;
 
-    private static string Emit(KeyBindingTable table, KeyScope scope, Func<AppCommand, bool> include, bool previewVisible)
+    /// <summary>The overlay's fixed-column rendering of a row list.</summary>
+    private static string Render(IReadOnlyList<MenuOption<AppCommand>> rows)
     {
         var sb = new StringBuilder();
+        foreach (var row in rows)
+        {
+            sb.AppendLine($"  {row.KeyHint,-8} {row.Label}");
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The single row builder behind both help surfaces: it owns every suppression rule
+    /// (the preview-dependent CyclePane wording, the caller's include filter, and the
+    /// first-binding-wins alias collapse).
+    /// </summary>
+    private static IReadOnlyList<MenuOption<AppCommand>> BuildRows(
+        KeyBindingTable table, KeyScope scope, Func<AppCommand, bool> include, bool previewVisible)
+    {
+        List<MenuOption<AppCommand>> rows = [];
         var seen = new HashSet<AppCommand>();
         foreach (var (sequence, command) in table.Visible(scope))
         {
@@ -141,8 +173,8 @@ public static class HelpText
                 continue; // alias (e.g. Enter and o) — show the first binding only
             }
             var keys = string.Join("", sequence);
-            sb.AppendLine($"  {keys,-8} {Describe(command, scope)}");
+            rows.Add(new MenuOption<AppCommand>(Describe(command, scope), keys, command));
         }
-        return sb.ToString();
+        return rows;
     }
 }

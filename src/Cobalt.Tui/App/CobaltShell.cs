@@ -919,8 +919,26 @@ public sealed class CobaltShell : Window
         RefreshMessage();
     }
 
-    private void ShowHelp() =>
-        TextDialog.Show(_app, "keys", HelpText.For(_bindings, ActiveScope, _workspace.PreviewVisible), _bindings);
+    /// <summary>Test seam: takes the pick in place of the real popup (which needs a run loop),
+    /// mirroring <see cref="ShowLogOverride"/>.</summary>
+    internal Func<IReadOnlyList<MenuOption<AppCommand>>, AppCommand?>? HelpMenuOverride { get; set; }
+
+    /// <summary>
+    /// `?` (and <c>:help</c>) — the active scope's bindings as an executable menu (#20). The pick
+    /// is dispatched after the popup's run loop has stopped, so a verb that opens its own dialog
+    /// never nests run loops (the palette's close-then-act pattern).
+    /// </summary>
+    private void ShowHelp()
+    {
+        var rows = HelpText.MenuFor(_bindings, ActiveScope, _workspace.PreviewVisible);
+        var chosen = HelpMenuOverride is { } pick
+            ? pick(rows)
+            : MenuDialog.Run(_app, "keys", rows, _bindings)?.Value;
+        if (chosen is { } command)
+        {
+            Dispatch(command);
+        }
+    }
 
     private void ShowMessages()
     {

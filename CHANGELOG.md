@@ -2,13 +2,22 @@
 
 ## [Unreleased]
 
+### Changed
+- **`?` (and `:help`) now opens an executable menu instead of a static cheatsheet.** `j`/`k`
+  move (with counts, `gg`/`G`, `C-d`/`C-u`), `/` filters the rows as you type, `Enter` runs the
+  highlighted command, and `q`/`Esc` closes. The rows are still generated from the live binding
+  table, so they can never drift from what the keys actually do. The detail dialogs' `?` still
+  shows the scrollable key reference. See
+  [ADR 0025](docs/adr/0025-executable-menu-component.md).
+
 ### Fixed
 - **The `?` help / messages overlay now closes on the resolved key-binding command, not a
   literal `q`/`Esc`/`Enter`.** A key bound to `Back` or `Open` closes it — matching every
   other screen — so remapping `back` away from `q` also moves the overlay's close key, and
   the title's `q to close` hint now reads whatever key `back` is actually bound to. `Esc`
   keeps its existing two-stage meaning (clears a pending count first, closes only once
-  nothing is pending).
+  nothing is pending). This still governs the messages overlay and `:log`; the shell's `?`
+  now opens the menu above.
 - **The keybar now reflects which workspace pane has focus.** With the preview focused,
   `j`/`k` advertise `scroll` rather than `move` — which is what they actually do there — and
   `C-h` appears as the way back to the list. The bar also repaints on a focus change; until
