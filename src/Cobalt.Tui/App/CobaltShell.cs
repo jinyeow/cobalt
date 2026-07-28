@@ -347,6 +347,9 @@ public sealed class CobaltShell : Window
                 return;
             case ShellActionKind.ApplyWorkspaceFocus:
                 ApplyWorkspaceFocus();
+                // The keybar advertises the focused pane's verbs, so a focus change (Tab/C-h/C-l)
+                // must repaint it — SetIfChanged makes this a no-op when the text didn't change.
+                RefreshChrome();
                 return;
             case ShellActionKind.PrNextTab:
                 _prList?.NextTab();
@@ -910,7 +913,8 @@ public sealed class CobaltShell : Window
         // instead of dirtying the tab strip and keybar on every chrome refresh. RefreshStatus and
         // RefreshMessage apply the same equality guard to their rows.
         SetIfChanged(_tabs, TabStripFormatter.Sections(_vm.ActiveSection));
-        SetIfChanged(_keybar, KeybarFormatter.Render(_bindings, ActiveScope, ChromeWidth, _workspace.PreviewVisible));
+        SetIfChanged(_keybar, KeybarFormatter.Render(
+            _bindings, ActiveScope, ChromeWidth, _workspace.PreviewVisible, _workspace.FocusedPane));
         RefreshStatus();
         RefreshMessage();
     }

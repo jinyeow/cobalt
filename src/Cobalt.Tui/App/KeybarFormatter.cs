@@ -1,5 +1,6 @@
 using System.Text;
 using Cobalt.Tui.Input;
+using Cobalt.Tui.ViewModels;
 
 namespace Cobalt.Tui.App;
 
@@ -50,10 +51,12 @@ public static class KeybarFormatter
 
     /// <summary>
     /// The bar for <paramref name="scope"/>, fitted to <paramref name="width"/>.
-    /// <paramref name="previewVisible"/> is required, not defaulted — advertisement must never
-    /// be able to drift from behaviour by a caller forgetting to say which state it is in.
+    /// <paramref name="previewVisible"/> and <paramref name="focusedPane"/> are required, not
+    /// defaulted — advertisement must never be able to drift from behaviour by a caller
+    /// forgetting to say which state it is in.
     /// </summary>
-    public static string Render(KeyBindingTable table, KeyScope scope, int width, bool previewVisible)
+    public static string Render(
+        KeyBindingTable table, KeyScope scope, int width, bool previewVisible, WorkspacePane focusedPane)
     {
         // Among a command's aliases keep the densest key (Enter/o/l all open — the
         // bar shows "o"); the bar trades the help overlay's completeness for width.
@@ -80,11 +83,23 @@ public static class KeybarFormatter
         // Seed MoveDown so the fallback loop can't re-emit it; MoveUp stays out of
         // the bar via Suppressed (its direction is implied by the pair entry).
         var emitted = new HashSet<AppCommand> { AppCommand.MoveDown };
+        // Movement lands on the preview's scroll rather than the list cursor while the
+        // preview pane holds focus (WorkspaceViewModel.Route) — the bar must say "scroll",
+        // not "move", or it lies about what j/k do.
+        var moveLabel = IsWorkspaceList(scope) && focusedPane == WorkspacePane.Preview ? "scroll" : "move";
         if (first.TryGetValue(AppCommand.MoveDown, out var down))
         {
             entries.Add(first.TryGetValue(AppCommand.MoveUp, out var up)
-                ? $"{down}/{up}:move"
-                : $"{down}:move");
+                ? $"{down}/{up}:{moveLabel}"
+                : $"{down}:{moveLabel}");
+        }
+        // FocusLeft (C-h) is otherwise suppressed — while the list holds focus it's already
+        // there and the key is a no-op (WorkspaceViewModel.FocusLeft), so advertising it would
+        // be a false hint. It only does something while the preview holds focus.
+        if (IsWorkspaceList(scope) && focusedPane == WorkspacePane.Preview
+            && first.TryGetValue(AppCommand.FocusLeft, out var backToList) && emitted.Add(AppCommand.FocusLeft))
+        {
+            entries.Add($"{backToList}:list");
         }
         foreach (var (command, label) in Priority)
         {
@@ -104,6 +119,11 @@ public static class KeybarFormatter
         var help = first.TryGetValue(AppCommand.Help, out var helpKey) ? $"{helpKey}:help" : null;
         return Fit(entries, help, width);
     }
+
+    /// <summary>The two workspace list scopes, where pane focus changes what a key does
+    /// (mirrors <c>HelpText.IsWorkspaceList</c>).</summary>
+    private static bool IsWorkspaceList(KeyScope scope) =>
+        scope is KeyScope.WorkItemList or KeyScope.PullRequestList;
 
     private static string Fit(IReadOnlyList<string> entries, string? help, int width)
     {
