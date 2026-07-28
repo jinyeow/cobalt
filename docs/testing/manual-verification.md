@@ -275,11 +275,30 @@ status line (` ctx:work  <Your Name>` once identity resolves), message bar
   bar. `Esc` cancels. `:` then `garbage` + Enter → message bar shows
   `unknown command: garbage`. Empty input + Enter → nothing.
   Result: ______
-- [ ] **D7 — `:help` and `?`.** Both open a modal titled `keys — q to close`
-  (the hint reflects whatever key `back` is currently bound to) listing
-  bindings with descriptions (e.g. `j        move down`,
+- [ ] **D7 — `:help` and `?` (the executable menu, ADR 0025).** Both open a
+  menu of the active context's bindings, each row a key hint plus its
+  description (e.g. `j        move down`,
   `:        command palette (:q quit, :ctx NAME)`); aliases collapse (Enter/o
-  shows once). `q` (or the current `back` binding), `Esc`, or `Enter` closes it.
+  shows once). `j`/`k` move the highlight (counts, `gg`/`G`, `Ctrl-d`/`Ctrl-u`
+  all work), `q`/`Esc` closes.
+  Result: ______
+- [ ] **D7a — the menu executes.** With the menu open, highlight a row that
+  does something observable (e.g. `r  refresh`) and press `Enter`: the menu
+  closes and that command runs. Then reopen and press `Enter` on `?  help`
+  — the menu closes and reopens once, which is deliberate, not a loop.
+  Result: ______
+- [ ] **D7b — the menu filters.** Press `/`, type `com`: rows narrow as you
+  type and the surviving rows keep their original order and hint alignment.
+  `Enter` runs the highlighted filtered row. `Esc` clears the filter and keeps
+  the menu open; a second `Esc` closes it. Type a filter matching nothing
+  (e.g. `zzz`) → a single `no matches` row, and `Enter` closes without running
+  anything.
+  Result: ______
+- [ ] **D7c — the menu survives a resize.** With the menu open, resize the
+  terminal narrower and wider. Rows must stay readable at every width — never
+  blank, never truncated to a single character. (This is the shape of the bug
+  fixed before 0.5.0 shipped; `MenuDialog.Run` has no automated coverage, so
+  this step is the only guard.)
   Result: ______
 - [ ] **D8 — `:messages`.** Open the palette, type `messages`, Enter.
   Expect: modal titled `messages — q to close` with one line per event:
@@ -726,13 +745,13 @@ only regressions *beyond* these descriptions are findings.
 | A. CLI basics | 7 | | | |
 | B. Config | 9 | | | |
 | C. Auth | 7 | | | |
-| D. Shell & vim | 18 | | | |
+| D. Shell & vim | 21 | | | |
 | E. Work items | 14 | | | |
 | F. Editor round-trip | 6 | | | |
 | G. Pull requests | 15 | | | |
 | H. Diff review | 14 | | | |
 | I. Robustness | 7 | | | |
-| **Total** | **97** | | | |
+| **Total** | **100** | | | |
 
 **Blocking issues found** (id, one line each):
 
