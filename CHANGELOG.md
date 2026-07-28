@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## 0.5.0 — 2026-07-28
 
 ### Changed
 - **`?` (and `:help`) now opens an executable menu instead of a static cheatsheet.** `j`/`k`
