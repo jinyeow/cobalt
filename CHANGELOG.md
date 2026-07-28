@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **The `?` help / messages overlay now closes on the resolved key-binding command, not a
+  literal `q`/`Esc`/`Enter`.** A key bound to `Back` or `Open` closes it — matching every
+  other screen — so remapping `back` away from `q` also moves the overlay's close key, and
+  the title's `q to close` hint now reads whatever key `back` is actually bound to. `Esc`
+  keeps its existing two-stage meaning (clears a pending count first, closes only once
+  nothing is pending).
+
 ## 0.4.0 — 2026-07-25
 
 ### Added

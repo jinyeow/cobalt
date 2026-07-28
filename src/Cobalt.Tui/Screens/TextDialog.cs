@@ -35,10 +35,12 @@ internal static class TextDialog
     {
         // The overlay's j/k/gg/G scroll routes through the same (possibly remapped) table the shell
         // and its dialogs use, so a user's movement remap works inside help/messages/:log too.
-        var router = new KeymapRouter(bindings ?? KeyBindingTable.Shared);
+        var table = bindings ?? KeyBindingTable.Shared;
+        var router = new KeymapRouter(table);
+        var closeHint = table.KeyFor(KeyScope.Global, AppCommand.Back) ?? "Esc";
         var dialog = new Dialog
         {
-            Title = $"{title} — q to close",
+            Title = $"{title} — {closeHint} to close",
             Width = Dim.Percent(85),
             Height = Dim.Percent(85),
         };
@@ -84,8 +86,17 @@ internal static class TextDialog
                 key.Handled = true;
                 return;
             }
-            // q (Back) / Enter (Open) / Esc all close the overlay.
-            if (token is "q" or "Esc" or "Enter")
+            // Back / Open close the overlay on the resolved command (issue #83), so a user's
+            // remap works here too; Esc keeps its own unconditional close below it never routes
+            // through the table (KeymapRouter always short-circuits Esc to cancel).
+            if (result.Kind == KeyResultKind.Matched
+                && (result.Command == AppCommand.Back || result.Command == AppCommand.Open))
+            {
+                key.Handled = true;
+                close();
+                return;
+            }
+            if (token == "Esc")
             {
                 key.Handled = true;
                 close();

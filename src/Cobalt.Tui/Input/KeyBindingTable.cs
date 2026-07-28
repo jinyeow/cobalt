@@ -374,6 +374,24 @@ public sealed class KeyBindingTable
         }
     }
 
+    /// <summary>
+    /// The first key sequence bound to <paramref name="command"/> and visible from
+    /// <paramref name="scope"/> (scoped, then global fallback — the same order as
+    /// <see cref="Visible"/>), joined the way <c>HelpText</c> renders a sequence
+    /// (e.g. "gg"). <c>null</c> if the command is unbound there (e.g. remapped away).
+    /// </summary>
+    public string? KeyFor(KeyScope scope, AppCommand command)
+    {
+        foreach (var (sequence, bound) in Visible(scope))
+        {
+            if (bound == command)
+            {
+                return string.Join("", sequence);
+            }
+        }
+        return null;
+    }
+
     /// <summary>The scope's own (non-global) bindings only — the verbs a modal in that scope actually dispatches.</summary>
     public IEnumerable<(string[] Sequence, AppCommand Command)> ScopedOnly(KeyScope scope) =>
         scope != KeyScope.Global && _bindings.TryGetValue(scope, out var scoped) ? scoped : [];

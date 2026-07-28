@@ -80,6 +80,41 @@ public class TextDialogScrollTests
     }
 
     [Fact]
+    public void A_Remapped_Back_Key_Closes_The_Overlay_And_The_Old_Default_No_Longer_Does()
+    {
+        // back remapped q -> x (issue #83): the overlay must close on the resolved command,
+        // not the literal token, so it follows the user's remap in both directions.
+        var keys = new KeysConfig(new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>
+        {
+            ["global"] = new Dictionary<string, IReadOnlyList<string>> { ["back"] = new[] { "x" } },
+        });
+        var text = string.Join("\n", Enumerable.Range(0, 200).Select(i => $"line {i}"));
+        var closed = 0;
+        var dialog = TextDialog.Build(
+            App, "keys", text, out _, onClose: () => closed++, bindings: KeyBindingTable.FromConfig(keys));
+        dialog.Layout(new Size(60, 12));
+        dialog.SetFocus();
+
+        dialog.NewKeyDownEvent(new Key('q')); // no longer bound to Back
+        Assert.Equal(0, closed);
+
+        dialog.NewKeyDownEvent(new Key('x')); // now bound to Back
+        Assert.Equal(1, closed);
+    }
+
+    [Fact]
+    public void Title_Close_Hint_Reflects_A_Remapped_Back_Key()
+    {
+        var keys = new KeysConfig(new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>>
+        {
+            ["global"] = new Dictionary<string, IReadOnlyList<string>> { ["back"] = new[] { "x" } },
+        });
+        var dialog = TextDialog.Build(App, "keys", "text", out _, bindings: KeyBindingTable.FromConfig(keys));
+
+        Assert.Equal("keys — x to close", dialog.Title.ToString());
+    }
+
+    [Fact]
     public void Overlay_Scroll_Uses_The_Injected_Remap_Table()
     {
         // move-down remapped j -> n. The overlay (help/messages/:log) must scroll from the injected
